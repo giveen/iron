@@ -207,7 +207,7 @@ The macro generates:
 Bench logic lives in the user's crate, next to the kernel, as an ordinary function annotated with `#[bench]`. No struct, no `impl`, no registration call — the macro generates all of that.
 
 ```rust
-#[bench(name = "unary/exp", dtypes = [f32, f16, bf16])]
+#[bench(dtypes = [f32, f16, bf16])]
 fn exp_bench(dt: DType) -> BenchSetup {
     const N: usize = 64 << 20;
     BenchSetup::new(mt_exp::kernel_ir_for(dt))
@@ -223,7 +223,7 @@ fn exp_bench(dt: DType) -> BenchSetup {
 `bytes_moved` defaults to the sum of all buffer sizes. Override with the `bytes` key when the kernel's bandwidth figure differs (e.g. read-only inputs counted once):
 
 ```rust
-#[bench(name = "unary/exp", dtypes = [f32, f16, bf16], bytes = |s| 2 * s.buffer_bytes("input"))]
+#[bench(dtypes = [f32, f16, bf16], bytes = |s| 2 * s.buffer_bytes("input"))]
 fn exp_bench(dt: DType) -> BenchSetup { … }
 ```
 

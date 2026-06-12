@@ -17,11 +17,11 @@ help: ## show this help
 # ─── Setup ────────────────────────────────────────────────────────────
 .PHONY: setup
 setup: ## one-time dev environment setup (toolchains, deps, first build)
-	./.github/scripts/setup-dev.sh
+	./scripts/setup-dev.sh
 
 .PHONY: hooks
 hooks: ## install git hooks (pre-commit, commit-msg, pre-push)
-	./.github/scripts/install-hooks.sh
+	./scripts/install-hooks.sh
 
 .PHONY: hooks-uninstall
 hooks-uninstall: ## remove git hook installation
@@ -58,7 +58,7 @@ test-validate: ## cargo test --workspace under Metal shader validation (diagnost
 
 .PHONY: coverage
 coverage: ## test coverage report (requires cargo-llvm-cov)
-	./.github/scripts/coverage.sh
+	./scripts/coverage.sh
 
 # ─── Lint / format ────────────────────────────────────────────────────
 #
@@ -103,7 +103,7 @@ typos: ## run typos checker (same config CI uses)
 
 .PHONY: check-bench-names
 check-bench-names: ## verify all #[bench] names use a CI-sharded group prefix (ffai/ or mlx/)
-	./.github/scripts/check_bench_names.sh
+	./scripts/check_bench_names.sh
 
 # ─── tile CLI ─────────────────────────────────────────────────────────
 #

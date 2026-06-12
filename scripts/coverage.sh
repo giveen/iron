@@ -5,9 +5,9 @@
 # local numbers match what Codecov sees on the PR.
 #
 # Usage:
-#   ./.github/scripts/coverage.sh           # html report, opens in browser
-#   ./.github/scripts/coverage.sh summary   # text summary only (CI-style)
-#   ./.github/scripts/coverage.sh lcov      # emit lcov.info for editor integrations
+#   ./scripts/coverage.sh           # html report, opens in browser
+#   ./scripts/coverage.sh summary   # text summary only (CI-style)
+#   ./scripts/coverage.sh lcov      # emit lcov.info for editor integrations
 
 set -euo pipefail
 

@@ -29,7 +29,7 @@ installed automatically by `rustup` on first build.
 ```bash
 git clone git@github.com:0xClandestine/metaltile.git
 cd metaltile
-./.github/scripts/setup-dev.sh
+./scripts/setup-dev.sh
 ```
 
 `setup-dev.sh` verifies the nightly toolchain, the `rustfmt` and `clippy` components, and the optional `typos-cli` / `cargo-llvm-cov` tools.

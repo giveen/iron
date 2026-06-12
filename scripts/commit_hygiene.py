@@ -31,7 +31,7 @@ import sys
 # AI tool / model names — used ONLY to qualify rule (P): an attribution
 # verb phrase is an issue when it credits one of these. Mentions on
 # their own are not flagged, so this list does not need to be
-# exhaustive; (T)/(K)/the 🤖 emoji are tool-agnostic catch-alls.
+# exhaustive; (T)/(K)/the 🤖 emoji are tool-agnostic catch-all rules.
 AI_TERMS = [
     r"claude", r"anthropic", r"\bcodex\b", r"openai", r"chatgpt",
     r"\bgpt[- ]?\d", r"antigravity", r"gemini", r"\bbard\b",

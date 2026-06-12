@@ -50,11 +50,11 @@ make clean       # remove target/
 
 Prefer `make` over raw `cargo` — it centralises flags and always passes `--workspace`. See [the CLI reference](cli.md) for the `tile` binary.
 
-New kernels can declare their correctness test and benchmark inline with the `#[test_kernel]` / `#[bench]` attributes (run via `tile test` / `tile bench`) instead of, or alongside, the hand-written `tests/*_gpu_correctness.rs` + `#[kernel(bench(...))]` pair. Both styles are supported during the migration — see [testing.md](testing.md#new-declarative-test_kernel--bench-additive-opt-in) and `crates/metaltile-std/src/mlx/arange.rs` for the template.
+New kernels can declare their correctness test and benchmark inline with the `#[test_kernel]` / `#[bench]` attributes (run via `tile test` / `tile bench`) instead of, or alongside, the hand-written `tests/*_gpu_correctness.rs` files. Both styles coexist during the migration — see [testing.md](testing.md#new-declarative-test_kernel--bench-additive-opt-in) and `crates/metaltile-std/src/mlx/arange.rs` for the template.
 
 ## Pre-push hooks
 
-`make hooks` installs three git hooks (under `.github/scripts/hooks/`, opt-in per clone via `git config core.hooksPath`) that mirror the CI checks locally so the slow round-trip to GitHub doesn't surface trivially-catchable failures:
+`make hooks` installs three git hooks (under `scripts/hooks/`, opt-in per clone via `git config core.hooksPath`) that mirror the CI checks locally so the slow round-trip to GitHub doesn't surface trivially-catchable failures:
 
 | Hook | When | Checks | Time |
 |---|---|---|---|
@@ -230,6 +230,12 @@ A latency that does not scale with input size is almost always the *harness* con
 A "flat ~215 µs regardless of context length" sliding-window-attention claim turned out to be upload overhead drowning the kernel; switching to resident buffers dropped the floor to ~98 µs and revealed the real curve.
 
 ## Kernel-writing philosophy
+
+> **The full how-to lives in the [Kernel Style Guide](STYLE_GUIDE.md)** — file
+> shape, naming, the `#[kernel(variants(...))]` axis, shared primitives, the CPU
+> oracle, and the bench. Read it before adding a kernel; the principles below are
+> the short version. (Where a kernel *file* belongs is the
+> [consolidation plan](specs/KERNEL_CONSOLIDATION_PLAN.md).)
 
 - **Improve the compiler, don't hand-write MSL.** If the DSL can't express a pattern, extend the codegen (body parser → IR → MSL emit). Don't bypass it.
 - **One generic `<T>` kernel** beats five precision-specific copies — `f32` / `f16` / `bf16` all flow through the same `#[kernel] fn`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# commit-msg — local mirror of .github/scripts/commit_hygiene.py.
+# commit-msg — local mirror of scripts/commit_hygiene.py.
 #
 # Guards AI *attribution* pollution, not bare mentions:
 #

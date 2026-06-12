@@ -104,7 +104,7 @@ The naive CPU reference **is the contract**. If kernel and reference disagree, d
 
 ### New: declarative `#[test_kernel]` / `#[bench]` (additive, opt-in)
 
-Alongside the hand-written `tests/*_gpu_correctness.rs` files, a kernel can now declare its correctness test and benchmark **next to the kernel** with the `#[test_kernel]` / `#[bench]` attributes. This is being introduced additively — the legacy `#[kernel(bench(...))]` registration and the `tests/*_gpu_correctness.rs` files keep working unchanged, and during migration a kernel can carry both so old and new are A/B-compared on the same IR. `crates/metaltile-std/src/mlx/arange.rs` is the first kernel ported; use it as the template.
+Alongside the hand-written `tests/*_gpu_correctness.rs` files, a kernel can now declare its correctness test and benchmark **next to the kernel** with the `#[test_kernel]` / `#[bench]` attributes. This is being introduced additively — the legacy `tests/*_gpu_correctness.rs` files keep working unchanged, and during migration a kernel can carry both so old and new are A/B-compared on the same IR. `crates/metaltile-std/src/mlx/arange.rs` is the first kernel ported; use it as the template.
 
 ```rust
 use metaltile::kernel;
@@ -141,7 +141,7 @@ pub mod kernel_benches {
     use super::mt_arange;
     use crate::utils::scalar_bytes;
 
-    #[bench(name = "mlx/arange", dtypes = [f32, f16, bf16])]
+    #[bench(dtypes = [f32, f16, bf16])]
     fn bench_arange(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
         BenchSetup::new(mt_arange::kernel_ir_for(dt))
@@ -169,7 +169,7 @@ Fixtures exist to **exercise distinct emit paths**, not to be exhaustive — add
 
 ## Coverage
 
-`make coverage` (or `./.github/scripts/coverage.sh`) produces an HTML report at `target/llvm-cov/html/index.html`; `./.github/scripts/coverage.sh summary` prints the per-file table CI emits. Per-crate floors live in `.github/configs/codecov.yml`:
+`make coverage` (or `./scripts/coverage.sh`) produces an HTML report at `target/llvm-cov/html/index.html`; `./scripts/coverage.sh summary` prints the per-file table CI emits. Per-crate floors live in `.github/configs/codecov.yml`:
 
 | Crate | Floor |
 |---|---|
