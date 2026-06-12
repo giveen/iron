@@ -10,13 +10,13 @@ structure is and the order we get there**; [`STYLE_GUIDE.md`](../STYLE_GUIDE.md)
 owns **how an individual kernel/bench/test is written** in the target style.
 Where they overlap (naming, per-file shape), defer to the style guide.
 
-> **Status:** in progress. `conv/` is the proven exemplar — its *structural*
-> consolidation has landed (move, dedup, per-format macro DRY-ing). Two
-> optimization phases remain open for it and every family: replace the interim
-> `macro_rules!` with `variants(...)`, and merge the `*_block_scaled` / `*_mma`
-> files into the dimensionality file (§4). "✅ done" in §6 means the structural
-> move is in; the optimization phases are tracked separately. The remaining
-> families migrate one-per-PR per §6.
+> **Status:** in progress. `convolution/` is the proven exemplar — its
+> *structural* consolidation has landed (move, dedup, per-format macro DRY-ing),
+> and `rope/` has landed too. Two optimization phases remain open for every
+> family: replace the interim `macro_rules!` with `variants(...)`, and merge the
+> `*_block_scaled` / `*_mma` files into the dimensionality file (§4). "✅ done"
+> in §6 means the structural move is in; the optimization phases are tracked
+> separately. The remaining families migrate one-per-PR per §6.
 
 ## 1. Why
 
@@ -50,8 +50,8 @@ crates/metaltile-std/src/kernels/
               aura_flash · steel/attn
   moe/        moe orchestration · mpp(bm8/bm64 × int8) · bgemm/gemv(q2k/iq2xxs) · block_scaled_moe
   norm/       rms_norm(+residual/rope/qgemv/gated) · layer_norm · adain1d
-  rope/       rope · rope_2d · rope_llama(_many) · rope_yarn · partial_rope
-  convolution/       ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv (see §4)
+  rope/       ✅ DONE — rope · rope_2d · rope_banded · rope_yarn · partial_rope
+  convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv (see §4)
   ssm/        ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
   quant/      INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
               quantized_* · fp_quantized_* · affine · aura codec stack · dequant_*
@@ -72,6 +72,13 @@ Notes:
   the matmul, §5/§7).
 - No `mlx` / `ffai` / `mlx_ref` naming anywhere. A metal reference is an optional
   `.with_reference(...)` on a bench, nothing more.
+- **No model names in kernels.** Name a kernel for the operation / layout it
+  implements, never for a model (`rope_llama` → `rope_banded`, `kokoro` →
+  `adain1d`/`lstm`). Many models share an op in different permutations; the
+  differentiator is the *layout*, which the name should describe. Model-specific
+  usage notes go in a comment above the kernel definition.
+- Folder names spell out abbreviated single words (`convolution`, not `conv`)
+  and keep standard acronyms (`gemm`, `sdpa`, `moe`, `rope`, `ssm`, `kv_cache`).
 
 ## 3. The three LOC-reduction tools
 
@@ -127,8 +134,9 @@ Mechanics, per family:
 2. Merge fragmented 1-kernel files; extract shared primitives (tool 1).
 3. Collapse format/bit-width/scale families onto `variants(...)` (tool 2); merge
    by op (tool 3).
-4. Rename to `mt_<op>`, dropping the legacy `ffai_` / model-name prefixes
-   (§9.1); regenerate the FFAI emit consumer from the new inventory.
+4. Rename to `mt_<op>`, dropping the legacy `ffai_` prefix **and any model name**
+   — name the operation / layout, not the model (§9.1); regenerate the FFAI emit
+   consumer from the new inventory.
 5. Gate: `cargo build` + `tile test -f <family>` green + `make fmt`. The
    *generated MSL per kernel* is unchanged — diffs are whitespace/comments and
    the inventory-name rename.
@@ -146,8 +154,8 @@ payoff last:
 
 | Wave | Families | Rationale | Payoff |
 |---|---|---|---|
-| ✅ done | `convolution/` | exemplar | 24k → ~1.6k |
-| 1 | `rope/`, `norm/`, `sampling/`, `ops/` | self-contained, mostly elementwise / few formats | small, sets the pattern |
+| ✅ done | `convolution/`, `rope/` | exemplar + first wave-1 family | 24k → ~1.6k |
+| 1 | `norm/`, `sampling/`, `ops/` | self-contained, mostly elementwise / few formats | small, sets the pattern |
 | 2 | `gemm/`, `ssm/`, `audio/`, `vision/`, `kv_cache/` | moderate size, few cross-deps | medium |
 | 3 | `sdpa/`, `moe/`, **`quant/`** | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
