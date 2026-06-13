@@ -7,6 +7,7 @@
 //! model-specific usage notes live in comments above the kernel. The FFAI emit
 //! consumer is regenerated from the new inventory after each family lands.
 
+pub mod audio;
 pub mod convolution;
 pub mod gemm;
 pub mod kv_cache;

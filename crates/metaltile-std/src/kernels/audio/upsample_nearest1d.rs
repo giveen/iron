@@ -24,7 +24,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_upsample_nearest1d<T>(
+pub fn mt_upsample_nearest1d<T>(
     input: Tensor<T>,
     mut out: Tensor<T>,
     #[constexpr] in_len: u32,
@@ -37,13 +37,13 @@ pub fn ffai_upsample_nearest1d<T>(
     store(out[i], load(input[c * in_len + t_in]));
 }
 
-/// New-syntax correctness for `ffai_upsample_nearest1d`. Grid3D, grid
+/// New-syntax correctness for `mt_upsample_nearest1d`. Grid3D, grid
 /// `[C·factor·in_len,1,1]`, tpg `[1,1,1]`. Oracle repeats each sample
 /// `factor` times.
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_upsample_nearest1d;
+    use super::mt_upsample_nearest1d;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(c: usize, in_len: usize, factor: usize, dt: DType) -> TestSetup {
@@ -59,7 +59,7 @@ pub mod kernel_tests {
                 input[ch * in_len + t_in]
             })
             .collect();
-        TestSetup::new(ffai_upsample_nearest1d::kernel_ir_for(dt))
+        TestSetup::new(mt_upsample_nearest1d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
@@ -82,13 +82,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_upsample_nearest1d;
+    use super::mt_upsample_nearest1d;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_upsample_nearest1d(dt: DType) -> BenchSetup {
         let (c, in_len, factor) = (512usize, 130usize, 2usize);
         let n_out = c * in_len * factor;
-        BenchSetup::new(ffai_upsample_nearest1d::kernel_ir_for(dt))
+        BenchSetup::new(mt_upsample_nearest1d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", c * in_len, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

@@ -56,7 +56,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn vocoder_istft<T>(
+pub fn mt_vocoder_istft<T>(
     spec_re: Tensor<T>,
     spec_im: Tensor<T>,
     window: Tensor<T>,
@@ -126,7 +126,7 @@ pub fn vocoder_istft<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::vocoder_istft;
+    use super::mt_vocoder_istft;
     use crate::utils::{pack_f32, unpack_f32};
 
     const PI: f32 = std::f32::consts::PI;
@@ -224,7 +224,7 @@ pub mod kernel_tests {
         let im_dt = unpack_f32(&pack_f32(&im, dt), dt);
         let win_dt = unpack_f32(&pack_f32(&window, dt), dt);
         let expected = naive_istft(&re_dt, &im_dt, &win_dt, n_frames, n_fft, n_freq, hop);
-        TestSetup::new(vocoder_istft::kernel_ir_for(dt))
+        TestSetup::new(mt_vocoder_istft::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("spec_re", pack_f32(&re, dt), dt))
             .input(TestBuffer::from_vec("spec_im", pack_f32(&im, dt), dt))
@@ -239,19 +239,19 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `vocoder_istft` — a Kokoro-class iSTFTNet tail
+/// New-syntax benchmark for `mt_vocoder_istft` — a Kokoro-class iSTFTNet tail
 /// over many frames (Grid3D, one thread per output sample).
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::vocoder_istft;
+    use super::mt_vocoder_istft;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_vocoder_istft(dt: DType) -> BenchSetup {
         let (n_frames, n_fft, hop) = (2048usize, 20usize, 5usize);
         let n_freq = n_fft / 2 + 1;
         let out_len = (n_frames - 1) * hop + n_fft;
-        BenchSetup::new(vocoder_istft::kernel_ir_for(dt))
+        BenchSetup::new(mt_vocoder_istft::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("spec_re", n_frames * n_freq, dt))
             .buffer(BenchBuffer::random("spec_im", n_frames * n_freq, dt))

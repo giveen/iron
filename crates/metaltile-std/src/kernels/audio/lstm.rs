@@ -3,12 +3,12 @@
 //! LSTM kernels — the recurrent building block style-vector TTS encoders /
 //! prosody / duration predictors need (no FFAI model used an LSTM before).
 //! This file holds two forms:
-//!   * [`ffai_lstm`] — runs the **whole sequence** recurrence on the GPU in
+//!   * [`mt_lstm`] — runs the **whole sequence** recurrence on the GPU in
 //!     one dispatch (the "GPU from the start" form).
 //!   * [`lstm_cell`] — ONE timestep, leaving the recurrence on the host (a
 //!     per-step CPU↔GPU sync); use when per-step host control is wanted.
 //!
-//! ## `ffai_lstm`
+//! ## `mt_lstm`
 //!
 //! Runs the full sequence recurrence on the GPU in **one threadgroup**:
 //! thread `j` owns hidden unit `j`, with the hidden/cell state `h` / `c`
@@ -49,7 +49,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_lstm<T>(
+pub fn mt_lstm<T>(
     x: Tensor<T>,
     w_ih: Tensor<T>,
     w_hh: Tensor<T>,
@@ -133,9 +133,9 @@ pub fn ffai_lstm<T>(
 /// one thread per `(b, j)` unit) — the per-step form, leaving the recurrence
 /// on the host (the host loops `t`, runs this forward `0..L` + backward
 /// `L-1..0` with separate weights for a bidirectional layer). Use this when
-/// per-step host control is wanted; use [`ffai_lstm`] above to run the whole
+/// per-step host control is wanted; use [`mt_lstm`] above to run the whole
 /// sequence on the GPU in one dispatch. Takes the `bias_ih` / `bias_hh`
-/// split separately (vs. `ffai_lstm`'s precombined `bias`).
+/// split separately (vs. `mt_lstm`'s precombined `bias`).
 #[kernel]
 pub fn lstm_cell<T>(
     x: Tensor<T>,
@@ -210,7 +210,7 @@ pub fn lstm_cell<T>(
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
-    use super::{ffai_lstm, lstm_cell};
+    use super::{lstm_cell, mt_lstm};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn sigmoid(x: f32) -> f32 { 1.0 / (1.0 + (-x).exp()) }
@@ -296,7 +296,7 @@ pub mod kernel_tests {
             0,
             &mut expected,
         );
-        TestSetup::new(ffai_lstm::kernel_ir_for(dt))
+        TestSetup::new(mt_lstm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
             .input(TestBuffer::from_vec("w_ih", pack_f32(&w_ih_f, dt), dt))
@@ -443,13 +443,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::{ffai_lstm, lstm_cell};
+    use super::{lstm_cell, mt_lstm};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_lstm(dt: DType) -> BenchSetup {
         let (seq_len, input_dim, hidden) = (200usize, 256usize, 256usize);
         let out_stride = hidden;
-        BenchSetup::new(ffai_lstm::kernel_ir_for(dt))
+        BenchSetup::new(mt_lstm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", seq_len * input_dim, dt))
             .buffer(BenchBuffer::random("w_ih", 4 * hidden * input_dim, dt))
