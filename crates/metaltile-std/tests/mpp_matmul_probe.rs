@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for the MPP `matmul2d` smoke kernel.
 //!
-//! Dispatches `mt_mpp_matmul_smoke` (single threadgroup × single simdgroup,
+//! Dispatches `mt_mpp_matmul_probe` (single threadgroup × single simdgroup,
 //! 16×32 fp16 @ 32×16 fp16 → 16×16 fp32) and validates against a naïve
 //! triple-loop CPU oracle.
 //!
@@ -14,7 +14,7 @@
 //! such toolchains this test will fail the correctness check, which is
 //! the intended signal.
 //!
-//! Run: `cargo test --release -p metaltile-std --test mpp_matmul_smoke -- --nocapture`
+//! Run: `cargo test --release -p metaltile-std --test mpp_matmul_probe -- --nocapture`
 
 #![cfg(target_os = "macos")]
 
@@ -24,7 +24,7 @@ mod common;
 
 use common::gpu_lock;
 use metaltile::Context;
-use metaltile_std::probe::mpp_matmul_smoke;
+use metaltile_std::probe::mpp_matmul_probe;
 
 const M: usize = 16;
 const N: usize = 16;
@@ -60,7 +60,7 @@ fn cpu_matmul_ref(a: &[f32], b: &[f32]) -> Vec<f32> {
 }
 
 #[test]
-fn mpp_matmul_smoke_matches_cpu_reference() {
+fn mpp_matmul_probe_matches_cpu_reference() {
     let _lock = gpu_lock();
 
     let ctx = Context::new().expect("Context::new");
@@ -72,7 +72,7 @@ fn mpp_matmul_smoke_matches_cpu_reference() {
     // so coverage runners stay green; M5 Max + dev hardware still cover it.
     let family = ctx.chip_family();
     if family.is_none_or(|lvl| lvl < 10) {
-        eprintln!("skip: mpp_matmul_smoke needs Apple10+ GPU (got chip_family={family:?})");
+        eprintln!("skip: mpp_matmul_probe needs Apple10+ GPU (got chip_family={family:?})");
         return;
     }
 
@@ -99,12 +99,12 @@ fn mpp_matmul_smoke_matches_cpu_reference() {
     buffers.insert("B".into(), pack_f16_bytes(&b_q));
     buffers.insert("C".into(), vec![0u8; M * N * 4]);
 
-    let kernel = mpp_matmul_smoke::kernel_ir();
+    let kernel = mpp_matmul_probe::kernel_ir();
 
     // 1 threadgroup × (32 threads = one simdgroup).
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [1, 1, 1], [32, 1, 1])
-        .expect("dispatch mpp_matmul_smoke");
+        .expect("dispatch mpp_matmul_probe");
 
     let got = unpack_f32_bytes(result.outputs.get("C").expect("C buffer"));
     assert_eq!(got.len(), M * N);

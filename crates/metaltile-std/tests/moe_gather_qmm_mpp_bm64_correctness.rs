@@ -54,7 +54,7 @@ fn pack_int4_row(weights: &[u32]) -> Vec<u32> {
 /// the kernel hits its pre-Metal-4 stub branch which writes zeros — the
 /// cosine assertion then fails with `cos = 0.0`. Skip rather than fail so
 /// CI's hosted Mac runner stays green; M5 Max + dev hardware still cover it.
-/// Mirrors the gate added to `mpp_matmul_smoke.rs` + `qmm_mpp_correctness.rs`.
+/// Mirrors the gate added to `mpp_matmul_probe.rs` + `qmm_mpp_correctness.rs`.
 fn skip_unless_apple10(test_name: &str) -> Option<Context> {
     let ctx = Context::new().expect("Context::new");
     let family = ctx.chip_family();

@@ -51,6 +51,18 @@ family — it folds into the op's file as a format axis (see §5). See
 family list and the migration state (the crate is mid-migration from the legacy
 `mlx/` + `ffai/` split).
 
+### Probe kernels — `probe/`, not a `kernels/` family
+
+A kernel whose *purpose* is to validate a codegen path or HW intrinsic
+end-to-end — not to do production work — is a **probe**. Probes live in
+`crates/metaltile-std/src/probe/` (a crate-root module, like `utils`, **outside**
+the `kernels/<family>/` tree) and are named **`mt_<thing>_probe`**:
+`mt_simdgroup_load_probe` (the `Op::SimdgroupLoad` round-trip),
+`mt_mpp_matmul_probe`, `mt_mma_probe_*` (MMA layout). Use `_probe`, not `_smoke`
+— "smoke" is reserved for *test* code (backend bring-up tests like
+`tests/cuda_smoke.rs`, codegen-sanity `#[test] fn …_smoke()`), which stays
+test-side and is not a kernel.
+
 ---
 
 ## 2. File skeleton
