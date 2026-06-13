@@ -70,8 +70,6 @@ pub mod gguf_dequant_q8_0;
 pub mod gguf_iq2_xxs_extract_qs;
 pub mod im2col_patch;
 pub mod im2col_patch_interleaved;
-pub mod kv_cache;
-pub mod kv_cache_update_many;
 pub mod leaky_relu;
 pub mod lstm;
 pub mod mel_spectrogram;

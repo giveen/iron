@@ -9,6 +9,7 @@
 
 pub mod convolution;
 pub mod gemm;
+pub mod kv_cache;
 pub mod norm;
 pub mod ops;
 pub mod rope;

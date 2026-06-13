@@ -1,6 +1,6 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `quantize_kv_int4/int8` + `bulk_dequant_kv_int4/int8`
+//! GPU correctness for `mt_quantize_kv_int4/int8` + `mt_bulk_dequant_kv_int4/int8`
 //! via raw → quantize → dequant round-trip.
 //!
 //! These four kernels ship in `ffai::kv_cache` but had no end-to-end
@@ -11,7 +11,7 @@
 //!
 //! Coverage rationale (mirrors the legacy
 //! `tests/kv_cache_update_gpu_correctness.rs`, removed in #240):
-//! `quantize_kv_*` and `bulk_dequant_kv_*` are emitted from `macro_rules!`
+//! `mt_quantize_kv_*` and `mt_bulk_dequant_kv_*` are emitted from `macro_rules!`
 //! shells (the proc-macro doesn't expand the inner declarative macro,
 //! so embedding kernel bodies in nested macros would silently produce
 //! empty kernels). The round-trip pins both the quantize geometry
@@ -26,8 +26,8 @@
 //! Each test:
 //!   1. Build random [n_kv_heads, head_dim] source slot (centred so
 //!      group ranges are well-distributed)
-//!   2. Dispatch `quantize_kv_*` → cache buffers at `position`
-//!   3. Dispatch `bulk_dequant_kv_*` reading the whole [0..n_positions)
+//!   2. Dispatch `mt_quantize_kv_*` → cache buffers at `position`
+//!   3. Dispatch `mt_bulk_dequant_kv_*` reading the whole [0..n_positions)
 //!      slice → reconstructed values
 //!   4. For the slot we just wrote, compare reconstructed vs source
 //!      with a per-bits relative tolerance (int4: ±range/15 = one
@@ -43,11 +43,11 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes, unpack_u32_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::kv_cache::{
-    bulk_dequant_kv_int4,
-    bulk_dequant_kv_int8,
-    quantize_kv_int4,
-    quantize_kv_int8,
+use metaltile_std::kernels::kv_cache::cache::{
+    mt_bulk_dequant_kv_int4,
+    mt_bulk_dequant_kv_int8,
+    mt_quantize_kv_int4,
+    mt_quantize_kv_int8,
 };
 
 /// Shape parameters covering Qwen3-class K/V slots.
@@ -140,12 +140,12 @@ fn roundtrip_int4(shape: &Shape, dt: Dt, source: &[f32]) -> Vec<f32> {
     buffers.insert("group_size".into(), (shape.group_size as u32).to_le_bytes().to_vec());
     buffers.insert("position".into(), (shape.position as u32).to_le_bytes().to_vec());
 
-    let mut qkernel = quantize_kv_int4::kernel_ir_for(dtype);
+    let mut qkernel = mt_quantize_kv_int4::kernel_ir_for(dtype);
     qkernel.mode = KernelMode::Grid3D;
     let (grid, tpg) = quantize_dispatch_grid(shape, bits);
     let q_out = ctx
         .dispatch_with_grid(&qkernel, &buffers, &BTreeMap::new(), grid, tpg)
-        .expect("quantize_kv_int4 dispatch");
+        .expect("mt_quantize_kv_int4 dispatch");
 
     let w_bytes = q_out.outputs.get("out_w").expect("out_w buffer").clone();
     let s_bytes = q_out.outputs.get("out_s").expect("out_s buffer").clone();
@@ -163,12 +163,12 @@ fn roundtrip_int4(shape: &Shape, dt: Dt, source: &[f32]) -> Vec<f32> {
     dbuf.insert("group_size".into(), (shape.group_size as u32).to_le_bytes().to_vec());
     dbuf.insert("n_positions".into(), (shape.n_positions as u32).to_le_bytes().to_vec());
 
-    let mut dkernel = bulk_dequant_kv_int4::kernel_ir_for(dtype);
+    let mut dkernel = mt_bulk_dequant_kv_int4::kernel_ir_for(dtype);
     dkernel.mode = KernelMode::Grid3D;
     let (dgrid, dtpg) = dequant_dispatch_grid(shape);
     let d_out = ctx
         .dispatch_with_grid(&dkernel, &dbuf, &BTreeMap::new(), dgrid, dtpg)
-        .expect("bulk_dequant_kv_int4 dispatch");
+        .expect("mt_bulk_dequant_kv_int4 dispatch");
 
     let out_bytes = d_out.outputs.get("out").expect("out buffer");
     unpack_bytes(out_bytes, dt)
@@ -199,12 +199,12 @@ fn roundtrip_int8(shape: &Shape, dt: Dt, source: &[f32]) -> Vec<f32> {
     buffers.insert("group_size".into(), (shape.group_size as u32).to_le_bytes().to_vec());
     buffers.insert("position".into(), (shape.position as u32).to_le_bytes().to_vec());
 
-    let mut qkernel = quantize_kv_int8::kernel_ir_for(dtype);
+    let mut qkernel = mt_quantize_kv_int8::kernel_ir_for(dtype);
     qkernel.mode = KernelMode::Grid3D;
     let (grid, tpg) = quantize_dispatch_grid(shape, bits);
     let q_out = ctx
         .dispatch_with_grid(&qkernel, &buffers, &BTreeMap::new(), grid, tpg)
-        .expect("quantize_kv_int8 dispatch");
+        .expect("mt_quantize_kv_int8 dispatch");
 
     let w_bytes = q_out.outputs.get("out_w").expect("out_w buffer").clone();
     let s_bytes = q_out.outputs.get("out_s").expect("out_s buffer").clone();
@@ -221,12 +221,12 @@ fn roundtrip_int8(shape: &Shape, dt: Dt, source: &[f32]) -> Vec<f32> {
     dbuf.insert("group_size".into(), (shape.group_size as u32).to_le_bytes().to_vec());
     dbuf.insert("n_positions".into(), (shape.n_positions as u32).to_le_bytes().to_vec());
 
-    let mut dkernel = bulk_dequant_kv_int8::kernel_ir_for(dtype);
+    let mut dkernel = mt_bulk_dequant_kv_int8::kernel_ir_for(dtype);
     dkernel.mode = KernelMode::Grid3D;
     let (dgrid, dtpg) = dequant_dispatch_grid(shape);
     let d_out = ctx
         .dispatch_with_grid(&dkernel, &dbuf, &BTreeMap::new(), dgrid, dtpg)
-        .expect("bulk_dequant_kv_int8 dispatch");
+        .expect("mt_bulk_dequant_kv_int8 dispatch");
 
     let out_bytes = d_out.outputs.get("out").expect("out buffer");
     unpack_bytes(out_bytes, dt)
@@ -340,7 +340,7 @@ fn kv_cache_int8_roundtrip_bf16() {
 
 // ── Cross-slot isolation ─────────────────────────────────────────────
 //
-// `quantize_kv_*` writes only to its `position` slot — verify by
+// `mt_quantize_kv_*` writes only to its `position` slot — verify by
 // pre-filling neighboring slots with a sentinel and checking they
 // survive a quantize+dequant cycle. Catches index formula regressions
 // (e.g. accidentally striding by head_dim instead of max_seq).
@@ -378,12 +378,12 @@ fn kv_cache_int8_does_not_touch_other_slots_f32() {
     buffers.insert("group_size".into(), (shape.group_size as u32).to_le_bytes().to_vec());
     buffers.insert("position".into(), (shape.position as u32).to_le_bytes().to_vec());
 
-    let mut qkernel = quantize_kv_int8::kernel_ir_for(dtype);
+    let mut qkernel = mt_quantize_kv_int8::kernel_ir_for(dtype);
     qkernel.mode = KernelMode::Grid3D;
     let (grid, tpg) = quantize_dispatch_grid(&shape, bits);
     let q_out = ctx
         .dispatch_with_grid(&qkernel, &buffers, &BTreeMap::new(), grid, tpg)
-        .expect("quantize_kv_int8 dispatch");
+        .expect("mt_quantize_kv_int8 dispatch");
 
     let w_after = unpack_u32_bytes(q_out.outputs.get("out_w").expect("out_w"));
     let s_after = unpack_bytes(q_out.outputs.get("out_s").expect("out_s"), dt);

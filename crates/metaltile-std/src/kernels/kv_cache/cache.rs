@@ -12,7 +12,7 @@
 //!            biases  [n_kv_heads, max_seq, head_dim / group_size]  T
 //!
 //! Affine-quant kernels use `#[kernel(variants(BITS = [4, 8], suffix =
-//! "int{BITS}")]` so `quantize_kv_int4/8` and `bulk_dequant_kv_int4/8`
+//! "int{BITS}")]` so `mt_quantize_kv_int4/8` and `mt_bulk_dequant_kv_int4/8`
 //! are generated from a single parameterised body. The fp8 kernels
 //! (e4m3 / e5m2) have float-literal format constants that cannot be
 //! expressed as integer variant parameters, so they remain explicit.
@@ -29,7 +29,7 @@ use metaltile::kernel;
 // Dest layout: [n_kv_heads, max_seq, head_dim]. One thread per output
 // element (n_kv_heads * head_dim total threads).
 #[kernel]
-pub fn kv_cache_update<T>(
+pub fn mt_kv_cache_update<T>(
     src: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] head_dim: u32,
@@ -52,9 +52,9 @@ pub fn kv_cache_update<T>(
 
 /// Affine KV-cache quantize — int4 and int8 variants.
 ///
-/// Produces `quantize_kv_int4` and `quantize_kv_int8`. One thread per group.
+/// Produces `mt_quantize_kv_int4` and `mt_quantize_kv_int8`. One thread per group.
 #[kernel(variants(BITS = [4, 8], suffix = "int{BITS}"))]
-pub fn quantize_kv<T>(
+pub fn mt_quantize_kv<T>(
     src: Tensor<T>,
     mut out_w: Tensor<u32>,
     mut out_s: Tensor<T>,
@@ -114,10 +114,10 @@ pub fn quantize_kv<T>(
 
 /// Affine KV-cache bulk dequant — int4 and int8 variants.
 ///
-/// Produces `bulk_dequant_kv_int4` and `bulk_dequant_kv_int8`.
+/// Produces `mt_bulk_dequant_kv_int4` and `mt_bulk_dequant_kv_int8`.
 /// One thread per output element.
 #[kernel(variants(BITS = [4, 8], suffix = "int{BITS}"))]
-pub fn bulk_dequant_kv<T>(
+pub fn mt_bulk_dequant_kv<T>(
     in_w: Tensor<u32>,
     in_s: Tensor<T>,
     in_b: Tensor<T>,
@@ -183,7 +183,7 @@ pub fn bulk_dequant_kv<T>(
 /// fp8 E4M3 KV-cache quantize — one thread per group. Stores the group amax
 /// as scale and packs fp8-quantized codes (4 per u32, 8 bits each).
 #[kernel]
-pub fn quantize_kv_fp8_e4m3<T>(
+pub fn mt_quantize_kv_fp8_e4m3<T>(
     src: Tensor<T>,
     mut out_w: Tensor<u32>,
     mut out_s: Tensor<T>,
@@ -244,7 +244,7 @@ pub fn quantize_kv_fp8_e4m3<T>(
 
 /// fp8 E5M2 KV-cache quantize — one thread per group.
 #[kernel]
-pub fn quantize_kv_fp8_e5m2<T>(
+pub fn mt_quantize_kv_fp8_e5m2<T>(
     src: Tensor<T>,
     mut out_w: Tensor<u32>,
     mut out_s: Tensor<T>,
@@ -303,7 +303,7 @@ pub fn quantize_kv_fp8_e5m2<T>(
 
 /// fp8 E4M3 KV-cache bulk dequant — one thread per output element.
 #[kernel]
-pub fn bulk_dequant_kv_fp8_e4m3<T>(
+pub fn mt_bulk_dequant_kv_fp8_e4m3<T>(
     in_w: Tensor<u32>,
     in_s: Tensor<T>,
     mut out: Tensor<T>,
@@ -351,7 +351,7 @@ pub fn bulk_dequant_kv_fp8_e4m3<T>(
 
 /// fp8 E5M2 KV-cache bulk dequant — one thread per output element.
 #[kernel]
-pub fn bulk_dequant_kv_fp8_e5m2<T>(
+pub fn mt_bulk_dequant_kv_fp8_e5m2<T>(
     in_w: Tensor<u32>,
     in_s: Tensor<T>,
     mut out: Tensor<T>,
@@ -399,21 +399,21 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::{
-        bulk_dequant_kv_fp8_e4m3,
-        bulk_dequant_kv_fp8_e5m2,
-        bulk_dequant_kv_int4,
-        bulk_dequant_kv_int8,
-        kv_cache_update,
-        quantize_kv_fp8_e4m3,
-        quantize_kv_fp8_e5m2,
-        quantize_kv_int4,
-        quantize_kv_int8,
+        mt_bulk_dequant_kv_fp8_e4m3,
+        mt_bulk_dequant_kv_fp8_e5m2,
+        mt_bulk_dequant_kv_int4,
+        mt_bulk_dequant_kv_int8,
+        mt_kv_cache_update,
+        mt_quantize_kv_fp8_e4m3,
+        mt_quantize_kv_fp8_e5m2,
+        mt_quantize_kv_int4,
+        mt_quantize_kv_int8,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
-    // ── kv_cache_update ──────────────────────────────────────────────
+    // ── mt_kv_cache_update ──────────────────────────────────────────────
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.0)]
     fn test_kv_cache_update(dt: DType) -> TestSetup {
         let (n_kv_heads, head_dim, max_seq, position) = (4usize, 16usize, 8usize, 3usize);
@@ -429,7 +429,7 @@ pub mod kernel_tests {
                 expected[dst] = src_dt[h * head_dim + d];
             }
         }
-        TestSetup::new(kv_cache_update::kernel_ir_for(dt))
+        TestSetup::new(mt_kv_cache_update::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::from_vec("out", pack_f32(&cache, dt), dt))
@@ -440,7 +440,7 @@ pub mod kernel_tests {
             .grid_1d(n_kv_heads * head_dim, 256)
     }
 
-    // ── quantize_kv_int4 / int8 — scale + bias check ─────────────────
+    // ── mt_quantize_kv_int4 / int8 — scale + bias check ─────────────────
     //
     // group_size=8 is a multiple of both vals_per_pack (8 for int4, 4 for
     // int8) so the pack loop is well-formed for both bit-widths.
@@ -511,15 +511,15 @@ pub mod kernel_tests {
     // shared setup helper retains a use site.
     #[allow(dead_code)]
     fn test_quantize_kv_int4(dt: DType) -> TestSetup {
-        quant_scale_bias_setup(quantize_kv_int4::kernel_ir_for(dt), 4, dt)
+        quant_scale_bias_setup(mt_quantize_kv_int4::kernel_ir_for(dt), 4, dt)
     }
 
     #[allow(dead_code)] // bench-only (see test_quantize_kv_int4 note)
     fn test_quantize_kv_int8(dt: DType) -> TestSetup {
-        quant_scale_bias_setup(quantize_kv_int8::kernel_ir_for(dt), 8, dt)
+        quant_scale_bias_setup(mt_quantize_kv_int8::kernel_ir_for(dt), 8, dt)
     }
 
-    // ── bulk_dequant_kv_int4 / int8 — exact dequant oracle ───────────
+    // ── mt_bulk_dequant_kv_int4 / int8 — exact dequant oracle ───────────
     //
     // scale=1, bias=0 → each output equals the unpacked quantized integer,
     // so the dequant is exact regardless of dtype rounding (small ints).
@@ -578,10 +578,10 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.0,
                   variants(BITS = [4, 8], suffix = "int{BITS}"))]
     fn test_bulk_dequant_kv(dt: DType) -> TestSetup {
-        dequant_setup(bulk_dequant_kv_intBITS::kernel_ir_for(dt), BITS, dt)
+        dequant_setup(mt_bulk_dequant_kv_intBITS::kernel_ir_for(dt), BITS, dt)
     }
 
-    // ── quantize_kv_fp8_e4m3 / e5m2 — scale check ────────────────────
+    // ── mt_quantize_kv_fp8_e4m3 / e5m2 — scale check ────────────────────
     //
     // fp8 quant is scale-only: scale = group amax / fp8_max. Exact.
     fn quant_fp8_scale_setup(
@@ -638,15 +638,15 @@ pub mod kernel_tests {
     // exact decode), so only the scale is pinned here.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_quantize_kv_fp8_e4m3(dt: DType) -> TestSetup {
-        quant_fp8_scale_setup(quantize_kv_fp8_e4m3::kernel_ir_for(dt), 240.0, dt)
+        quant_fp8_scale_setup(mt_quantize_kv_fp8_e4m3::kernel_ir_for(dt), 240.0, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_quantize_kv_fp8_e5m2(dt: DType) -> TestSetup {
-        quant_fp8_scale_setup(quantize_kv_fp8_e5m2::kernel_ir_for(dt), 57344.0, dt)
+        quant_fp8_scale_setup(mt_quantize_kv_fp8_e5m2::kernel_ir_for(dt), 57344.0, dt)
     }
 
-    // ── bulk_dequant_kv_fp8_e4m3 / e5m2 — exact fp8 decode oracle ─────────
+    // ── mt_bulk_dequant_kv_fp8_e4m3 / e5m2 — exact fp8 decode oracle ─────────
     //
     // Pack KNOWN fp8 bytes whose decoded magnitudes are exact in every dtype
     // (the fp8 grid is a subset of f16/bf16), with scale=1, so the dequant
@@ -720,7 +720,7 @@ pub mod kernel_tests {
             (0xB8, -1.0),
             (0xC0, -2.0),
         ];
-        dequant_fp8_setup(bulk_dequant_kv_fp8_e4m3::kernel_ir_for(dt), &palette, dt)
+        dequant_fp8_setup(mt_bulk_dequant_kv_fp8_e4m3::kernel_ir_for(dt), &palette, dt)
     }
 
     // e5m2 byte → exact value: 0x00→0, 0x34→0.25, 0x38→0.5, 0x3C→1.0,
@@ -738,7 +738,7 @@ pub mod kernel_tests {
             (0xBC, -1.0),
             (0xB8, -0.5),
         ];
-        dequant_fp8_setup(bulk_dequant_kv_fp8_e5m2::kernel_ir_for(dt), &palette, dt)
+        dequant_fp8_setup(mt_bulk_dequant_kv_fp8_e5m2::kernel_ir_for(dt), &palette, dt)
     }
 }
 
@@ -748,15 +748,15 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::{
-        bulk_dequant_kv_fp8_e4m3,
-        bulk_dequant_kv_fp8_e5m2,
-        bulk_dequant_kv_int4,
-        bulk_dequant_kv_int8,
-        kv_cache_update,
-        quantize_kv_fp8_e4m3,
-        quantize_kv_fp8_e5m2,
-        quantize_kv_int4,
-        quantize_kv_int8,
+        mt_bulk_dequant_kv_fp8_e4m3,
+        mt_bulk_dequant_kv_fp8_e5m2,
+        mt_bulk_dequant_kv_int4,
+        mt_bulk_dequant_kv_int8,
+        mt_kv_cache_update,
+        mt_quantize_kv_fp8_e4m3,
+        mt_quantize_kv_fp8_e5m2,
+        mt_quantize_kv_int4,
+        mt_quantize_kv_int8,
     };
 
     fn u32_bytes(n: usize) -> Vec<u8> { vec![0u8; n * 4] }
@@ -771,7 +771,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_kv_cache_update(dt: DType) -> BenchSetup {
         let elems = N_KV_HEADS * HEAD_DIM;
-        BenchSetup::new(kv_cache_update::kernel_ir_for(dt))
+        BenchSetup::new(mt_kv_cache_update::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("src", elems, dt))
             .buffer(BenchBuffer::zeros("out", N_KV_HEADS * MAX_SEQ * HEAD_DIM, dt).output())
@@ -805,7 +805,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [4, 8], suffix = "int{BITS}"))]
     fn bench_quantize_kv(dt: DType) -> BenchSetup {
-        quant_bench(quantize_kv_intBITS::kernel_ir_for(dt), BITS, dt)
+        quant_bench(mt_quantize_kv_intBITS::kernel_ir_for(dt), BITS, dt)
     }
 
     fn dequant_bench(kernel: metaltile::core::ir::Kernel, bits: u32, dt: DType) -> BenchSetup {
@@ -831,7 +831,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [4, 8], suffix = "int{BITS}"))]
     fn bench_bulk_dequant_kv(dt: DType) -> BenchSetup {
-        dequant_bench(bulk_dequant_kv_intBITS::kernel_ir_for(dt), BITS, dt)
+        dequant_bench(mt_bulk_dequant_kv_intBITS::kernel_ir_for(dt), BITS, dt)
     }
 
     // fp8 quantize is scale-only (no out_b buffer).
@@ -855,11 +855,11 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_quantize_kv_fp8_e4m3(dt: DType) -> BenchSetup {
-        quant_fp8_bench(quantize_kv_fp8_e4m3::kernel_ir_for(dt), dt)
+        quant_fp8_bench(mt_quantize_kv_fp8_e4m3::kernel_ir_for(dt), dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_quantize_kv_fp8_e5m2(dt: DType) -> BenchSetup {
-        quant_fp8_bench(quantize_kv_fp8_e5m2::kernel_ir_for(dt), dt)
+        quant_fp8_bench(mt_quantize_kv_fp8_e5m2::kernel_ir_for(dt), dt)
     }
 
     // fp8 dequant is scale-only (no in_b buffer).
@@ -883,10 +883,10 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bulk_dequant_kv_fp8_e4m3(dt: DType) -> BenchSetup {
-        dequant_fp8_bench(bulk_dequant_kv_fp8_e4m3::kernel_ir_for(dt), dt)
+        dequant_fp8_bench(mt_bulk_dequant_kv_fp8_e4m3::kernel_ir_for(dt), dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bulk_dequant_kv_fp8_e5m2(dt: DType) -> BenchSetup {
-        dequant_fp8_bench(bulk_dequant_kv_fp8_e5m2::kernel_ir_for(dt), dt)
+        dequant_fp8_bench(mt_bulk_dequant_kv_fp8_e5m2::kernel_ir_for(dt), dt)
     }
 }
