@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::gemv_rows_iq2xxs::mt_moe_gemv_rows_iq2xxs;
+use metaltile_std::kernels::moe::moe_gemv_rows_iq2xxs::mt_moe_gemv_rows_iq2xxs;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;

@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `kernels::moe::gather_down_q2k` — fused 6-expert
+//! GPU correctness for `kernels::moe::moe_gather_down_q2k` — fused 6-expert
 //! Q2_K inline-dequant down-projection + router-weighted sum. Validates
 //! against a CPU reference running the identical (production-proven)
 //! Q2_K dequant formula.
@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::gather_down_q2k::mt_moe_gather_down_q2k;
+use metaltile_std::kernels::moe::moe_gather_down_q2k::mt_moe_gather_down_q2k;
 // The Q2_K output-index → (qs byte, 2-bit shift) map is the single shared
 // definition in `quant::gguf`: the kernel, the quantizer, and this oracle all
 // read it, so the layout can't drift apart (getting it wrong was PR #264).

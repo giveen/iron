@@ -13,7 +13,7 @@ use std::{collections::BTreeMap, time::Instant};
 
 use common::{Dt, gpu_lock, pack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::gather_qmm::{
+use metaltile_std::kernels::moe::moe_gather_qmm::{
     mt_moe_gather_qmm_int4,
     mt_moe_gather_qmm_int4_m8,
     mt_moe_gather_qmm_mma_int4,

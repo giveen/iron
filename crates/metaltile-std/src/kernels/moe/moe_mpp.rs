@@ -1,50 +1,56 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! MPP-backed MoE int8 grouped BGEMM — `mt_moe_gather_qmm_mma_int8_bm16_mpp`.
+//! MPP-backed MoE grouped int4 BGEMM — `mt_moe_gather_qmm_mma_int4_bm16_mpp`.
 //!
-//! Int8 analogue of `moe_mpp::mt_moe_gather_qmm_mma_int4_bm16_mpp`. Same
-//! BM=16 / BN=32 / BK=16 MPP cooperative-tensor tiling; the only change is
-//! the weight coop-dequant inner loop:
+//! Routes the per-tile matmul through Apple's MetalPerformancePrimitives
+//! `mpp::tensor_ops::matmul2d`. Algorithmically mirrors
+//! `mt_moe_gather_qmm_mma_int4_bm16` (BM=16, BN=32, per-TG expert
+//! sub-runs, per-row expert dispatch); the inner `simdgroup_matmul`
+//! 8×8 frags are replaced by a single `16×32×16` MPP descriptor.
 //!
-//!   int4: 32 lanes × 2 packs/lane × 8 nibbles/pack = 512 = BN×BK ✓
-//!   int8: 32 lanes × 4 packs/lane × 4 bytes/pack   = 512 = BN×BK ✓
-//!
-//! Each uint32 holds 4 consecutive unsigned-byte codes in LSB-first order.
-//! `packs_per_row = k_in / 4` (4 bytes/u32 vs 8 nibbles/u32 for int4).
+//! Expressed entirely in the `#[kernel]` DSL via the `coop_tile_*`
+//! intrinsics — no `Op::InlineMsl`. The `coop_tile_*` ops lower to the
+//! `mpp::tensor_ops::matmul2d` cooperative-tensor calls; codegen emits
+//! the framework include automatically.
 //!
 //! ## bf16 staging
 //!
-//! Same `coop_stage(T)` trick as the int4 MPP kernel: bf16 activations are
-//! staged through `half` so `mpp::tensor_ops::matmul2d` sees a supported
-//! cooperative-tensor dtype. Accumulation is fp32.
+//! Apple's `matmul2d` mishandles `bfloat` cooperative tensors, so bf16
+//! activations are staged through `half` (10-bit mantissa losslessly
+//! covers bf16's 7; accumulation is fp32 regardless). The DSL
+//! `coop_stage(T)` form yields `half` for `T = bf16` and `T` otherwise —
+//! the kernel stays generic over `T` while its threadgroup tiles and
+//! cooperative tensors pick up the staged type.
 //!
 //! ## Descriptor
 //!
 //! `matmul2d_descriptor(16, 32, 16, ta=false, tb=true, tc=false,
-//! multiply_accumulate)` — identical to the int4 MPP descriptor; only the
-//! threadgroup W tile contents differ.
+//! multiply_accumulate)` — `N=32` satisfies Apple's "at least one of
+//! M/N/K = 32" rule; `tb=true` reads W in its native `[N, K]` layout;
+//! `multiply_accumulate` spans the K loop without an explicit add.
 //!
 //! ## Dispatch invariants
 //!
 //! - Mode `Reduction`; grid `[N/32, ceil(M/16), 1]`; threadgroup
 //!   `[32, 1, 1]` (1 simdgroup — `matmul2d` is `execution_simdgroup`).
-//! - `k_in % 16 == 0`, `n_out % 32 == 0`, `group_size` divides `k_in`,
-//!   `(k_in / 4) % 4 == 0` (i.e. `k_in % 16 == 0`).
-//! - macOS 26+ / Metal 4; on older toolchains a zero-write stub is emitted.
+//! - `k_in % 16 == 0`, `n_out % 32 == 0`, `group_size` divides `k_in`.
+//! - macOS 26+ / Metal 4; on older toolchains the codegen emits a
+//!   linkable stub.
 //!
-//! Correctness: `tests/moe_gather_qmm_mpp_int8_correctness.rs` (cosine ≥ 0.999).
+//! Correctness validated by `tests/moe_gather_qmm_mpp_correctness.rs`
+//! (cosine ≥ 0.999 vs the m1 scalar oracle).
 
 use metaltile::kernel;
 
-/// MPP MoE int8 grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup.
+/// MPP MoE int4 grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup.
 ///
-/// Params: `x [m_total, k_in]`, `w [n_experts, n_out, k_in/4]` (int8
-/// packed, 4 bytes/uint32), `scales`/`biases [n_experts, n_out,
+/// Params: `x [m_total, k_in]`, `w [n_experts, n_out, k_in/8]` (int4
+/// packed, 8 nibbles/uint32), `scales`/`biases [n_experts, n_out,
 /// k_in/group]`, `indices [m_total]` (per-row expert id), `out
 /// [m_total, n_out]`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma_int8_bm16_mpp<T>(
+pub fn mt_moe_gather_qmm_mma_int4_bm16_mpp<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -59,12 +65,12 @@ pub fn mt_moe_gather_qmm_mma_int8_bm16_mpp<T>(
     let n_tile_base = tgid_x * 32u32;
     let m_tile_base = tgid_y * 16u32;
     let lane = simd_lane;
-    // int8: 4 bytes per u32 → packs_per_row = k_in / 4.
-    let packs_per_row = k_in / 4u32;
+    let packs_per_row = k_in / 8u32;
     let groups_per_row = k_in / group_size;
-    // Threadgroup staging tiles. `coop_stage(T)` = half for bf16, else T.
-    // `out_scratch` is fp32: `coop_tile_store_c` destination must match the
-    // accumulator type.
+    // Threadgroup staging tiles. `coop_stage(T)` = half for bf16, else T —
+    // the matmul reads these as cooperative tensors. `out_scratch` is
+    // fp32: `coop_tile_store_c` requires the destination elem-type to
+    // match the accumulator.
     threadgroup_alloc("xs", 256, coop_stage(T)); // 16 × 16
     threadgroup_alloc("ws", 512, coop_stage(T)); // 32 × 16
     threadgroup_alloc("out_scratch", 512, f32); // 16 × 32
@@ -82,13 +88,13 @@ pub fn mt_moe_gather_qmm_mma_int8_bm16_mpp<T>(
         true,
         false,
     );
-    // Walk the BM=16 rows in contiguous-expert sub-runs (identical to int4 MPP).
+    // Walk the BM=16 rows in contiguous-expert sub-runs.
     let mut sub_offset = 0u32;
     for _sub_iter in range(0u32, 16u32, 1u32) {
         let cur_row = m_tile_base + sub_offset;
         let cur_in_range = (sub_offset < 16u32) & (cur_row < m_total);
         let cur_expert = select(cur_in_range, load(indices[cur_row]), 4294967295u32);
-        // Find run end — first row whose expert differs (or OOB).
+        // Find the run end — first row whose expert differs (or OOB).
         let mut sub_end = 16u32;
         let mut found = 0u32;
         for _ii in range(0u32, 16u32, 1u32) {
@@ -125,40 +131,26 @@ pub fn mt_moe_gather_qmm_mma_int8_bm16_mpp<T>(
                     threadgroup_store("xs", mr * 16u32 + kc, select(in_run, xv, 0.0f32));
                 }
                 // Dequant W[expert, n_tile_base..+32, kb..kb+16] → ws.
-                // int8: 32 lanes × 4 packs/lane × 4 bytes/pack = 512 = BN×BK.
-                // Lane assignment:
-                //   pack_id = lane * 4 + _pi       (0..127, but we have 32 lanes so 4 iters)
-                //   w_row   = pack_id / 4           (0..31: which BN row)
-                //   pack_col = pack_id % 4          (0..3: which uint32 in BK=16 slice)
-                //   k_off   = kb + pack_col * 4     (byte offset of first element in pack)
-                //
-                // 32 lanes × 4 iters × 4 bytes/pack = 512 elements = 32 rows × 16 cols ✓
-                for _pi in range(0u32, 4u32, 1u32) {
-                    let pack_id = lane * 4u32 + _pi;
-                    let w_row = pack_id / 4u32; // 0..31 (BN rows)
-                    let pack_col = pack_id % 4u32; // 0..3 (BK=16 → 4 packs × 4 bytes)
+                // 32 lanes × 2 packs/lane; 8 nibbles/pack.
+                for _pi in range(0u32, 2u32, 1u32) {
+                    let pack_id = lane * 2u32 + _pi;
+                    let w_row = pack_id / 2u32; // 0..31 (BN rows)
+                    let pack_col = pack_id % 2u32; // 0..1 (BK=16 → 2 packs)
                     let pack_dev = w_expert_base
                         + (n_tile_base + w_row) * packs_per_row
-                        + kb / 4u32
+                        + kb / 8u32
                         + pack_col;
                     let packed = load(w[pack_dev]);
-                    // k_off = byte offset of the first element in this pack within the row.
-                    let k_off = kb + pack_col * 4u32;
+                    let k_off = kb + pack_col * 8u32;
                     let g = k_off / group_size;
                     let sb_off = sb_expert_base + (n_tile_base + w_row) * groups_per_row + g;
                     let s = load(scales[sb_off]).cast::<f32>();
                     let b = load(biases[sb_off]).cast::<f32>();
-                    // Extract 4 unsigned byte codes (LSB-first).
-                    let q0 = (packed & 255u32).cast::<f32>();
-                    let q1 = ((packed >> 8u32) & 255u32).cast::<f32>();
-                    let q2 = ((packed >> 16u32) & 255u32).cast::<f32>();
-                    let q3 = ((packed >> 24u32) & 255u32).cast::<f32>();
-                    // Write to threadgroup ws at the correct row/col position.
-                    let dst = w_row * 16u32 + pack_col * 4u32;
-                    threadgroup_store("ws", dst, s * q0 + b);
-                    threadgroup_store("ws", dst + 1u32, s * q1 + b);
-                    threadgroup_store("ws", dst + 2u32, s * q2 + b);
-                    threadgroup_store("ws", dst + 3u32, s * q3 + b);
+                    let dst = w_row * 16u32 + pack_col * 8u32;
+                    for _j in range(0u32, 8u32, 1u32) {
+                        let q = ((packed >> (_j * 4u32)) & 15u32).cast::<f32>();
+                        threadgroup_store("ws", dst + _j, s * q + b);
+                    }
                 }
                 threadgroup_barrier();
                 // A = xs [M=16, K=16] (ta=false → extents K,M = 16,16).
@@ -203,8 +195,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_moe_gather_qmm_mma_int8_bm16_mpp");
+            let k = mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt);
+            assert_eq!(k.name, "mt_moe_gather_qmm_mma_int4_bm16_mpp");
             assert_eq!(k.params.len(), 6);
             assert!(k.params[5].is_output);
             assert_eq!(k.constexprs.len(), 4);
@@ -221,7 +213,7 @@ mod tests {
     /// cooperative tensors resolve to `half`, never `bfloat`.
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(DType::BF16);
+        let k = mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -236,34 +228,35 @@ mod tests {
     /// Codegen sanity — the MPP header + descriptor land in the MSL.
     #[test]
     fn codegen_emits_mpp_include() {
-        let mut k = mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(DType::F32);
-        k.name = "mt_moe_gather_qmm_mma_int8_bm16_mpp_f32".into();
+        let mut k = mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::F32);
+        k.name = "mt_moe_gather_qmm_mma_int4_bm16_mpp_f32".into();
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         assert!(msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"));
         assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-        assert!(msl.contains("kernel void mt_moe_gather_qmm_mma_int8_bm16_mpp_f32"));
+        assert!(msl.contains("kernel void mt_moe_gather_qmm_mma_int4_bm16_mpp_f32"));
     }
 }
 
-/// New-syntax correctness test for the MPP MoE int8 BGEMM (BM=16). Oracle is
-/// the per-row-`indices` int8 dequant-then-grouped-matmul (4 unsigned bytes per
-/// u32, per-group scale/bias) shared with the bm8/bm64 int8 variants. Inputs
-/// are dtype-rounded so the GPU sees exactly what the oracle computes; tolerance
-/// is wide because the MPP cooperative-tensor accumulator reorders the K
-/// reduction.
+/// New-syntax correctness test for the MPP MoE int4 BGEMM (BM=16). Oracle is
+/// the clean per-row-`indices` dequant-then-grouped-matmul: each row `t`
+/// resolves its expert from `indices[t]`, dequantizes that expert's int4
+/// weight (8 nibbles/u32, per-group scale/bias), and dots against the row's
+/// input. Inputs are dtype-rounded so the GPU sees exactly what the oracle
+/// computes; tolerance is wide because the MPP cooperative-tensor accumulator
+/// reorders the K reduction.
 ///
 /// Grid (Reduction, 1 simdgroup per TG): `grid_3d(n_out/32, ceil(m_total/16), 1, [32,1,1])`.
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::mt_moe_gather_qmm_mma_int8_bm16_mpp;
-    use crate::kernels::moe::mpp_shared::{MmaTestShape, int8_indexed_setup};
+    use super::mt_moe_gather_qmm_mma_int4_bm16_mpp;
+    use crate::kernels::moe::moe_mpp_shared::{MmaTestShape, int4_indexed_setup};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_moe_gather_qmm_mma_int8_bm16_mpp(dt: DType) -> TestSetup {
-        // BM=16 → ceil(64/16)=4 m-tiles, BN=32 → 64/32=2 n-tiles.
-        int8_indexed_setup(
-            mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
+    fn test_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> TestSetup {
+        // Clean tile: BM=16 → ceil(64/16)=4 m-tiles, BN=32 → 64/32=2 n-tiles.
+        int4_indexed_setup(
+            mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
             32, // bn
             16, // bm
@@ -273,22 +266,19 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for the MPP MoE int8 BGEMM (BM=16). `bits=8` →
-/// `k_in/4` u32 weight words/row.
-///
-/// Grid (Reduction, 1 simdgroup per TG): `grid_3d(n_out/32, ceil(m_total/16), 1, [32,1,1])`.
+/// New-syntax benchmark for the MPP MoE int4 BGEMM (BM=16). Qwen3.6-A3B-ish.
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::mt_moe_gather_qmm_mma_int8_bm16_mpp;
-    use crate::kernels::moe::mpp_shared::{MmaBenchShape, int4_mma_bench};
+    use super::mt_moe_gather_qmm_mma_int4_bm16_mpp;
+    use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_moe_gather_qmm_mma_int8_bm16_mpp(dt: DType) -> BenchSetup {
+    fn bench_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> BenchSetup {
         int4_mma_bench(
-            mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
+            mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
             MmaBenchShape {
-                bits: 8,
+                bits: 4,
                 bn: 32,
                 bm: 16,
                 tpg: 32,

@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp`.
 //!
 //! BM=BN=64 MPP MoE kernel — same output semantics as the BM=16 sibling but
 //! scaled up to a 64×64 output tile with 4 SGs (WM=WN=2) per TG. Validated
@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::{gather_qmm::mt_moe_gather_qmm_int4, mpp_bm64};
+use metaltile_std::kernels::moe::{moe_gather_qmm::mt_moe_gather_qmm_int4, moe_mpp_bm64};
 
 /// Pack a row of int4 weights into uint32s (8 per uint, LSB-first per
 /// nibble). Identical to the helper used by the bm16_mpp test —
@@ -148,7 +148,7 @@ fn moe_gather_qmm_mma_int4_bm64_mpp_matches_m1_clean_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
+            moe_mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         // Grid: [ceil(N/64), ceil(T/64), 1]. TG: 128 lanes = 4 SGs (WM=WN=2).
         let r = ctx
@@ -267,7 +267,7 @@ fn moe_gather_qmm_mma_int4_bm64_mpp_matches_m1_multi_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
+            moe_mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(
@@ -391,7 +391,7 @@ fn moe_gather_qmm_mma_int4_bm64_mpp_bf16_matches_m1_clean_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
+            moe_mpp_bm64::mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(

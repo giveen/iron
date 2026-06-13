@@ -241,7 +241,7 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::mt_moe_gather_qmm_mma_int8_bm8_mpp;
-    use crate::kernels::moe::mpp_shared::{MmaTestShape, int8_indexed_setup};
+    use crate::kernels::moe::moe_mpp_shared::{MmaTestShape, int8_indexed_setup};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int8_bm8_mpp(dt: DType) -> TestSetup {
@@ -265,7 +265,7 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::mt_moe_gather_qmm_mma_int8_bm8_mpp;
-    use crate::kernels::moe::mpp_shared::{MmaBenchShape, int4_mma_bench};
+    use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int8_bm8_mpp(dt: DType) -> BenchSetup {

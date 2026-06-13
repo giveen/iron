@@ -3,7 +3,7 @@
 #![allow(clippy::manual_is_multiple_of)]
 
 //! GPU correctness for the bit-width-generalized MMA MoE BGEMMs
-//! `kernels::moe::gather_qmm::mt_moe_gather_qmm_mma_b{3,5,6,8}`.
+//! `kernels::moe::moe_gather_qmm::mt_moe_gather_qmm_mma_b{3,5,6,8}`.
 //!
 //! Same tiled-MMA algorithm as `mt_moe_gather_qmm_mma_int4`, but the
 //! weight coop-dequant pulls codes from a contiguous LSB-first bit-stream
@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::gather_qmm::{
+use metaltile_std::kernels::moe::moe_gather_qmm::{
     mt_moe_gather_qmm_mma_b3,
     mt_moe_gather_qmm_mma_b5,
     mt_moe_gather_qmm_mma_b6,

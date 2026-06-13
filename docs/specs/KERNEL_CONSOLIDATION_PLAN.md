@@ -59,7 +59,7 @@ crates/metaltile-std/src/kernels/
               router_topk_biased / sigmoid_bias / sqrtsoftplus · mpp(bm8/bm64 × int8 ×
               block_scaled) + mpp_shared · bgemm/gemv (q2k/iq2xxs/q4, view/ws/rows) · gather_q4 ·
               down_swiglu_accum / down_weighted_sum · dequant_gemv_expert_indexed(_block_scaled) ·
-              block_scaled. Filenames drop the moe_ prefix; format-axis fold deferred (§7).
+              block_scaled. Filenames keep the moe_ prefix (match kernel names); format-axis fold deferred (§7).
               (orchestration split into router_topk / permute / gather_qmm.)
   norm/       ✅ DONE — rms_norm(+residual/rope/qgemv/gated) · layer_norm · adain1d
   rope/       ✅ DONE — rope · rope_2d · rope_banded · rope_yarn · partial_rope

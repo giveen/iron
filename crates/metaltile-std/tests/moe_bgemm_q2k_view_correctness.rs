@@ -17,8 +17,8 @@ use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use half::f16;
 use metaltile::{Context, core::ir::KernelMode};
 use metaltile_std::kernels::moe::{
-    bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
-    bgemm_q2k_view::mt_moe_bgemm_q2k_view,
+    moe_bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
+    moe_bgemm_q2k_view::mt_moe_bgemm_q2k_view,
 };
 
 fn xorshift(s: &mut u32) -> u32 {

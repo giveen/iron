@@ -17,8 +17,8 @@ use metaltile::{
     core::{dtype::DType, ir::KernelMode},
 };
 use metaltile_std::kernels::moe::{
-    bgemm_iq2xxs_bm64::mt_moe_bgemm_iq2xxs_bm64,
-    bgemm_iq2xxs_view_u16_bm64::mt_moe_bgemm_iq2xxs_view_u16_bm64,
+    moe_bgemm_iq2xxs_bm64::mt_moe_bgemm_iq2xxs_bm64,
+    moe_bgemm_iq2xxs_view_u16_bm64::mt_moe_bgemm_iq2xxs_view_u16_bm64,
 };
 
 struct Lcg(u64);

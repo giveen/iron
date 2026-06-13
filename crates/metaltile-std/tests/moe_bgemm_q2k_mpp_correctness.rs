@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp;
+use metaltile_std::kernels::moe::moe_bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp;
 // Shared Q2_K output-index → (qs byte, 2-bit shift) map (see PR #264/#265): the
 // kernel, quantizer, and this oracle all read the one definition in quant::gguf.
 use metaltile_std::quant::gguf::q2_k_qpos;

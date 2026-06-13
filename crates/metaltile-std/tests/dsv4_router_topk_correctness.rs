@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes, unpack_u32_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::router_topk_biased::{mt_moe_router_topk_biased, mt_remap_u32};
+use metaltile_std::kernels::moe::moe_router_topk_biased::{mt_moe_router_topk_biased, mt_remap_u32};
 
 #[test]
 fn dsv4_router_topk_f32() {

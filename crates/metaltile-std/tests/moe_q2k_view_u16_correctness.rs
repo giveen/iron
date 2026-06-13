@@ -13,8 +13,8 @@ use metaltile::{
     core::{dtype::DType, ir::KernelMode},
 };
 use metaltile_std::kernels::moe::{
-    bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
-    bgemm_q2k_view_u16_bm64::mt_moe_bgemm_q2k_view_u16_bm64,
+    moe_bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
+    moe_bgemm_q2k_view_u16_bm64::mt_moe_bgemm_q2k_view_u16_bm64,
 };
 
 fn xs(s: &mut u32) -> u32 {

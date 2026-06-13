@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
 use metaltile_std::kernels::moe::{
-    bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
-    bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
+    moe_bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
+    moe_bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
 };
 
 fn xorshift(s: &mut u32) -> u32 {
