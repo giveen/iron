@@ -395,6 +395,28 @@ pub fn mt_bulk_dequant_kv_fp8_e5m2<T>(
     store(out[dst_idx], w_real.cast::<T>());
 }
 
+// Append one token's K/V into the cache (on-device, no host round-trip).
+/// Append a decode step's K (or V) into an IN-PLACE device KV cache, so the
+/// growing context never round-trips through the host. `src` is `[nkv*hd]` (the
+/// new token's per-head vectors), `dst` is the cache `[nkv, cap, hd]`, `posbuf[0]`
+/// is the current position. Writes `dst[h, pos, :] = src[h, :]`. Runtime `pos`
+/// rides in a buffer (NOT constexpr) so the kernel is compiled once, not per step.
+#[kernel]
+pub fn mt_kv_append<T>(
+    src: Tensor<T>,
+    mut dst: Tensor<T>,
+    posbuf: Tensor<u32>,
+    #[constexpr] hd: u32,
+    #[constexpr] cap: u32,
+) {
+    let idx = program_id::<0>();
+    let pos = load(posbuf[0]);
+    let h = idx / hd;
+    let dd = idx % hd;
+    store(dst[h * cap * hd + pos * hd + dd], load(src[idx]));
+}
+
+
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

@@ -57,6 +57,9 @@ pub mod gemm_q4_mpp;
 pub mod gemm_q8;
 pub mod gemm_q8_mpp;
 
+// Quantized inline-dequant GEMV (Q8_0 / Q4, coalesced + grouped/tiled forms).
+pub mod gemv_quantized;
+
 // Quantized patch-embed (block-scaled im2col + matmul).
 pub mod patch_embed_block_scaled;
 pub mod patch_embed_mma_block_scaled;

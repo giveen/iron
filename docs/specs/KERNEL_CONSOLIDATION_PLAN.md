@@ -45,26 +45,31 @@ the FFAI emit path is unaffected).
 crates/metaltile-std/src/kernels/
   ops/        ✅ DONE — elementwise/core primitives: binary · unary · ternary · copy · arange ·
               random · reduce · arg_reduce · scan · indexing · gather/scatter · hadamard ·
-              fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation
+              fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation ·
+              slice · vscale · cast(f32↔f16)
   gemm/       ✅ DONE — dense: gemm · gemv(_masked,_axpy) · patch_embed(_mma) · steel/gemm;
               quantized: quantized_*(+mpp/nax/int8/dynamic_m) · fp_quantized_* · block_scaled_*
               · dequant_gemv · gemm_q8(_mpp)/q4_mpp · batched_{qkv,4}(_block_scaled)_{qgemv,qmm}
-              · patch_embed(_mma)_block_scaled (same folder; format-axis fold deferred, §7)
+              · patch_embed(_mma)_block_scaled · gemv_quantized (Q8/Q4 inline-dequant gemv,
+              ex-gemv_q8 grab-bag) (same folder; format-axis fold deferred, §7)
   sdpa/       ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
               aura_flash · steel/attn
-  moe/        moe orchestration · mpp(bm8/bm64 × int8) · bgemm/gemv(q2k/iq2xxs) · block_scaled_moe
+  moe/        🔨 SEEDED (folder created early) — gather_q4 (batched expert up/down/weighted-sum)
+              · sigmoid_bias (router pre-score), split out of the gemv_q8 grab-bag. Remaining:
+              moe orchestration · mpp(bm8/bm64 × int8) · bgemm/gemv(q2k/iq2xxs) · block_scaled_moe
   norm/       ✅ DONE — rms_norm(+residual/rope/qgemv/gated) · layer_norm · adain1d
   rope/       ✅ DONE — rope · rope_2d · rope_banded · rope_yarn · partial_rope
-  convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv (see §4)
+  convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv · conv1d_causal(_roll) (see §4)
   ssm/        ✅ DONE — ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
+              (gated_group_rmsnorm(_batched)) · softplus_add(_rows)
   quant/      INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
               quantized_* · fp_quantized_* · affine · aura codec stack · dequant_*
   audio/      ✅ DONE — mel_spectrogram(+magnitude/stft/filterbank) · lstm · vocoder · snake1d · upsample
   vision/     ✅ DONE — resize_normalize(+bicubic) · im2col · patch_unfold · pos_emb_2d · avg_pool2d ·
               transpose_th · frame_diff · broadcast_affine
   sampling/   ✅ DONE — logits_topk/top_p/min_p/processors · categorical_sample · softmax · sort
-  kv_cache/   ✅ DONE — kv_cache(_update_many) · fft
+  kv_cache/   ✅ DONE — kv_cache(_update_many) · kv_append · fft
   primitives.rs   cross-family decode/reduce ops (mt_decode_e2m1/e4m3/e5m2/e8m0, mt_unpack_nbit, …)
   mod.rs          pub mod ops; pub mod gemm; pub mod sdpa; …
 ```

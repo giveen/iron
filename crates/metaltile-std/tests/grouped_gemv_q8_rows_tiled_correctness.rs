@@ -1,8 +1,8 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::ffai_grouped_gemv_q8_rows_tiled` — the
+//! GPU correctness for `mt_grouped_gemv_q8_rows_tiled` — the
 //! token-TILED grouped Q8 gemv (8-fold weight-DRAM amortization). It must
-//! equal the proven `ffai_grouped_gemv_q8_rows` row-by-row: same grouped Q8
+//! equal the proven `mt_grouped_gemv_q8_rows` row-by-row: same grouped Q8
 //! dequant and dot product, only the per-token weight reuse differs. NO model
 //! load. (Mirrors `grouped_gemv_q8_rows_correctness.rs`, which validates
 //! `_rows` against the per-token single kernel.)
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::gemv_q8::{ffai_grouped_gemv_q8_rows, ffai_grouped_gemv_q8_rows_tiled};
+use metaltile_std::kernels::gemm::gemv_quantized::{mt_grouped_gemv_q8_rows, mt_grouped_gemv_q8_rows_tiled};
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -64,7 +64,7 @@ fn grouped_gemv_q8_rows_tiled_matches_rows() {
     bref.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     bref.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
     bref.insert("rows_per_group".into(), (rows_per_group as u32).to_le_bytes().to_vec());
-    let mut kr = ffai_grouped_gemv_q8_rows::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kr = mt_grouped_gemv_q8_rows::kernel_ir_for(Dt::F32.to_dtype());
     kr.mode = KernelMode::Reduction;
     let rr = ctx
         .dispatch_with_grid(&kr, &bref, &BTreeMap::new(), [m_out, n_tokens, 1], [32, 1, 1])
@@ -81,7 +81,7 @@ fn grouped_gemv_q8_rows_tiled_matches_rows() {
     bt.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
     bt.insert("rows_per_group".into(), (rows_per_group as u32).to_le_bytes().to_vec());
     bt.insert("n_tokens".into(), (n_tokens as u32).to_le_bytes().to_vec());
-    let mut kt = ffai_grouped_gemv_q8_rows_tiled::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kt = mt_grouped_gemv_q8_rows_tiled::kernel_ir_for(Dt::F32.to_dtype());
     kt.mode = KernelMode::Reduction;
     let gy = n_tokens.div_ceil(8);
     let rt =

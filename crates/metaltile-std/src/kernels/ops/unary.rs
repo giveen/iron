@@ -237,6 +237,40 @@ pub fn mt_erfinv<T>(a: Tensor<T>, out: Tensor<T>) {
 /// generous-but-bounded per-dtype band that still catches an empty-body or
 /// wrong-formula kernel. `erf`/`gelu`/`erfinv` are bench-only — there's no
 /// std f32 oracle for them (the legacy test didn't cover them either).
+// Device-glue casts + scalar scale (keep activation pipelines on-GPU).
+/// Scale a vector in place by a scalar (router weights × routed_scaling_factor).
+#[kernel]
+pub fn mt_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(buf[i], load(buf[i]) * scale);
+    }
+}
+
+
+/// Elementwise dtype cast f32 → f16. Compacts the attention KV cache to half
+/// precision: at 32K context the sdpa read is bandwidth-bound, so halving the
+/// cache bytes roughly halves the per-layer attention cost. One thread / elem.
+#[kernel]
+pub fn mt_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<f16>());
+    }
+}
+
+
+/// Elementwise dtype cast f16 → f32 (reverse): the sdpa f16 output is widened
+/// back to f32 for the downstream o_proj Q4 GEMV, which consumes f32 activations.
+#[kernel]
+pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<f32>());
+    }
+}
+
+
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 

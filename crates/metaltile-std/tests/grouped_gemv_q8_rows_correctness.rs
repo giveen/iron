@@ -1,7 +1,7 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! Batched grouped Q8 gemv (ffai_grouped_gemv_q8_rows) must equal the
-//! per-token single kernel (ffai_grouped_gemv_q8) row by row. NO model load.
+//! Batched grouped Q8 gemv (mt_grouped_gemv_q8_rows) must equal the
+//! per-token single kernel (mt_grouped_gemv_q8) row by row. NO model load.
 #![cfg(target_os = "macos")]
 
 mod common;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::gemv_q8::{ffai_grouped_gemv_q8, ffai_grouped_gemv_q8_rows};
+use metaltile_std::kernels::gemm::gemv_quantized::{mt_grouped_gemv_q8, mt_grouped_gemv_q8_rows};
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -58,7 +58,7 @@ fn grouped_gemv_q8_rows_matches_single() {
 
     // Reference: single kernel per token.
     let mut want = vec![0.0f32; n_tokens * m_out];
-    let mut ks = ffai_grouped_gemv_q8::kernel_ir_for(Dt::F32.to_dtype());
+    let mut ks = mt_grouped_gemv_q8::kernel_ir_for(Dt::F32.to_dtype());
     ks.mode = KernelMode::Reduction;
     for t in 0..n_tokens {
         let xt = &x[t * n_groups * k_in..(t + 1) * n_groups * k_in];
@@ -79,7 +79,7 @@ fn grouped_gemv_q8_rows_matches_single() {
     bb.insert("d_f32".into(), pack_bytes(&d, Dt::F32));
     bb.insert("x".into(), pack_bytes(&x, Dt::F32));
     bb.insert("out".into(), pack_bytes(&vec![0.0f32; n_tokens * m_out], Dt::F32));
-    let mut kr = ffai_grouped_gemv_q8_rows::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kr = mt_grouped_gemv_q8_rows::kernel_ir_for(Dt::F32.to_dtype());
     kr.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&kr, &bb, &BTreeMap::new(), [m_out, n_tokens, 1], [32, 1, 1])

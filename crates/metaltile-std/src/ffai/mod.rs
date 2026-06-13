@@ -44,8 +44,7 @@ pub mod flash_block_scaled_sdpa;
 pub mod flash_quantized_sdpa;
 pub mod gate_up_swiglu_fused;
 pub mod gelu_erf;
-// gemm_q4_mpp / gemm_q8 / gemm_q8_mpp migrated to kernels/gemm/.
-pub mod gemv_q8;
+// gemm_q4_mpp / gemm_q8 / gemm_q8_mpp + gemv_q8 (split by family) → kernels/.
 pub mod gguf_dequant_iq2_xxs;
 pub mod gguf_dequant_iq2_xxs_raw;
 pub mod gguf_dequant_q2_k;

@@ -96,6 +96,30 @@ pub fn mt_conv1d_causal_prefill(
     store(y[idx], acc * sig);
 }
 
+// Causal-conv state roll (prefill->decode handoff for the short conv).
+/// Roll a causal-conv state ON-DEVICE: `new = [old[conv_dim..], xbc]` (drop the
+/// oldest conv_dim, append the current input) — keeps the Mamba conv history on
+/// the GPU. `keep = (kc-2)*conv_dim`; indices clamped so both select branches
+/// are in-bounds.
+#[kernel]
+pub fn mt_conv_roll<T>(
+    old: Tensor<T>,
+    xbc: Tensor<T>,
+    mut newst: Tensor<T>,
+    #[constexpr] conv_dim: u32,
+    #[constexpr] keep: u32,
+    #[constexpr] n: u32,
+) {
+    let i = program_id::<0>();
+    if i < n {
+        let oi = select(i < keep, i + conv_dim, 0u32);
+        let xi = select(i < keep, 0u32, i - keep);
+        let v = select(i < keep, load(old[oi]), load(xbc[xi]));
+        store(newst[i], v);
+    }
+}
+
+
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

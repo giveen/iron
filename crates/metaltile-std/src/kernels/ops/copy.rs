@@ -11,6 +11,24 @@ pub fn mt_copy<T>(a: Tensor<T>, out: Tensor<T>) {
 }
 
 /// New-syntax correctness for `mt_copy` (elementwise, bit-exact).
+// Contiguous device-slice copy (split a packed buffer on-device).
+/// Copy a contiguous device slice `dst[i] = src[off + i]` — lets the Mamba
+/// in_proj output be split (z / xBC / dt) ON-DEVICE instead of via a host
+/// download, so the layer runs pure-async. `offbuf[0]` is the start offset.
+#[kernel]
+pub fn mt_slice<T>(
+    src: Tensor<T>,
+    mut dst: Tensor<T>,
+    #[constexpr] off: u32,
+    #[constexpr] len: u32,
+) {
+    let i = program_id::<0>();
+    if i < len {
+        store(dst[i], load(src[off + i]));
+    }
+}
+
+
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

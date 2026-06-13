@@ -229,6 +229,72 @@ pub fn mt_ssm_step_grouped<T>(
     }
 }
 
+// Mamba on-device dt + gated grouped RMSNorm (elementwise / one-TG forms).
+/// Device dt for Mamba2: `dt[i] = softplus(dt_raw[i] + dt_bias[i])` (stable form).
+/// Keeps the Mamba dt computation ON-DEVICE (no host round-trip).
+#[kernel]
+pub fn mt_softplus_add(
+    a: Tensor<f32>,
+    b: Tensor<f32>,
+    mut out: Tensor<f32>,
+    #[constexpr] n: u32,
+) {
+    let i = program_id::<0>();
+    if i < n {
+        let x = load(a[i]) + load(b[i]);
+        let ax = select(x > 0.0f32, x, 0.0f32 - x);
+        let pos = select(x > 0.0f32, x, 0.0f32);
+        store(out[i], pos + log(1.0f32 + exp(0.0f32 - ax)));
+    }
+}
+
+
+/// NemotronH/Zamba2 gated GROUPED RMSNorm (ON-DEVICE; removes the per-Mamba-layer
+/// dl→host-norm→up sync). Gate-BEFORE-norm, per group of `gs`: g = y·silu(z);
+/// out = g · rsqrt(mean_group(g²)+eps) · w. `y` fp32, z/w/out = T. One TG/group,
+/// 4 elems/thread (block = gs/4), threadgroup reduce.
+#[kernel]
+pub fn mt_gated_group_rmsnorm<T>(
+    y: Tensor<f32>,
+    z: Tensor<T>,
+    w: Tensor<T>,
+    mut out: Tensor<T>,
+    eps_buf: Tensor<f32>,
+    #[constexpr] gs: u32,
+) {
+    let grp = program_id::<0>();
+    let rs = grp * gs;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < gs;
+    let safe_col = select(in_bounds, col, 0u32);
+    let sb = rs + safe_col;
+    let y0 = load(y[sb]).cast::<f32>();
+    let y1 = load(y[sb + 1u32]).cast::<f32>();
+    let y2 = load(y[sb + 2u32]).cast::<f32>();
+    let y3 = load(y[sb + 3u32]).cast::<f32>();
+    let z0 = load(z[sb]).cast::<f32>();
+    let z1 = load(z[sb + 1u32]).cast::<f32>();
+    let z2 = load(z[sb + 2u32]).cast::<f32>();
+    let z3 = load(z[sb + 3u32]).cast::<f32>();
+    let g0 = y0 * (z0 / (1.0f32 + exp(0.0f32 - z0)));
+    let g1 = y1 * (z1 / (1.0f32 + exp(0.0f32 - z1)));
+    let g2 = y2 * (z2 / (1.0f32 + exp(0.0f32 - z2)));
+    let g3 = y3 * (z3 / (1.0f32 + exp(0.0f32 - z3)));
+    let raw = g0 * g0 + g1 * g1 + g2 * g2 + g3 * g3;
+    let partial = select(in_bounds, raw, 0.0f32);
+    let ssq = reduce_sum(partial);
+    let eps = load(eps_buf[0]);
+    let rms = rsqrt(ssq / (gs.cast::<f32>()) + eps);
+    if in_bounds {
+        let base = rs + col;
+        store(out[base], (g0 * rms * load(w[base]).cast::<f32>()).cast::<T>());
+        store(out[base + 1u32], (g1 * rms * load(w[base + 1u32]).cast::<f32>()).cast::<T>());
+        store(out[base + 2u32], (g2 * rms * load(w[base + 2u32]).cast::<f32>()).cast::<T>());
+        store(out[base + 3u32], (g3 * rms * load(w[base + 3u32]).cast::<f32>()).cast::<T>());
+    }
+}
+
+
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
