@@ -59,11 +59,11 @@ crates/metaltile-std/src/kernels/
   ssm/        ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
   quant/      INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
               quantized_* · fp_quantized_* · affine · aura codec stack · dequant_*
-  audio/      mel_spectrogram(+magnitude/stft/filterbank) · lstm · vocoder · snake1d · upsample
-  vision/     resize_normalize(+bicubic) · im2col · patch_unfold · pos_emb_2d · avg_pool2d ·
+  audio/      ✅ DONE — mel_spectrogram(+magnitude/stft/filterbank) · lstm · vocoder · snake1d · upsample
+  vision/     ✅ DONE — resize_normalize(+bicubic) · im2col · patch_unfold · pos_emb_2d · avg_pool2d ·
               transpose_th · frame_diff · broadcast_affine
   sampling/   ✅ DONE — logits_topk/top_p/min_p/processors · categorical_sample · softmax · sort
-  kv_cache/   kv_cache(_update_many) · fft
+  kv_cache/   ✅ DONE — kv_cache(_update_many) · fft
   primitives.rs   cross-family decode/reduce ops (mt_decode_e2m1/e4m3/e5m2/e8m0, mt_unpack_nbit, …)
   mod.rs          pub mod ops; pub mod gemm; pub mod sdpa; …
 ```
@@ -159,7 +159,7 @@ payoff last:
 | Wave | Families | Rationale | Payoff |
 |---|---|---|---|
 | ✅ done | `convolution/`, `rope/`, `norm/`, `sampling/`, `ops/` | exemplar + all of wave 1 | 24k → ~1.6k |
-| 2 | `gemm/` (🔨 dense in; quantized matmuls next), `ssm/`, `audio/`, `vision/`, `kv_cache/` | moderate size, few cross-deps | medium |
+| 2 | ✅ `audio/` `vision/` `kv_cache/` done; `gemm/` (🔨 dense in, quantized next); `ssm/` next | moderate size, few cross-deps | medium |
 | 3 | `sdpa/`, `moe/`, **`quant/`** | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
 ## 7. The `quant/` umbrella — collapsing the op × format matrix
