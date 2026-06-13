@@ -5,7 +5,7 @@
 //! Vulkan/RDNA4 correctness + throughput for the gated `VK_KHR_cooperative_matrix`
 //! GEMM codegen path (`MT_VK_COOPMAT=1`).
 //!
-//! Drives the real `ffai_gemm_q8_mpp` 64×64×32 SimdGroup CoopTile kernel
+//! Drives the real `mt_gemm_q8_mpp` 64×64×32 SimdGroup CoopTile kernel
 //! through `VulkanDevice::run_kernel`. The device honors `MT_VK_COOPMAT`
 //! at create time; the SPIR-V emitter emits coopMatLoad/MulAdd/Store for
 //! the CoopTile ops. Oracle: triple-loop Q8_0 dequant GEMM (same recipe
@@ -20,7 +20,7 @@
 use std::{collections::BTreeMap, time::Instant};
 
 use metaltile::{VulkanDevice, core::dtype::DType};
-use metaltile_std::ffai::gemm_q8_mpp::ffai_gemm_q8_mpp;
+use metaltile_std::kernels::gemm::gemm_q8_mpp::mt_gemm_q8_mpp;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -81,7 +81,7 @@ fn coopmat_gemm_q8_mpp_correct_and_fast() {
     // Kernel IR (f16 instantiation → coop_stage(f16)=f16 staging).
     // The kernel reads tgid_x/tgid_y + simd_group/simd_lane → Reduction
     // mode (matches the bench's `.mode(KernelMode::Reduction)`).
-    let mut kernel = ffai_gemm_q8_mpp::kernel_ir_for(DType::F16);
+    let mut kernel = mt_gemm_q8_mpp::kernel_ir_for(DType::F16);
     kernel.mode = metaltile::core::ir::KernelMode::Reduction;
 
     // Pack buffers. x as f16, qs/d as-is, out zeroed f16.

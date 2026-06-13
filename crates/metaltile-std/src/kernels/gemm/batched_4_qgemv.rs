@@ -2,8 +2,8 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched 4-output 4-bit quantized GEMV. Fuses FOUR independent
 //! projection matvecs that share the same `x` activation into one
-//! dispatch. Sibling of `ffai_batched_qkv_qgemv_fast` (3-output) and
-//! `ffai_batched_qkv_qmm_fast` (3-output, M>1).
+//! dispatch. Sibling of `mt_batched_qkv_qgemv_fast` (3-output) and
+//! `mt_batched_qkv_qmm_fast` (3-output, M>1).
 //!
 //! Motivation: the Qwen35 GDN layer mixer runs FOUR int4 input
 //! projections per decode token off the same `xNorm`: `qkv`, `z`,
@@ -56,7 +56,7 @@ use metaltile::kernel;
 /// Grid: `[ceil(max(out_a,out_b,out_c,out_d)/8), 1, 4]`. All out_*
 /// must be multiples of 8; in_dim a multiple of 512; group_size = 64.
 #[kernel]
-pub fn ffai_batched_4_qgemv_fast<T>(
+pub fn mt_batched_4_qgemv_fast<T>(
     x: Tensor<T>,
     w_a: Tensor<u32>,
     scales_a: Tensor<T>,
@@ -332,7 +332,7 @@ pub fn ffai_batched_4_qgemv_fast<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_batched_4_qgemv_fast;
+    use super::mt_batched_4_qgemv_fast;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -438,7 +438,7 @@ pub mod kernel_tests {
         let ed = naive_gemv(&wd_p, &r(&sd), &r(&bd), &x, in_dim, gs, out_d);
 
         let n_tgs = out_a.max(out_b).max(out_c).max(out_d).div_ceil(8);
-        TestSetup::new(ffai_batched_4_qgemv_fast::kernel_ir_for(dt))
+        TestSetup::new(mt_batched_4_qgemv_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w_a", pack_u32(&wa_p), DType::U32))
@@ -471,12 +471,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `ffai_batched_4_qgemv_fast` — MLX-less reduction
+/// New-syntax benchmark for `mt_batched_4_qgemv_fast` — MLX-less reduction
 /// kernel. GDN input-projection shape (Qwen35): hidden 2048 → conv/value/gate.
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_batched_4_qgemv_fast;
+    use super::mt_batched_4_qgemv_fast;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_batched_4_qgemv_fast(dt: DType) -> BenchSetup {
@@ -486,7 +486,7 @@ pub mod kernel_benches {
         let words = |o: usize| o * in_dim / 8;
         let total = words(out_a) + words(out_b) + words(out_c) + words(out_d);
         let n_tgs = out_a.max(out_b).max(out_c).max(out_d).div_ceil(8);
-        BenchSetup::new(ffai_batched_4_qgemv_fast::kernel_ir_for(dt))
+        BenchSetup::new(mt_batched_4_qgemv_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", in_dim, dt))
             .buffer(BenchBuffer::random("w_a", words(out_a), DType::U32))

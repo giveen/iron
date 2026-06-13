@@ -1,7 +1,7 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for the dynamic-M qmm path
-//! (`metaltile_std::mlx::quantized_mma_dynamic_m`). This is the
+//! (`metaltile_std::kernels::gemm::quantized_mma_dynamic_m`). This is the
 //! bandwidth-bound prefill unlock for FFAI's `Qwen35Model.forwardMany`:
 //! a single dispatch handles any `T` token count (rounded up to a
 //! multiple of 32 via X-row zero padding) so int4 weights are read
@@ -33,7 +33,7 @@ mod common;
 
 use common::gpu_lock;
 use metaltile::{Context, core::dtype::DType};
-use metaltile_std::mlx::quantized_mma_dynamic_m as dyn_m;
+use metaltile_std::kernels::gemm::quantized_mma_dynamic_m as dyn_m;
 
 // ── Triple-loop CPU oracle — bit-identical algorithm to ──────────────────
 //    `cpu_qmm_reference` in the legacy `tests/qmm_gpu_correctness.rs`

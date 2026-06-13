@@ -32,7 +32,7 @@ use metaltile::{
     Context,
     core::{dtype::DType, ir::KernelMode},
 };
-use metaltile_std::mlx::quantized_mpp::mt_qmm_mma_mpp;
+use metaltile_std::kernels::gemm::quantized_mpp::mt_qmm_mma_mpp;
 
 /// MPP `tensor_ops::matmul2d` requires Apple10 (gen-17) + macOS 26.2+.
 /// On older silicon or virtualised CI runners the kernel hits its

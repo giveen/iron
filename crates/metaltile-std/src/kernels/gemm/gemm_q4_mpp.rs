@@ -1,13 +1,13 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
 //! Dense Q4 GEMM via cooperative-tensor MMA — the tensor-core projection GEMM
-//! for Nemotron prefill. The MMA twin of `ffai_gemm_q8_mpp`, but reading the
+//! for Nemotron prefill. The MMA twin of `mt_gemm_q8_mpp`, but reading the
 //! bench's Q4 weight layout (signed 4-bit, per-32-block scale `amax/7` stored
 //! f16) instead of Q8_0. Compute-bound prefill projections (q/k/v/o, mamba
 //! in/out_proj, shared experts, lm_head) run on this instead of the f32
 //! scalar `mt_gemm` (which sat at ~0.1% of the tensor-core peak).
 //!
-//! Same 64×64×32 coop_tile geometry as `ffai_gemm_q8_mpp` (4 simdgroups,
+//! Same 64×64×32 coop_tile geometry as `mt_gemm_q8_mpp` (4 simdgroups,
 //! 2×2 warp grid, 128 threads/tg). Only the weight-dequant block differs.
 //!
 //! ## Q4 weight layout (matches `ffai_ops::quantize_q4`)
@@ -23,7 +23,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_gemm_q4_mpp<T>(
+pub fn mt_gemm_q4_mpp<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     scales: Tensor<f16>,
@@ -123,7 +123,7 @@ pub fn ffai_gemm_q4_mpp<T>(
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_gemm_q4_mpp;
+    use super::mt_gemm_q4_mpp;
 
     // q_proj-like shape: in=2688, out=4096, 256 tokens.
     #[bench(dtypes = [f32, f16, bf16])]
@@ -132,7 +132,7 @@ pub mod kernel_benches {
         let out_dim = 4096usize;
         let k_in = 2688usize;
         let n_blocks = out_dim * k_in / 32;
-        BenchSetup::new(ffai_gemm_q4_mpp::kernel_ir_for(dt))
+        BenchSetup::new(mt_gemm_q4_mpp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", n_rows * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_blocks * 4, DType::U32))
@@ -150,7 +150,7 @@ pub mod kernel_benches {
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_gemm_q4_mpp;
+    use super::mt_gemm_q4_mpp;
     use crate::utils::pack_f32;
 
     fn quantize_q4(w: &[f32], m: usize, k: usize) -> (Vec<u32>, Vec<f32>) {
@@ -215,7 +215,7 @@ pub mod kernel_tests {
             scales.iter().map(|&s| half::f16::from_f32(s).to_f32()).collect();
         let expected = naive(&xv, &qs, &scales_f16, n_rows, out_dim, k_in);
         let qs_bytes: Vec<u8> = qs.iter().flat_map(|x| x.to_le_bytes()).collect();
-        TestSetup::new(ffai_gemm_q4_mpp::kernel_ir_for(dt))
+        TestSetup::new(mt_gemm_q4_mpp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&xv, dt), dt))
             .input(TestBuffer::from_vec("qs", qs_bytes, DType::U32))

@@ -132,7 +132,7 @@ pub fn mt_fp4_qmm_mma<T>(
         let s = load(scales[sb_base + g]).cast::<f32>();
         let ws_base = w_row * ws_ld + word_in_row * 8u32;
         // Dequant 8 fp4 codes via the E2M1 decode intrinsic. This matches the
-        // proven block-scaled MMA path (`mlx::block_scaled_mma`) and avoids the
+        // proven block-scaled MMA path (`kernels::gemm::block_scaled_mma`) and avoids the
         // earlier hand-rolled `(mantissa + 2) << (exp - 1)` magnitude trick,
         // whose shift was undefined when `exp == 0` (subnormal codes). That UB
         // shift miscompiled on the f32 simdgroup path — leaving the output tile

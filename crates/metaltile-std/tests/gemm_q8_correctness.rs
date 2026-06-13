@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::ffai_gemm_q8` — the multi-row Q8_0 tiled GEMM
+//! GPU correctness for `ffai::mt_gemm_q8` — the multi-row Q8_0 tiled GEMM
 //! used by DSv4 prefill. Oracle: triple-loop with the same Q8 dequant.
 #![cfg(target_os = "macos")]
 
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::gemm_q8::ffai_gemm_q8;
+use metaltile_std::kernels::gemm::gemm_q8::mt_gemm_q8;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -67,7 +67,7 @@ fn run_case(dt: Dt, in_dim: usize, out_dim: usize, n_rows: usize, tol: f32) {
     buffers.insert("n_rows".into(), (n_rows as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut kernel = ffai_gemm_q8::kernel_ir_for(dt.to_dtype());
+    let mut kernel = mt_gemm_q8::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let gx = (out_dim as u32).div_ceil(32);
     let gy = (n_rows as u32).div_ceil(32);

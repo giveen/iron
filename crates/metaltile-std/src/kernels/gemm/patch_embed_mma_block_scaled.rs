@@ -1689,7 +1689,7 @@ pub fn mt_int8_patch_embed_mma<T>(
 // i`), but instead of reading one byte it decodes each element from the global
 // bit-stream with a straddle-aware two-word read + float sign-extend (subtract
 // 2^N when the top bit is set; `$half`/`$full` are 2^(N-1) / 2^N), mirroring
-// `mlx::block_scaled_mma`'s GPU-verified `int_qmm_mma_*` macros. The in-bounds
+// `kernels::gemm::block_scaled_mma`'s GPU-verified `int_qmm_mma_*` macros. The in-bounds
 // mask (`select(kt < patch_dim, decoded, 0)`) is preserved; on the masked path
 // `kt_safe = 0` keeps the bit-stream read in range. `$half`/`$full` are passed
 // as literals to keep the constexpr math out of the DSL shift operands.

@@ -21,7 +21,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_gemm_q8<T>(
+pub fn mt_gemm_q8<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     input: Tensor<T>,
@@ -80,7 +80,7 @@ pub fn ffai_gemm_q8<T>(
 }
 
 /// GROUPED Q8 GEMM — the amortized fix for prefill O-LoRA-A. Same tiled
-/// 32×32 / threadgroup-staged structure as `ffai_gemm_q8` (weight read+
+/// 32×32 / threadgroup-staged structure as `mt_gemm_q8` (weight read+
 /// dequanted ONCE, reused across 32 rows), but the input is GROUPED: output
 /// column `o` belongs to group `g = o / rows_per_group`, and group g reads
 /// input columns `[g*in_dim, (g+1)*in_dim)` of a row that is `n_groups*in_dim`
@@ -89,10 +89,10 @@ pub fn ffai_gemm_q8<T>(
 /// A 32-wide output tile lies entirely within one group (rows_per_group %
 /// 32 == 0), so `g` is uniform per threadgroup → no per-thread divergence.
 /// weight `[out_dim, in_dim]`; input `[n_rows, n_groups*in_dim]`;
-/// out `[n_rows, out_dim]`. Grid + TPG identical to ffai_gemm_q8.
+/// out `[n_rows, out_dim]`. Grid + TPG identical to mt_gemm_q8.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn ffai_grouped_gemm_q8<T>(
+pub fn mt_grouped_gemm_q8<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     input: Tensor<T>,
@@ -159,7 +159,7 @@ pub fn ffai_grouped_gemm_q8<T>(
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::{ffai_gemm_q8, ffai_grouped_gemm_q8};
+    use super::{mt_gemm_q8, mt_grouped_gemm_q8};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemm_q8(dt: DType) -> BenchSetup {
@@ -167,7 +167,7 @@ pub mod kernel_benches {
         let out_dim = 2048usize;
         let n_rows = 256usize;
         let n_blocks = out_dim * in_dim / 32;
-        BenchSetup::new(ffai_gemm_q8::kernel_ir_for(dt))
+        BenchSetup::new(mt_gemm_q8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", n_blocks * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", n_blocks, DType::F32))
@@ -190,7 +190,7 @@ pub mod kernel_benches {
         let n_groups = 8usize;
         let rows_per_group = out_dim / n_groups; // 1024
         let n_blocks = out_dim * in_dim / 32;
-        BenchSetup::new(ffai_grouped_gemm_q8::kernel_ir_for(dt))
+        BenchSetup::new(mt_grouped_gemm_q8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", n_blocks * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", n_blocks, DType::F32))

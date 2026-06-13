@@ -236,7 +236,7 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::mt_fp_qmm_nax;
-    use crate::mlx::fp_quantized_mma::kernel_tests::fp_setup;
+    use crate::kernels::gemm::fp_quantized_mma::kernel_tests::fp_setup;
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp_qmm_nax(dt: DType) -> TestSetup {
@@ -254,7 +254,7 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::mt_fp_qmm_nax;
-    use crate::mlx::fp_quantized_mma::kernel_benches::fpb;
+    use crate::kernels::gemm::fp_quantized_mma::kernel_benches::fpb;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp_qmm_nax(dt: DType) -> BenchSetup {

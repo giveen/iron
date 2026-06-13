@@ -45,7 +45,7 @@
 
 use metaltile::core::{dtype::DType, ir::Kernel};
 
-use crate::mlx::quantized::{mt_qmm_mma, patch_qmm_mma_dtype_aware_skew};
+use crate::kernels::gemm::quantized::{mt_qmm_mma, patch_qmm_mma_dtype_aware_skew};
 
 /// Tile geometry mirrors `mt_qmm_mma`. Exposed for callers sizing
 /// the dispatch grid + the M-padding step.

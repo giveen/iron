@@ -10,11 +10,11 @@
 //!
 //! Two variants:
 //!
-//! **`ffai_batched_qkv_qgemv`** — one output row per TG (original
+//! **`mt_batched_qkv_qgemv`** — one output row per TG (original
 //! correctness-first variant). Grid: `[max(out_q,out_k,out_v), 1, 3]`;
 //! `program_id::<0>()` = output row, `program_id::<2>()` = matrix.
 //!
-//! **`ffai_batched_qkv_qgemv_fast`** — 8 output rows per TG, mirroring
+//! **`mt_batched_qkv_qgemv_fast`** — 8 output rows per TG, mirroring
 //! `mt_qmv`'s geometry. Each TG computes 8 output rows of the matrix
 //! selected by `program_id::<2>()`. Grid:
 //! `[ceil(max(out_q,out_k,out_v)/8), 1, 3]`, TPG = 64 (2 simdgroups ×
@@ -38,7 +38,7 @@ use metaltile::kernel;
 /// Fused Q/K/V int4 quantized GEMV — one output row per TG.
 /// `program_id::<2>()` picks the matrix.
 #[kernel]
-pub fn ffai_batched_qkv_qgemv<T>(
+pub fn mt_batched_qkv_qgemv<T>(
     x: Tensor<T>,
     w_q: Tensor<u32>,
     scales_q: Tensor<T>,
@@ -153,7 +153,7 @@ pub fn ffai_batched_qkv_qgemv<T>(
 /// out_q, out_k, out_v must be multiples of 8; in_dim must be a multiple
 /// of 512; group_size must be 64. TGs past a matrix's out_* rows no-op.
 #[kernel]
-pub fn ffai_batched_qkv_qgemv_fast<T>(
+pub fn mt_batched_qkv_qgemv_fast<T>(
     x: Tensor<T>,
     w_q: Tensor<u32>,
     scales_q: Tensor<T>,
@@ -924,7 +924,7 @@ pub fn ffai_batched_qkv_qgemv_fast<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::{ffai_batched_qkv_qgemv, ffai_batched_qkv_qgemv_fast};
+    use super::{mt_batched_qkv_qgemv, mt_batched_qkv_qgemv_fast};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -1059,7 +1059,7 @@ pub mod kernel_tests {
     fn test_batched_qkv_qgemv(dt: DType) -> TestSetup {
         let (in_dim, gs, out_q, out_k, out_v) = (256usize, 64usize, 16usize, 4usize, 4usize);
         let max_rows = out_q.max(out_k).max(out_v);
-        setup(ffai_batched_qkv_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v)
+        setup(mt_batched_qkv_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v)
             .grid_3d(max_rows as u32, 1, 3, [128, 1, 1])
     }
 
@@ -1068,7 +1068,7 @@ pub mod kernel_tests {
     fn test_batched_qkv_qgemv_fast(dt: DType) -> TestSetup {
         let (in_dim, gs, out_q, out_k, out_v) = (512usize, 64usize, 16usize, 8usize, 8usize);
         let n_tgs = out_q.max(out_k).max(out_v).div_ceil(8);
-        setup(ffai_batched_qkv_qgemv_fast::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v)
+        setup(mt_batched_qkv_qgemv_fast::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v)
             .grid_3d(n_tgs as u32, 1, 3, [64, 1, 1])
     }
 }
@@ -1078,7 +1078,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::{ffai_batched_qkv_qgemv, ffai_batched_qkv_qgemv_fast};
+    use super::{mt_batched_qkv_qgemv, mt_batched_qkv_qgemv_fast};
 
     fn buffers(
         s: BenchSetup,
@@ -1119,7 +1119,7 @@ pub mod kernel_benches {
             (4096usize, 64usize, 4096usize, 1024usize, 1024usize);
         let max_rows = out_q.max(out_k).max(out_v);
         let s =
-            BenchSetup::new(ffai_batched_qkv_qgemv::kernel_ir_for(dt)).mode(KernelMode::Reduction);
+            BenchSetup::new(mt_batched_qkv_qgemv::kernel_ir_for(dt)).mode(KernelMode::Reduction);
         buffers(s, in_dim, gs, out_q, out_k, out_v, dt).grid_3d(max_rows as u32, 1, 3, [128, 1, 1])
     }
 
@@ -1128,7 +1128,7 @@ pub mod kernel_benches {
         let (in_dim, gs, out_q, out_k, out_v) =
             (4096usize, 64usize, 4096usize, 1024usize, 1024usize);
         let n_tgs = out_q.max(out_k).max(out_v).div_ceil(8);
-        let s = BenchSetup::new(ffai_batched_qkv_qgemv_fast::kernel_ir_for(dt))
+        let s = BenchSetup::new(mt_batched_qkv_qgemv_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction);
         buffers(s, in_dim, gs, out_q, out_k, out_v, dt).grid_3d(n_tgs as u32, 1, 3, [64, 1, 1])
     }

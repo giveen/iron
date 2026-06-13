@@ -37,7 +37,7 @@ use metaltile_std::{
         gemm::steel::{steel_gemm_fused_nax, steel_gemm_gather_nax, steel_gemm_splitk_nax},
         ops::hadamard_m,
     },
-    mlx::{fp_quantized_nax, quantized_nax},
+    kernels::gemm::{fp_quantized_nax, quantized_nax},
 };
 
 /// Lower one of the NAX-family kernel IRs to MSL with its declared

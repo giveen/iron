@@ -31,7 +31,7 @@ use metaltile::{
     Context,
     core::{dtype::DType, ir::KernelMode},
 };
-use metaltile_std::mlx::quantized_mpp_int8::mt_qmm_mma_mpp_int8;
+use metaltile_std::kernels::gemm::quantized_mpp_int8::mt_qmm_mma_mpp_int8;
 
 /// MPP `tensor_ops::matmul2d` requires Apple10 (gen-17) + macOS 26.2+.
 /// Returns `None` when the device can't run MPP so the caller can skip.
