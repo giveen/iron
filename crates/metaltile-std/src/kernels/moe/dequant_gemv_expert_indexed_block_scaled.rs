@@ -44,615 +44,130 @@
 
 use metaltile::kernel;
 
-/// mxfp4 expert-indexed dequantizing GEMV — E2M1 weights (block 32), E8M0 scale.
-#[kernel]
-pub fn mt_mxfp4_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u32>,
-    scales_stacked: Tensor<u8>,
+/// Expert-indexed block-scaled dequantizing GEMV, folded over the 28-format
+/// axis (§7). `output[r] = Σ_k dequant(weights_stacked[expert, r, k]) · input[k]`
+/// where `expert = expert_index[0]`. One threadgroup per output row. Per-element
+/// decode + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer types
+/// by `(WT, ST)` — see `gemm/block_scaled_matmul` for the legend. Decodes
+/// through `kernels/primitives.rs`. Produces `mt_<FMT>_dequant_gemv_expert_indexed`.
+#[kernel(variants(
+    (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
+        (mxfp4,        4u32, u32, u8,  0u32, 0u32),
+        (nvfp4,        4u32, u32, u8,  0u32, 1u32),
+        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
+        (int2,         2u32, u32, f32, 1u32, 2u32),
+        (int3,         3u32, u32, f32, 1u32, 2u32),
+        (int4,         4u32, u32, f32, 1u32, 2u32),
+        (int5,         5u32, u32, f32, 1u32, 2u32),
+        (int6,         6u32, u32, f32, 1u32, 2u32),
+        (mxint2,       2u32, u32, u8,  1u32, 0u32),
+        (mxint3,       3u32, u32, u8,  1u32, 0u32),
+        (mxint4,       4u32, u32, u8,  1u32, 0u32),
+        (mxint5,       5u32, u32, u8,  1u32, 0u32),
+        (mxint6,       6u32, u32, u8,  1u32, 0u32),
+        (int2_f16,     2u32, u32, f16, 1u32, 2u32),
+        (int3_f16,     3u32, u32, f16, 1u32, 2u32),
+        (int4_f16,     4u32, u32, f16, 1u32, 2u32),
+        (int5_f16,     5u32, u32, f16, 1u32, 2u32),
+        (int6_f16,     6u32, u32, f16, 1u32, 2u32),
+        (mxfp8_e4m3,   8u32, u8,  u8,  2u32, 0u32),
+        (mxfp8_e5m2,   8u32, u8,  u8,  3u32, 0u32),
+        (mxint8,       8u32, u8,  u8,  4u32, 0u32),
+        (nvfp8,        8u32, u8,  f32, 2u32, 2u32),
+        (fp8_e5m2,     8u32, u8,  f32, 3u32, 2u32),
+        (int8,         8u32, u8,  f32, 4u32, 2u32),
+        (nvfp8_f16,    8u32, u8,  f16, 2u32, 2u32),
+        (fp8_e5m2_f16, 8u32, u8,  f16, 3u32, 2u32),
+        (int8_f16,     8u32, u8,  f16, 4u32, 2u32),
+    ],
+    suffix = "{FMT}_dequant_gemv_expert_indexed",
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn mt<T>(
+    weights_stacked: Tensor<WT>,
+    scales_stacked: Tensor<ST>,
     input: Tensor<T>,
     expert_index: Tensor<u32>,
     output: Tensor<T>,
     #[constexpr] in_dim: u32,
     #[constexpr] out_dim: u32,
     #[constexpr] block_size: u32,
+    #[constexpr(only_when = "SKIND == 1u32")] global: f32,
 ) {
     let row = program_id::<0>();
-    let n_packs_per_row = in_dim / 8u32; // 8 nibbles per u32
     let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    // expert_index[0] ∈ [0, n_experts): stride the row bases by the per-expert span.
     let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * n_packs_per_row;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_pack_off = weight_expert_off + row * n_packs_per_row;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
+    let row_block_off = expert * out_dim * n_blocks + row * n_blocks;
     let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            // All 8 nibbles of a pack lie in one block → one scale load.
-            let blk = pack_idx / packs_per_block;
-            let sbits = load(scales_stacked[row_block_off + blk]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-            let packed = load(weights_stacked[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
+
+    if WDEC == 0u32 {
+        let n_packs_per_row = in_dim / 8u32;
+        let packs_per_block = block_size / 8u32;
+        let row_pack_off = expert * out_dim * n_packs_per_row + row * n_packs_per_row;
+        let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
+        for p_iter in range(0u32, p_iters, 1u32) {
+            let pack_idx = p_iter * lsize + tid;
+            if pack_idx < n_packs_per_row {
+                let blk = pack_idx / packs_per_block;
+                let sraw = load(scales_stacked[row_block_off + blk]);
+                let scale = if SKIND == 0u32 {
+                    exp2(sraw.cast::<f32>() - 127.0f32)
+                } else if SKIND == 1u32 {
+                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                } else {
+                    sraw.cast::<f32>()
+                };
+                let packed = load(weights_stacked[row_pack_off + pack_idx]);
+                let p_off = pack_idx * 8u32;
+                for i in range(0u32, 8u32, 1u32) {
+                    let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                    acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
+                }
             }
         }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// nvfp4 expert-indexed dequantizing GEMV — E2M1 weights (block 16), E4M3
-/// micro-scale × a global FP32. Pack-strided like mxfp4 (block 16 ⇒ 2 packs/block).
-#[kernel]
-pub fn mt_nvfp4_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u32>,
-    scales_stacked: Tensor<u8>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-    #[constexpr] global: f32,
-) {
-    let row = program_id::<0>();
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * n_packs_per_row;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_pack_off = weight_expert_off + row * n_packs_per_row;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let blk = pack_idx / packs_per_block;
-            // E4M3 micro-scale × global.
-            let scale =
-                mt_decode_e4m3(load(scales_stacked[row_block_off + blk]).cast::<u32>()) * global;
-            let packed = load(weights_stacked[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// mxfp8 (E4M3) expert-indexed dequantizing GEMV — 8-bit weights (block 32),
-/// E8M0 pow-2 scale. Element-strided: one byte per code.
-#[kernel]
-pub fn mt_mxfp8_e4m3_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<u8>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weights_stacked[row_off + c]).cast::<u32>());
-            let sbits = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// mxfp8 (E5M2) expert-indexed dequantizing GEMV — 8-bit weights (block 32),
-/// E8M0 pow-2 scale.
-#[kernel]
-pub fn mt_mxfp8_e5m2_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<u8>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weights_stacked[row_off + c]).cast::<u32>());
-            let sbits = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// nvfp8 expert-indexed dequantizing GEMV — E4M3 weights (block 16), per-block
-/// FP32 scale. Also serves the legacy `fp8_e4m3` format (identical layout).
-#[kernel]
-pub fn mt_nvfp8_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f32>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── Legacy float-scale (fp4 / fp8) + symmetric int8 expert-indexed GEMVs ─────
-// These share the framework but store a raw per-group FP32 scale (no E8M0/E4M3/
-// global). fp8_e4m3 has the same shape as nvfp8 (8-bit E4M3 + f32 scale), so it
-// reuses `mt_nvfp8_dequant_gemv_expert_indexed`; only fp4 (4-bit E2M1),
-// fp8_e5m2 (8-bit E5M2), and int8 (8-bit symmetric) need their own decode here.
-
-/// Legacy fp4 expert-indexed dequantizing GEMV — E2M1 weights (group 32),
-/// per-group FP32 scale.
-#[kernel]
-pub fn mt_fp4_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u32>,
-    scales_stacked: Tensor<f32>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * n_packs_per_row;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_pack_off = weight_expert_off + row * n_packs_per_row;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let scale = load(scales_stacked[row_block_off + pack_idx / packs_per_block]);
-            let packed = load(weights_stacked[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// Legacy fp8 (E5M2) expert-indexed dequantizing GEMV — 8-bit weights
-/// (group 32), per-group FP32 scale.
-#[kernel]
-pub fn mt_fp8_e5m2_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f32>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// Symmetric int8 expert-indexed dequantizing GEMV — 8-bit codes (group 64),
-/// per-group FP32 scale (affine, scale-only). Decode is sign-extend → `code · scale`.
-#[kernel]
-pub fn mt_int8_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f32>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── Symmetric sub-byte integer expert-indexed GEMVs (int2/3/4/5/6 + MXINT2..6 +
-//    MXINT8) ───────────────────────────────────────────────────────────────────
-// Mirror `mlx/block_scaled_matmul.rs`'s `int_qgemv_f32!` / `int_qgemv_e8m0!` /
-// `mt_mxint8_qgemv` element decode, but fold in the per-expert row bases exactly
-// like the int8 kernel above. The element is a signed N-bit two's-complement code
-// tight-bit-packed LSB-first into u32 words. The whole `[n_experts·out_dim, in_dim]`
-// stack is one bit-stream, so for global row `g_row = expert·out_dim + row` the
-// row's word base is `g_row · (in_dim · bits / 32)` (per-row word-aligned because
-// `in_dim` is a multiple of 32 for every width). The scale base folds the expert
-// stride the same way the float kernels do: `(expert·out_dim + row)·n_blocks`.
-// Decode = straddle-aware two-word read + float sign-extend (subtract 2^N when the
-// top bit is set; `$half`/`$full` are 2^(N-1) / 2^N), then × block scale × input.
-// Element-strided like `mt_int8_dequant_gemv_expert_indexed`. The dispatch geometry
-// is unchanged from the rest of the family (Reduction, `grid = [out_dim, 1, 1]`,
-// `tpg = [64, 1, 1]`).
-
-/// FP32-scaled symmetric int expert-indexed GEMV (int2/3/4/5/6): per-element
-/// bit-stream code × per-group FP32 scale, dotted with the input. The row's tight
-/// bit-stream word base folds the expert stride via `g_row = expert·out_dim + row`.
-macro_rules! int_qgemv_f32_expert_indexed {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            weights_stacked: Tensor<u32>,
-            scales_stacked: Tensor<f32>,
-            input: Tensor<T>,
-            expert_index: Tensor<u32>,
-            output: Tensor<T>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] out_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            // g_row = expert·out_dim + row → fold the expert stride into both bases.
-            let expert = load(expert_index[0u32]);
-            let g_row = expert * out_dim + row;
-            let row_word_off = g_row * words_per_row;
-            let row_block_off = g_row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
+    } else {
+        let half = 1u32 << (BITS - 1u32);
+        let full = (1u32 << BITS).cast::<f32>();
+        let words_per_row = in_dim * BITS / 32u32;
+        let row_word_off = expert * out_dim * words_per_row + row * words_per_row;
+        let row_off = expert * out_dim * in_dim + row * in_dim;
+        let iters = (in_dim + lsize - 1u32) / lsize;
+        for it in range(0u32, iters, 1u32) {
+            let c = it * lsize + tid;
+            if c < in_dim {
+                let blk = c / block_size;
+                let sraw = load(scales_stacked[row_block_off + blk]);
+                let scale = if SKIND == 0u32 {
+                    exp2(sraw.cast::<f32>() - 127.0f32)
+                } else {
+                    sraw.cast::<f32>()
+                };
+                let val = if WDEC == 1u32 {
+                    let bit_off = c * BITS;
                     let word_idx = bit_off / 32u32;
                     let bit_in_w = bit_off & 31u32;
                     let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
+                    let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                    let spill = BITS - lo_bits;
                     let w0 = load(weights_stacked[row_word_off + word_idx]);
                     let w1 = load(
-                        weights_stacked
-                            [row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
+                        weights_stacked[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
+                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales_stacked[row_block_off + c / block_size]);
-                    acc = acc + (val * scale) * load(input[c]).cast::<f32>();
-                }
-            }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_qgemv_f32_expert_indexed!(mt_int2_dequant_gemv_expert_indexed, 2u32, 2u32, 4.0f32);
-int_qgemv_f32_expert_indexed!(mt_int3_dequant_gemv_expert_indexed, 3u32, 4u32, 8.0f32);
-int_qgemv_f32_expert_indexed!(mt_int4_dequant_gemv_expert_indexed, 4u32, 8u32, 16.0f32);
-int_qgemv_f32_expert_indexed!(mt_int5_dequant_gemv_expert_indexed, 5u32, 16u32, 32.0f32);
-int_qgemv_f32_expert_indexed!(mt_int6_dequant_gemv_expert_indexed, 6u32, 32u32, 64.0f32);
-
-/// E8M0-scaled symmetric int expert-indexed GEMV (MXINT2/3/4/5/6): per-element
-/// bit-stream code × pow-2 (E8M0) block scale `2^(bits-127)`, dotted with the
-/// input. Same straddle-aware decode + expert-folded bases as the FP32 variant;
-/// only the scale axis differs (one u8 exponent per block instead of a raw f32).
-macro_rules! int_qgemv_e8m0_expert_indexed {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            weights_stacked: Tensor<u32>,
-            scales_stacked: Tensor<u8>,
-            input: Tensor<T>,
-            expert_index: Tensor<u32>,
-            output: Tensor<T>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] out_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let expert = load(expert_index[0u32]);
-            let g_row = expert * out_dim + row;
-            let row_word_off = g_row * words_per_row;
-            let row_block_off = g_row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weights_stacked[row_word_off + word_idx]);
-                    let w1 = load(
-                        weights_stacked
-                            [row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                    );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let sbits = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-                    let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                    acc = acc + (val * scale) * load(input[c]).cast::<f32>();
-                }
-            }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_qgemv_e8m0_expert_indexed!(mt_mxint2_dequant_gemv_expert_indexed, 2u32, 2u32, 4.0f32);
-int_qgemv_e8m0_expert_indexed!(mt_mxint3_dequant_gemv_expert_indexed, 3u32, 4u32, 8.0f32);
-int_qgemv_e8m0_expert_indexed!(mt_mxint4_dequant_gemv_expert_indexed, 4u32, 8u32, 16.0f32);
-int_qgemv_e8m0_expert_indexed!(mt_mxint5_dequant_gemv_expert_indexed, 5u32, 16u32, 32.0f32);
-int_qgemv_e8m0_expert_indexed!(mt_mxint6_dequant_gemv_expert_indexed, 6u32, 32u32, 64.0f32);
-
-/// MXINT8 expert-indexed dequantizing GEMV — 8-bit symmetric codes (byte layout,
-/// block 32), E8M0 pow-2 block scale `2^(bits-127)`. Element-strided like the
-/// 8-bit float formats (one byte per code), decode is `mt_decode_int8 → val · scale`,
-/// with the per-expert row bases folded in exactly like the int8 kernel.
-#[kernel]
-pub fn mt_mxint8_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<u8>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weights_stacked[row_off + c]).cast::<u32>());
-            let sbits = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── FP16-scale twins (nvfp8_f16 / fp4_f16 / fp8_e5m2_f16 + int2..int6/int8 f16) ─
-// Near-clones of the FP32-scaled kernels above for the same element layout; only
-// the scale tensor changes from `Tensor<f32>` to `Tensor<f16>` and the scale read
-// gains a `.cast::<f32>()`. Element decode (E2M1 / E4M3 / E5M2 / int bit-stream +
-// sign-extend), weight indexing, the per-expert row bases, and the dispatch
-// geometry are IDENTICAL to the FP32 twin. The GPU-verified scale-read pattern is
-// `mlx/block_scaled_dequant.rs` (`mt_nvfp8_f16_dequant` et al.): native half load
-// then cast to f32. `fp8_e4m3_f16` reuses `mt_nvfp8_f16_dequant_gemv_expert_indexed`
-// (same 8-bit E4M3 + f16-scale shape), exactly as `fp8_e4m3` reuses the nvfp8 kernel.
-
-/// nvfp8 (FP16-scale) expert-indexed dequantizing GEMV — E4M3 weights (block 16),
-/// per-block FP16 scale. Also serves the `fp8_e4m3_f16` format (identical layout).
-/// Clone of `mt_nvfp8_dequant_gemv_expert_indexed` with the scale as half.
-#[kernel]
-pub fn mt_nvfp8_f16_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f16>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// fp4 (FP16-scale) expert-indexed dequantizing GEMV — E2M1 weights (group 32),
-/// per-group FP16 scale. Clone of `mt_fp4_dequant_gemv_expert_indexed`, scale → half.
-#[kernel]
-pub fn mt_fp4_f16_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u32>,
-    scales_stacked: Tensor<f16>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * n_packs_per_row;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_pack_off = weight_expert_off + row * n_packs_per_row;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let scale =
-                load(scales_stacked[row_block_off + pack_idx / packs_per_block]).cast::<f32>();
-            let packed = load(weights_stacked[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
+                    select(q >= half, qf - full, qf)
+                } else {
+                    let raw = load(weights_stacked[row_off + c]).cast::<u32>();
+                    if WDEC == 2u32 {
+                        mt_decode_e4m3(raw)
+                    } else if WDEC == 3u32 {
+                        mt_decode_e5m2(raw)
+                    } else {
+                        mt_decode_int8(raw)
+                    }
+                };
+                acc = acc + (val * scale) * load(input[c]).cast::<f32>();
             }
         }
     }
@@ -663,162 +178,6 @@ pub fn mt_fp4_f16_dequant_gemv_expert_indexed<T>(
     }
 }
 
-/// fp8 (E5M2, FP16-scale) expert-indexed dequantizing GEMV — 8-bit weights
-/// (group 32), per-group FP16 scale. Clone of
-/// `mt_fp8_e5m2_dequant_gemv_expert_indexed`, scale → half.
-#[kernel]
-pub fn mt_fp8_e5m2_f16_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f16>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// FP16-scaled symmetric int expert-indexed GEMV (int2/3/4/5/6 F16): identical
-/// straddle-aware bit-stream decode + expert-folded row bases as
-/// `int_qgemv_f32_expert_indexed!`; only the scale tensor is half (read with a
-/// trailing `.cast::<f32>()`).
-macro_rules! int_qgemv_f16_expert_indexed {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            weights_stacked: Tensor<u32>,
-            scales_stacked: Tensor<f16>,
-            input: Tensor<T>,
-            expert_index: Tensor<u32>,
-            output: Tensor<T>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] out_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            // g_row = expert·out_dim + row → fold the expert stride into both bases.
-            let expert = load(expert_index[0u32]);
-            let g_row = expert * out_dim + row;
-            let row_word_off = g_row * words_per_row;
-            let row_block_off = g_row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weights_stacked[row_word_off + word_idx]);
-                    let w1 = load(
-                        weights_stacked
-                            [row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                    );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (val * scale) * load(input[c]).cast::<f32>();
-                }
-            }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_qgemv_f16_expert_indexed!(mt_int2_f16_dequant_gemv_expert_indexed, 2u32, 2u32, 4.0f32);
-int_qgemv_f16_expert_indexed!(mt_int3_f16_dequant_gemv_expert_indexed, 3u32, 4u32, 8.0f32);
-int_qgemv_f16_expert_indexed!(mt_int4_f16_dequant_gemv_expert_indexed, 4u32, 8u32, 16.0f32);
-int_qgemv_f16_expert_indexed!(mt_int5_f16_dequant_gemv_expert_indexed, 5u32, 16u32, 32.0f32);
-int_qgemv_f16_expert_indexed!(mt_int6_f16_dequant_gemv_expert_indexed, 6u32, 32u32, 64.0f32);
-
-/// int8 (FP16-scale) expert-indexed dequantizing GEMV — 8-bit symmetric codes
-/// (byte layout, group 64), per-group FP16 scale. Clone of
-/// `mt_int8_dequant_gemv_expert_indexed`, scale → half.
-#[kernel]
-pub fn mt_int8_f16_dequant_gemv_expert_indexed<T>(
-    weights_stacked: Tensor<u8>,
-    scales_stacked: Tensor<f16>,
-    input: Tensor<T>,
-    expert_index: Tensor<u32>,
-    output: Tensor<T>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] out_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let expert = load(expert_index[0u32]);
-    let weight_expert_off = expert * out_dim * in_dim;
-    let scale_expert_off = expert * out_dim * n_blocks;
-    let row_off = weight_expert_off + row * in_dim;
-    let row_block_off = scale_expert_off + row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weights_stacked[row_off + c]).cast::<u32>());
-            let scale = load(scales_stacked[row_block_off + c / block_size]).cast::<f32>();
-            acc = acc + (elem * scale) * load(input[c]).cast::<f32>();
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// Correctness tests for the per-expert-indexed block-scaled dequant GEMVs.
-///
-/// Oracle: build the FULL `[n_experts·out_dim, in_dim]` stacked weight and pack
-/// it **once** via `crate::quant::format::pack` (so the resulting `codes`/`scales`
-/// buffers are a single contiguous, correctly-aligned bit-stream — concatenating
-/// per-expert packs would misalign experts after the first for the straddling
-/// sub-byte widths 3/5/6, which append a guard word). Pick a non-zero expert,
-/// dequant the full stack, slice the selected expert's `[out_dim, in_dim]` rows,
-/// and replay `out[row] = Σ_i wdq[row,i]·x[i]` in f32. Verifies the expert-stride
-/// offset math on both the weight + scale row bases. Inputs are dtype-rounded so
-/// the GPU sees exactly what the oracle does.
-///
-/// Grid: `grid_3d(out_dim, 1, 1, [TPG, 1, 1])` — one TG per output row, TPG = 64.
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
