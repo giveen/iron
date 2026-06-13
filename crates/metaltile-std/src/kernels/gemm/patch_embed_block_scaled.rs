@@ -17,13 +17,51 @@
 
 use metaltile::kernel;
 
-/// mxfp4 quantized patch embed — E2M1 weight (block 32), E8M0 pow-2 scale.
-#[kernel]
+/// Block-scaled quantized patch embedding, folded over the 28-format axis (§7).
+///
+/// `out[patch, h] = bias[h] + Σ_(ic,py,px) dequant(weight[h, col]) · image[...]`
+/// where `col = ic·patch_h·patch_w + py·patch_w + px`. Per-column weight decode
+/// + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer types by
+/// `(WT, ST)` — see `block_scaled_matmul` for the axis legend. Decodes through
+/// `kernels/primitives.rs`. Produces `mt_<FMT>_patch_embed`.
+#[kernel(variants(
+    (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
+        (mxfp4,        4u32, u32, u8,  0u32, 0u32),
+        (nvfp4,        4u32, u32, u8,  0u32, 1u32),
+        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
+        (int2,         2u32, u32, f32, 1u32, 2u32),
+        (int3,         3u32, u32, f32, 1u32, 2u32),
+        (int4,         4u32, u32, f32, 1u32, 2u32),
+        (int5,         5u32, u32, f32, 1u32, 2u32),
+        (int6,         6u32, u32, f32, 1u32, 2u32),
+        (mxint2,       2u32, u32, u8,  1u32, 0u32),
+        (mxint3,       3u32, u32, u8,  1u32, 0u32),
+        (mxint4,       4u32, u32, u8,  1u32, 0u32),
+        (mxint5,       5u32, u32, u8,  1u32, 0u32),
+        (mxint6,       6u32, u32, u8,  1u32, 0u32),
+        (int2_f16,     2u32, u32, f16, 1u32, 2u32),
+        (int3_f16,     3u32, u32, f16, 1u32, 2u32),
+        (int4_f16,     4u32, u32, f16, 1u32, 2u32),
+        (int5_f16,     5u32, u32, f16, 1u32, 2u32),
+        (int6_f16,     6u32, u32, f16, 1u32, 2u32),
+        (mxfp8_e4m3,   8u32, u8,  u8,  2u32, 0u32),
+        (mxfp8_e5m2,   8u32, u8,  u8,  3u32, 0u32),
+        (mxint8,       8u32, u8,  u8,  4u32, 0u32),
+        (nvfp8,        8u32, u8,  f32, 2u32, 2u32),
+        (fp8_e5m2,     8u32, u8,  f32, 3u32, 2u32),
+        (int8,         8u32, u8,  f32, 4u32, 2u32),
+        (nvfp8_f16,    8u32, u8,  f16, 2u32, 2u32),
+        (fp8_e5m2_f16, 8u32, u8,  f16, 3u32, 2u32),
+        (int8_f16,     8u32, u8,  f16, 4u32, 2u32),
+    ],
+    suffix = "{FMT}_patch_embed",
+))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp4_patch_embed<T>(
+pub fn mt<T>(
     image: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
+    weight: Tensor<WT>,
+    scales: Tensor<ST>,
     bias: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] in_ch: u32,
@@ -33,151 +71,7 @@ pub fn mt_mxfp4_patch_embed<T>(
     #[constexpr] patch_w: u32,
     #[constexpr] hidden: u32,
     #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let w_packs_per_row = patch_dim / 8u32;
-    let n_blocks = patch_dim / block_size;
-    let w_row_pack = h * w_packs_per_row;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-                let scale =
-                    exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-                acc = acc + (mt_decode_e2m1(nib) * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// nvfp4 quantized patch embed — E2M1 weight (block 16), E4M3 micro-scale × global.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp4_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-    #[constexpr] global: f32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let w_packs_per_row = patch_dim / 8u32;
-    let n_blocks = patch_dim / block_size;
-    let w_row_pack = h * w_packs_per_row;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-                let scale =
-                    mt_decode_e4m3(load(scales[w_row_blk + col / block_size]).cast::<u32>())
-                        * global;
-                acc = acc + (mt_decode_e2m1(nib) * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp4 quantized patch embed — E2M1 weight (group 32), per-group FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp4_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let w_packs_per_row = patch_dim / 8u32;
-    let n_blocks = patch_dim / block_size;
-    let w_row_pack = h * w_packs_per_row;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-                let scale = load(scales[w_row_blk + col / block_size]);
-                acc = acc + (mt_decode_e2m1(nib) * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// mxfp8 (E4M3) quantized patch embed — 8-bit weight (block 32), E8M0 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp8_e4m3_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
+    #[constexpr(only_when = "SKIND == 1u32")] global: f32,
 ) {
     let idx = program_id::<0>();
     let h = idx % hidden;
@@ -188,8 +82,12 @@ pub fn mt_mxfp8_e4m3_patch_embed<T>(
     let input_plane = in_h * in_w;
     let patch_dim = in_ch * patch_h * patch_w;
     let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
+    let w_row_pack = h * (patch_dim / 8u32); // nibble: u32 packs
+    let w_row_word = h * (patch_dim * BITS / 32u32); // sub-byte int: bit-stream words
+    let w_row_byte = h * patch_dim; // byte: one u8 per code
     let w_row_blk = h * n_blocks;
+    let half = 1u32 << (BITS - 1u32);
+    let full = (1u32 << BITS).cast::<f32>();
     let mut acc = load(bias[h]).cast::<f32>();
     for ic in range(0u32, in_ch, 1u32) {
         let img_ic = ic * input_plane;
@@ -199,675 +97,44 @@ pub fn mt_mxfp8_e4m3_patch_embed<T>(
             for px in range(0u32, patch_w, 1u32) {
                 let col = col_ic + py * patch_w + px;
                 let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-                let scale =
-                    exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// mxfp8 (E5M2) quantized patch embed — 8-bit weight (block 32), E8M0 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp8_e5m2_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-                let scale =
-                    exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp8 (E5M2) quantized patch embed — 8-bit weight (group 32), FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp8_e5m2_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]);
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// nvfp8 quantized patch embed — E4M3 weight (block 16), per-block FP32 scale.
-/// Also serves **fp8_e4m3** (same 8-bit-E4M3 + f32-scale shape).
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp8_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]);
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Symmetric int8 quantized patch embed — 8-bit codes (group 64), FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_int8_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]);
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-// ── FP16-scale twins (nvfp8 / fp4 / fp8_e5m2) ────────────────────────────────
-// Identical element decode + weight indexing + Grid3D geometry to their
-// FP32-scaled twin above; only the scale axis changes — read as a native `half`
-// (`Tensor<f16>`) and cast to f32. The GPU half load matches the host
-// `f16_scale_decode`, so the dequant-vs-oracle equality is preserved.
-
-/// nvfp8 (FP16 scale) quantized patch embed — E4M3 weight (block 16), per-block
-/// FP16 scale. Also serves **fp8_e4m3_f16** (same 8-bit-E4M3 + f16-scale shape).
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp8_f16_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp4 (FP16 scale) quantized patch embed — E2M1 weight (group 32),
-/// per-group FP16 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp4_f16_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let w_packs_per_row = patch_dim / 8u32;
-    let n_blocks = patch_dim / block_size;
-    let w_row_pack = h * w_packs_per_row;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-                let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                acc = acc + (mt_decode_e2m1(nib) * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp8 (E5M2, FP16 scale) quantized patch embed — 8-bit weight (group 32),
-/// per-group FP16 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp8_e5m2_f16_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-// ── Symmetric sub-byte integer patch embeds (int2/3/4/5/6 + MXINT2..6) ───────
-// The projection weight `W[hidden, patch_dim]` is stored as signed N-bit
-// two's-complement codes, tight-bit-packed LSB-first into u32 words. Each weight
-// row (`patch_dim` codes) is word-aligned: row `h` begins at word
-// `h · (patch_dim · BITS / 32)` (`patch_dim` is a multiple of 32, so every width
-// keeps each row whole-word). For the `col`-th element of a row, the code lives at
-// bit `col · BITS` within that row's bit-stream. Decode mirrors the proven
-// `block_scaled_dequant` / `block_scaled_matmul` `int_*` macros: extract the low
-// N bits with a straddle-aware two-word read, sign-extend in float (subtract 2^N
-// when the top bit is set; `$half`/`$full` are 2^(N-1) / 2^N), then multiply by
-// the block scale and the image pixel. Geometry is unchanged from the rest of the
-// family (Grid3D, one thread per output element). `$half`/`$full` are passed as
-// literals to keep the constexpr math out of the DSL shift operands.
-
-/// FP32-scaled symmetric int patch embed (int2/3/4/5/6): per-element bit-stream
-/// weight code × per-group FP32 scale, dotted with the unfolded image patch.
-/// `w_row_word` indexes the row's tight bit-stream (`patch_dim · bits / 32` u32
-/// words per row); `col` is the element index within the row.
-macro_rules! int_patch_embed_f32 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            image: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f32>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] in_ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] patch_h: u32,
-            #[constexpr] patch_w: u32,
-            #[constexpr] hidden: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let h = idx % hidden;
-            let patch = idx / hidden;
-            let patches_w = in_w / patch_w;
-            let py0 = (patch / patches_w) * patch_h;
-            let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-            let input_plane = in_h * in_w;
-            let patch_dim = in_ch * patch_h * patch_w;
-            let words_per_row = patch_dim * $bits / 32u32;
-            let n_blocks = patch_dim / block_size;
-            let w_row_word = h * words_per_row;
-            let w_row_blk = h * n_blocks;
-            let mut acc = load(bias[h]).cast::<f32>();
-            for ic in range(0u32, in_ch, 1u32) {
-                let img_ic = ic * input_plane;
-                let col_ic = ic * patch_h * patch_w;
-                for py in range(0u32, patch_h, 1u32) {
-                    let img_row = img_ic + (py0 + py) * in_w;
-                    for px in range(0u32, patch_w, 1u32) {
-                        let col = col_ic + py * patch_w + px;
-                        let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                        let bit_off = col * $bits;
-                        let word_idx = bit_off / 32u32;
-                        let bit_in_w = bit_off & 31u32;
-                        let bits_in_w0 = 32u32 - bit_in_w;
-                        let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                        let spill = $bits - lo_bits;
-                        let w0 = load(weight[w_row_word + word_idx]);
-                        let w1 = load(
-                            weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                        );
-                        let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                        let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                        let q = lo | hi;
-                        let qf = q.cast::<f32>();
-                        let val = select(q >= $half, qf - $full, qf); // sign-extend
-                        let scale = load(scales[w_row_blk + col / block_size]);
-                        acc = acc + (val * scale) * pix;
+                // Element decode — per-column, selected by WDEC.
+                let elem = if WDEC == 0u32 {
+                    let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32))
+                        & 0xFu32;
+                    mt_decode_e2m1(nib)
+                } else if WDEC == 1u32 {
+                    let bit_off = col * BITS;
+                    let word_idx = bit_off / 32u32;
+                    let bit_in_w = bit_off & 31u32;
+                    let bits_in_w0 = 32u32 - bit_in_w;
+                    let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                    let spill = BITS - lo_bits;
+                    let w0 = load(weight[w_row_word + word_idx]);
+                    let w1 = load(
+                        weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
+                    );
+                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                    let qf = q.cast::<f32>();
+                    select(q >= half, qf - full, qf)
+                } else {
+                    let raw = load(weight[w_row_byte + col]).cast::<u32>();
+                    if WDEC == 2u32 {
+                        mt_decode_e4m3(raw)
+                    } else if WDEC == 3u32 {
+                        mt_decode_e5m2(raw)
+                    } else {
+                        mt_decode_int8(raw)
                     }
-                }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_patch_embed_f32!(mt_int2_patch_embed, 2u32, 2u32, 4.0f32);
-int_patch_embed_f32!(mt_int3_patch_embed, 3u32, 4u32, 8.0f32);
-int_patch_embed_f32!(mt_int4_patch_embed, 4u32, 8u32, 16.0f32);
-int_patch_embed_f32!(mt_int5_patch_embed, 5u32, 16u32, 32.0f32);
-int_patch_embed_f32!(mt_int6_patch_embed, 6u32, 32u32, 64.0f32);
-
-/// E8M0-scaled symmetric int patch embed (MXINT2/3/4/5/6): per-element bit-stream
-/// weight code × pow-2 (E8M0) block scale `2^(bits-127)`, dotted with the image
-/// patch. Same straddle-aware decode and per-row word alignment as
-/// `int_patch_embed_f32`; only the scale axis differs (one u8 exponent per block
-/// instead of a raw f32).
-macro_rules! int_patch_embed_e8m0 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            image: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<u8>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] in_ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] patch_h: u32,
-            #[constexpr] patch_w: u32,
-            #[constexpr] hidden: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let h = idx % hidden;
-            let patch = idx / hidden;
-            let patches_w = in_w / patch_w;
-            let py0 = (patch / patches_w) * patch_h;
-            let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-            let input_plane = in_h * in_w;
-            let patch_dim = in_ch * patch_h * patch_w;
-            let words_per_row = patch_dim * $bits / 32u32;
-            let n_blocks = patch_dim / block_size;
-            let w_row_word = h * words_per_row;
-            let w_row_blk = h * n_blocks;
-            let mut acc = load(bias[h]).cast::<f32>();
-            for ic in range(0u32, in_ch, 1u32) {
-                let img_ic = ic * input_plane;
-                let col_ic = ic * patch_h * patch_w;
-                for py in range(0u32, patch_h, 1u32) {
-                    let img_row = img_ic + (py0 + py) * in_w;
-                    for px in range(0u32, patch_w, 1u32) {
-                        let col = col_ic + py * patch_w + px;
-                        let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                        let bit_off = col * $bits;
-                        let word_idx = bit_off / 32u32;
-                        let bit_in_w = bit_off & 31u32;
-                        let bits_in_w0 = 32u32 - bit_in_w;
-                        let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                        let spill = $bits - lo_bits;
-                        let w0 = load(weight[w_row_word + word_idx]);
-                        let w1 = load(
-                            weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                        );
-                        let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                        let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                        let q = lo | hi;
-                        let qf = q.cast::<f32>();
-                        let val = select(q >= $half, qf - $full, qf); // sign-extend
-                        let sbits = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                        let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                        acc = acc + (val * scale) * pix;
-                    }
-                }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_patch_embed_e8m0!(mt_mxint2_patch_embed, 2u32, 2u32, 4.0f32);
-int_patch_embed_e8m0!(mt_mxint3_patch_embed, 3u32, 4u32, 8.0f32);
-int_patch_embed_e8m0!(mt_mxint4_patch_embed, 4u32, 8u32, 16.0f32);
-int_patch_embed_e8m0!(mt_mxint5_patch_embed, 5u32, 16u32, 32.0f32);
-int_patch_embed_e8m0!(mt_mxint6_patch_embed, 6u32, 32u32, 64.0f32);
-
-/// FP16-scaled symmetric int patch embed (int2/3/4/5/6): identical per-element
-/// bit-stream decode and per-row word alignment as `int_patch_embed_f32`; only
-/// the scale axis differs — read as a native `half` (`Tensor<f16>`) and cast to
-/// f32 (one FP16 scale per group).
-macro_rules! int_patch_embed_f16 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            image: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f16>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] in_ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] patch_h: u32,
-            #[constexpr] patch_w: u32,
-            #[constexpr] hidden: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let h = idx % hidden;
-            let patch = idx / hidden;
-            let patches_w = in_w / patch_w;
-            let py0 = (patch / patches_w) * patch_h;
-            let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-            let input_plane = in_h * in_w;
-            let patch_dim = in_ch * patch_h * patch_w;
-            let words_per_row = patch_dim * $bits / 32u32;
-            let n_blocks = patch_dim / block_size;
-            let w_row_word = h * words_per_row;
-            let w_row_blk = h * n_blocks;
-            let mut acc = load(bias[h]).cast::<f32>();
-            for ic in range(0u32, in_ch, 1u32) {
-                let img_ic = ic * input_plane;
-                let col_ic = ic * patch_h * patch_w;
-                for py in range(0u32, patch_h, 1u32) {
-                    let img_row = img_ic + (py0 + py) * in_w;
-                    for px in range(0u32, patch_w, 1u32) {
-                        let col = col_ic + py * patch_w + px;
-                        let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                        let bit_off = col * $bits;
-                        let word_idx = bit_off / 32u32;
-                        let bit_in_w = bit_off & 31u32;
-                        let bits_in_w0 = 32u32 - bit_in_w;
-                        let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                        let spill = $bits - lo_bits;
-                        let w0 = load(weight[w_row_word + word_idx]);
-                        let w1 = load(
-                            weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                        );
-                        let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                        let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                        let q = lo | hi;
-                        let qf = q.cast::<f32>();
-                        let val = select(q >= $half, qf - $full, qf); // sign-extend
-                        let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                        acc = acc + (val * scale) * pix;
-                    }
-                }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_patch_embed_f16!(mt_int2_f16_patch_embed, 2u32, 2u32, 4.0f32);
-int_patch_embed_f16!(mt_int3_f16_patch_embed, 3u32, 4u32, 8.0f32);
-int_patch_embed_f16!(mt_int4_f16_patch_embed, 4u32, 8u32, 16.0f32);
-int_patch_embed_f16!(mt_int5_f16_patch_embed, 5u32, 16u32, 32.0f32);
-int_patch_embed_f16!(mt_int6_f16_patch_embed, 6u32, 32u32, 64.0f32);
-
-/// int8 (FP16 scale) quantized patch embed — 8-bit symmetric codes (byte layout,
-/// group 64), per-group FP16 scale. Same byte-strided decode as `mt_int8_patch_embed`;
-/// only the scale is read as a `half` and cast to f32.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_int8_f16_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-                let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                acc = acc + (elem * scale) * pix;
-            }
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// MXINT8 quantized patch embed — 8-bit symmetric codes (byte layout, block 32),
-/// E8M0 pow-2 block scale `2^(bits-127)`. Element-strided like the 8-bit float
-/// formats (one byte per code), decode is `mt_decode_int8 → val · scale`.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxint8_patch_embed<T>(
-    image: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] in_ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] patch_h: u32,
-    #[constexpr] patch_w: u32,
-    #[constexpr] hidden: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let h = idx % hidden;
-    let patch = idx / hidden;
-    let patches_w = in_w / patch_w;
-    let py0 = (patch / patches_w) * patch_h;
-    let px0 = (patch - (patch / patches_w) * patches_w) * patch_w;
-    let input_plane = in_h * in_w;
-    let patch_dim = in_ch * patch_h * patch_w;
-    let n_blocks = patch_dim / block_size;
-    let w_row = h * patch_dim;
-    let w_row_blk = h * n_blocks;
-    let mut acc = load(bias[h]).cast::<f32>();
-    for ic in range(0u32, in_ch, 1u32) {
-        let img_ic = ic * input_plane;
-        let col_ic = ic * patch_h * patch_w;
-        for py in range(0u32, patch_h, 1u32) {
-            let img_row = img_ic + (py0 + py) * in_w;
-            for px in range(0u32, patch_w, 1u32) {
-                let col = col_ic + py * patch_w + px;
-                let pix = load(image[img_row + px0 + px]).cast::<f32>();
-                let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-                let sbits = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
+                };
+                // Scale decode — per block of the patch_dim row.
+                let sraw = load(scales[w_row_blk + col / block_size]);
+                let scale = if SKIND == 0u32 {
+                    exp2(sraw.cast::<f32>() - 127.0f32)
+                } else if SKIND == 1u32 {
+                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                } else {
+                    sraw.cast::<f32>()
+                };
                 acc = acc + (elem * scale) * pix;
             }
         }
