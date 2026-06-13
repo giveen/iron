@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::type_complexity)]
 
-//! GPU correctness for `ffai::gated_delta_prep::mt_gated_delta_prep_step`.
+//! GPU correctness for `kernels::ssm::gated_delta_prep::mt_gated_delta_prep_step`.
 //!
 //! The fused kernel absorbs the host-side prep that
 //! `Qwen35GDNMixer.forward` currently does between conv1d and the GDN
@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::gated_delta_prep::mt_gated_delta_prep_step;
+use metaltile_std::kernels::ssm::gated_delta_prep::mt_gated_delta_prep_step;
 
 // ────────────────────────────────────────────────────────────────────
 //  CPU oracle: scalar prep + recurrence.

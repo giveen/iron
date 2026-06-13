@@ -56,7 +56,7 @@ crates/metaltile-std/src/kernels/
   norm/       ✅ DONE — rms_norm(+residual/rope/qgemv/gated) · layer_norm · adain1d
   rope/       ✅ DONE — rope · rope_2d · rope_banded · rope_yarn · partial_rope
   convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv (see §4)
-  ssm/        ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
+  ssm/        ✅ DONE — ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
   quant/      INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
               quantized_* · fp_quantized_* · affine · aura codec stack · dequant_*
   audio/      ✅ DONE — mel_spectrogram(+magnitude/stft/filterbank) · lstm · vocoder · snake1d · upsample
@@ -159,7 +159,7 @@ payoff last:
 | Wave | Families | Rationale | Payoff |
 |---|---|---|---|
 | ✅ done | `convolution/`, `rope/`, `norm/`, `sampling/`, `ops/` | exemplar + all of wave 1 | 24k → ~1.6k |
-| 2 | ✅ `audio/` `vision/` `kv_cache/` done; `gemm/` (🔨 dense in, quantized next); `ssm/` next | moderate size, few cross-deps | medium |
+| 2 | ✅ `audio/` `vision/` `kv_cache/` done; `gemm/` (🔨 dense in, quantized next); `ssm/` ✅ | moderate size, few cross-deps | medium |
 | 3 | `sdpa/`, `moe/`, **`quant/`** | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
 ## 7. The `quant/` umbrella — collapsing the op × format matrix

@@ -6,9 +6,9 @@
 //! GDN-bearing models (Qwen 3.5 / 3.6).
 //!
 //! Two kernels:
-//!   - `gated_delta_step_record` — the standard GatedDelta forward step
+//!   - `mt_gated_delta_step_record` — the standard GatedDelta forward step
 //!     that *also* writes each step's `delta_t` to a `delta_log` tape.
-//!   - `state_replay` — re-folds the accepted prefix `[0, accepted)` of
+//!   - `mt_state_replay` — re-folds the accepted prefix `[0, accepted)` of
 //!     an innovation tape onto a pre-record state snapshot:
 //!     `state ← select(do_step, state·g_t + k_t·delta_t, state)`,
 //!     branchless via `select` (good SIMD occupancy when the timestep
@@ -40,7 +40,7 @@ use metaltile::kernel;
     NPT = [6, 2],
     suffix = "d{DK}_{DV}_{HK}_{HV}"
 ))]
-pub fn gated_delta_step_record<T>(
+pub fn mt_gated_delta_step_record<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -123,7 +123,7 @@ pub fn gated_delta_step_record<T>(
     NPT = [6, 2],
     suffix = "d{DK}_{DV}_{HV}_{HV}"
 ))]
-pub fn state_replay<T>(
+pub fn mt_state_replay<T>(
     delta_log: Tensor<T>,
     k_log: Tensor<T>,
     g_log: Tensor<T>,
@@ -189,7 +189,7 @@ pub fn state_replay<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::{gated_delta_step_record_d64_32_2_2, state_replay_d64_32_2_2};
+    use super::{mt_gated_delta_step_record_d64_32_2_2, mt_state_replay_d64_32_2_2};
     use crate::utils::{pack_f32, unpack_f32};
 
     // d64_32_2_2 cell dims.
@@ -304,7 +304,7 @@ pub mod kernel_tests {
         let (y_exp, s_exp) =
             naive_record(&r(&q), &r(&k), &r(&v), &r(&g), &r(&beta), &r(&state_in), batch, t_val);
 
-        TestSetup::new(gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
+        TestSetup::new(mt_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -343,7 +343,7 @@ pub mod kernel_tests {
             accepted,
         );
 
-        TestSetup::new(state_replay_d64_32_2_2::kernel_ir_for(dt))
+        TestSetup::new(mt_state_replay_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("delta_log", pack_f32(&delta_log, dt), dt))
             .input(TestBuffer::from_vec("k_log", pack_f32(&k_log, dt), dt))
@@ -371,10 +371,10 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::{
-        gated_delta_step_record_d64_32_2_2,
-        gated_delta_step_record_d192_128_4_4,
-        state_replay_d64_32_2_2,
-        state_replay_d192_128_4_4,
+        mt_gated_delta_step_record_d64_32_2_2,
+        mt_gated_delta_step_record_d192_128_4_4,
+        mt_state_replay_d64_32_2_2,
+        mt_state_replay_d192_128_4_4,
     };
 
     const DK: usize = 64;
@@ -395,7 +395,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_record(dt: DType) -> BenchSetup {
         let (batch, t_val) = (1usize, 8usize);
         let n_total = batch * HV;
-        BenchSetup::new(gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
+        BenchSetup::new(mt_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("q", batch * t_val * HK * DK, dt))
             .buffer(BenchBuffer::random("k", batch * t_val * HK * DK, dt))
@@ -422,7 +422,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_replay(dt: DType) -> BenchSetup {
         let (batch, t_log, accepted) = (1usize, 8usize, 8usize);
         let n_total = batch * HV;
-        BenchSetup::new(state_replay_d64_32_2_2::kernel_ir_for(dt))
+        BenchSetup::new(mt_state_replay_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("delta_log", batch * t_log * HV * DV, dt))
             .buffer(BenchBuffer::random("k_log", batch * t_log * HV * DK, dt))
@@ -447,7 +447,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_record_d192_128_4_4(dt: DType) -> BenchSetup {
         let (batch, t_val) = (1usize, 8usize);
         let n_total = batch * P_HV;
-        BenchSetup::new(gated_delta_step_record_d192_128_4_4::kernel_ir_for(dt))
+        BenchSetup::new(mt_gated_delta_step_record_d192_128_4_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("q", batch * t_val * P_HK * P_DK, dt))
             .buffer(BenchBuffer::random("k", batch * t_val * P_HK * P_DK, dt))
@@ -475,7 +475,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_replay_d192_128_4_4(dt: DType) -> BenchSetup {
         let (batch, t_log, accepted) = (1usize, 8usize, 8usize);
         let n_total = batch * P_HV;
-        BenchSetup::new(state_replay_d192_128_4_4::kernel_ir_for(dt))
+        BenchSetup::new(mt_state_replay_d192_128_4_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("delta_log", batch * t_log * P_HV * P_DV, dt))
             .buffer(BenchBuffer::random("k_log", batch * t_log * P_HV * P_DK, dt))

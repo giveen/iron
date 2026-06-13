@@ -3,7 +3,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
 
-//! GPU correctness for `ffai::gated_delta_prep_chunk::mt_gated_delta_prep_chunk`.
+//! GPU correctness for `kernels::ssm::gated_delta_prep_chunk::mt_gated_delta_prep_chunk`.
 //!
 //! The chunked variant must match T sequential calls of
 //! `mt_gated_delta_prep_step` carrying state forward — that is exactly
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::gated_delta_prep_chunk::mt_gated_delta_prep_chunk;
+use metaltile_std::kernels::ssm::gated_delta_prep_chunk::mt_gated_delta_prep_chunk;
 
 // ────────────────────────────────────────────────────────────────────
 //  CPU oracle: T-step prep + recurrence with state carried forward.

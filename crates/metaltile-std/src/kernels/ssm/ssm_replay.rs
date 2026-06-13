@@ -1,13 +1,13 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! Mamba / Mamba 2 state replay — port of `ssm_replay.metal`
+//! Mamba / Mamba 2 state replay — port of `mt_ssm_replay.metal`
 //! (spec 040). The speculative-decode rollback companion to
 //! `ssm.rs`'s `ssm_step`. Two kernels:
 //!
-//!   - `ssm_step_record` — the sequential SSD forward over `t_total`
+//!   - `mt_ssm_step_record` — the sequential SSD forward over `t_total`
 //!     steps, capturing each step's `(dA, dBx)` into delta logs
 //!     alongside the standard `(y, state_out)`.
-//!   - `ssm_replay` — re-folds the first `k` log entries onto a
+//!   - `mt_ssm_replay` — re-folds the first `k` log entries onto a
 //!     recurrent-state snapshot to recover state-after-k.
 //!
 //! Threading (matches `ssm.metal`): a 32-lane simdgroup splits the
@@ -43,7 +43,7 @@ use metaltile::kernel;
     NPT = [2, 4, 4],
     suffix = "d{DH}_{DS}_{H}_{G}"
 ))]
-pub fn ssm_step_record<T>(
+pub fn mt_ssm_step_record<T>(
     x: Tensor<T>,
     a_log: Tensor<T>,
     b: Tensor<T>,
@@ -128,7 +128,7 @@ pub fn ssm_step_record<T>(
     NPT = [2, 4, 4],
     suffix = "d{DH}_{DS}_{H}"
 ))]
-pub fn ssm_replay<T>(
+pub fn mt_ssm_replay<T>(
     state_snapshot: Tensor<T>,
     da_log: Tensor<T>,
     dbx_log: Tensor<T>,
@@ -176,7 +176,7 @@ pub fn ssm_replay<T>(
 
 /// New-syntax correctness for the Mamba 2 SSD tape record + replay kernels on
 /// the small `d16_64_4` cell (Dh=16, Ds=64, H=4, G=2). Oracles are ported
-/// verbatim from the legacy `tests/ssm_replay_gpu_correctness.rs`
+/// verbatim from the legacy `tests/mt_ssm_replay_gpu_correctness.rs`
 /// (removed in #240):
 ///
 ///   - `record` runs the sequential SSD forward (`y = C·state + D·x`,
@@ -192,7 +192,7 @@ pub fn ssm_replay<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::{ssm_replay_d16_64_4, ssm_step_record_d16_64_4_2};
+    use super::{mt_ssm_replay_d16_64_4, mt_ssm_step_record_d16_64_4_2};
     use crate::utils::{pack_f32, unpack_f32};
 
     // d16_64_4 cell dims.
@@ -321,7 +321,7 @@ pub mod kernel_tests {
             t,
         );
 
-        TestSetup::new(ssm_step_record_d16_64_4_2::kernel_ir_for(dt))
+        TestSetup::new(mt_ssm_step_record_d16_64_4_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -355,7 +355,7 @@ pub mod kernel_tests {
         let s_exp =
             naive_replay(&r(&snapshot), &r(&da_log), &r(&dbx_log), &mask, has_mask, batch, t, k);
 
-        TestSetup::new(ssm_replay_d16_64_4::kernel_ir_for(dt))
+        TestSetup::new(mt_ssm_replay_d16_64_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("state_snapshot", pack_f32(&snapshot, dt), dt))
             .input(TestBuffer::from_vec("da_log", pack_f32(&da_log, dt), dt))
@@ -390,10 +390,10 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::{
-        ssm_replay_d16_64_4,
-        ssm_replay_d128_128_32,
-        ssm_step_record_d16_64_4_2,
-        ssm_step_record_d128_128_32_2,
+        mt_ssm_replay_d16_64_4,
+        mt_ssm_replay_d128_128_32,
+        mt_ssm_step_record_d16_64_4_2,
+        mt_ssm_step_record_d128_128_32_2,
     };
 
     const DH: usize = 16;
@@ -414,7 +414,7 @@ pub mod kernel_benches {
     fn bench_ssm_record(dt: DType) -> BenchSetup {
         let (batch, t) = (1usize, 8usize);
         let n_total = batch * H;
-        BenchSetup::new(ssm_step_record_d16_64_4_2::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_step_record_d16_64_4_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("x", batch * t * H * DH, dt))
             .buffer(BenchBuffer::random("a_log", H, dt))
@@ -439,7 +439,7 @@ pub mod kernel_benches {
     fn bench_ssm_replay(dt: DType) -> BenchSetup {
         let (batch, t, k_steps) = (1usize, 8usize, 8usize);
         let n_total = batch * H;
-        BenchSetup::new(ssm_replay_d16_64_4::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_replay_d16_64_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("state_snapshot", n_total * DH * DS, dt))
             .buffer(BenchBuffer::random("da_log", batch * t * H * DS, dt))
@@ -459,7 +459,7 @@ pub mod kernel_benches {
     fn bench_ssm_record_d128_128_32(dt: DType) -> BenchSetup {
         let (batch, t) = (1usize, 8usize);
         let n_total = batch * P_H;
-        BenchSetup::new(ssm_step_record_d128_128_32_2::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_step_record_d128_128_32_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("x", batch * t * P_H * P_DH, dt))
             .buffer(BenchBuffer::random("a_log", P_H, dt))
@@ -485,7 +485,7 @@ pub mod kernel_benches {
     fn bench_ssm_replay_d128_128_32(dt: DType) -> BenchSetup {
         let (batch, t, k_steps) = (1usize, 8usize, 8usize);
         let n_total = batch * P_H;
-        BenchSetup::new(ssm_replay_d128_128_32::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_replay_d128_128_32::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("state_snapshot", n_total * P_DH * P_DS, dt))
             .buffer(BenchBuffer::random("da_log", batch * t * P_H * P_DS, dt))

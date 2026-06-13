@@ -3,6 +3,7 @@
 //! Convolution kernels (1-D, 2-D, 3-D, depthwise, winograd, audio/speech).
 
 pub mod consolidated;
+pub mod conv1d_causal;
 pub mod conv1d_causal_step_silu_cast_many;
 pub mod conv2d;
 pub mod conv2d_block_scaled;

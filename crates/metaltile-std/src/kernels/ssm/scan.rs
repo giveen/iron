@@ -2,15 +2,15 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Mamba 2 (SSD-form) building blocks: the selective-scan single-token
 //! decode step and the depthwise causal-conv streaming step. Plus
-//! `ssm_step_a2d` — the Mamba 1 (Jamba) variant carrying a 2-D
+//! `mt_ssm_step_a2d` — the Mamba 1 (Jamba) variant carrying a 2-D
 //! per-(channel, state) `A_log` instead of the scalar-per-head `A`.
 //!
-//! `mt_ssm_step` is a faithful port of MLX's `ssm_step<T, Dh, Ds, H, G>`
+//! `mt_ssm_step_grouped` is a faithful port of MLX's `mt_ssm_step<T, Dh, Ds, H, G>`
 //! from ekryski's `mlx` fork (`alpha` branch) — semantically MLX-aligned
 //! but mainline MLX (pinned by `metaltile-std/build.rs`) doesn't ship
 //! the `ssm.metal` source yet, so there's no side-by-side comparison
 //! today. When the pin moves to a commit that ships `ssm.metal`, this
-//! file (or just `mt_ssm_step` alone) graduates to `mlx/ssm.rs` and
+//! file (or just `mt_ssm_step_grouped` alone) graduates to `mlx/ssm.rs` and
 //! picks up an MLX bench comparison via the standard `mlx=` /
 //! `metal_file=` annotations.
 //!
@@ -24,110 +24,6 @@
 
 use metaltile::kernel;
 
-// Mamba 2 / Mamba 1D depthwise causal-conv step — streaming-decode form.
-//
-//   y[d] = bias[d]
-//        + w[K-1][d] * x[d]
-//        + Σ_{k=0..K-2} w[k][d] * state[k][d]
-//
-// `state` holds the K-1 most recent inputs. After computing y the kernel
-// shifts state in-place: state[k][d] = state[k+1][d], state[K-2][d] = x[d].
-// Each channel d is owned by exactly one thread, so the read-then-write
-// shift is safe within the thread without barriers.
-//
-// Grid: n_channels threads (one per channel). For Mamba 2 with conv_dim
-// ~1500 channels and K=4 this is a tiny dispatch. Activation (Mamba 2
-// follows the conv with SiLU) is the caller's concern — kept separate.
-#[kernel]
-pub fn conv1d_causal_step<T>(
-    x: Tensor<T>,
-    w: Tensor<T>,
-    b: Tensor<T>,
-    mut state: Tensor<T>,
-    mut y: Tensor<T>,
-    #[constexpr] n_channels: u32,
-    #[constexpr] kernel_size: u32,
-) {
-    let d = program_id::<0>();
-    let x_d = load(x[d]).cast::<f32>();
-    let b_d = load(b[d]).cast::<f32>();
-    // Convolution: w[K-1] pairs with current input x[d]; w[0]..w[K-2]
-    // pair with state[0]..state[K-2].
-    let w_last = load(w[(kernel_size - 1u32) * n_channels + d]).cast::<f32>();
-    let mut acc = b_d + w_last * x_d;
-    // `kernel_size` is contractually >= 2 (a causal conv with state).
-    // Guard the unsigned subtraction anyway: a stray `kernel_size == 0`
-    // would make `kernel_size - 1` underflow to ~4e9 — a GPU-pinning
-    // loop. `select` clamps the trip count to 0 instead.
-    let conv_taps = select(kernel_size > 1u32, kernel_size - 1u32, 0u32);
-    for k in range(0u32, conv_taps, 1u32) {
-        let s_kd = load(state[k * n_channels + d]).cast::<f32>();
-        let w_kd = load(w[k * n_channels + d]).cast::<f32>();
-        acc = acc + w_kd * s_kd;
-    }
-    store(y[d], acc.cast::<T>());
-    // Shift state up by one (drop state[0], append x[d] at the tail).
-    // Sequential within the thread → safe even though state[k] is read
-    // after being written: we read state[k+1] each iteration, never
-    // state[k].
-    // Same underflow guard: `kernel_size - 2` would wrap to ~4e9 for
-    // any `kernel_size < 2`.
-    let shift_taps = select(kernel_size > 2u32, kernel_size - 2u32, 0u32);
-    for k in range(0u32, shift_taps, 1u32) {
-        let next = load(state[(k + 1u32) * n_channels + d]);
-        store(state[k * n_channels + d], next);
-    }
-    // Same `kernel_size < 2` hazard as above, but for the tail STORE: the
-    // slot index would wrap to ~4e9 AND `state` has K-1 = 0 slots, so there
-    // is nothing valid to clamp to — skip the store entirely.
-    if kernel_size > 1u32 {
-        store(state[(kernel_size - 2u32) * n_channels + d], load(x[d]));
-    }
-}
-
-// ── Mamba 2 batched-prefill causal depthwise conv1d ─────────────────────
-//
-// Processes ALL S prompt tokens in one dispatch, with zero initial state
-// (prefill starts from scratch). Each thread computes one output element
-// y[ti, ch] = silu( bias[ch]
-//                 + sum_{k=0..kc-1} w[k, ch] * xbc_in[ti - (kc-1-k), ch] )
-// where out-of-bounds reads (ti < kc-1-k) are treated as 0 (zero initial
-// state). Silu is applied inline — saves a second kernel dispatch.
-//
-// Grid: [s * conv_dim, 1, 1]; one thread per (token, channel).
-// Replaces the host ring-conv loop in bench_nemotron's forward_batched.
-// Gate: NEMOTRON_CONV_DEVICE=1 in bench_nemotron.
-#[kernel]
-pub fn conv1d_causal_prefill(
-    xbc_in: Tensor<f32>, // [s * conv_dim] flat row-major
-    w: Tensor<f32>,      // [kc * conv_dim] reorganized same as decode step
-    bias: Tensor<f32>,   // [conv_dim]
-    mut y: Tensor<f32>,  // [s * conv_dim] output with silu applied
-    #[constexpr] conv_dim: u32,
-    #[constexpr] kc: u32,
-) {
-    let idx = program_id::<0>();
-    let ti = idx / conv_dim;
-    let ch = idx - ti * conv_dim;
-    let b_ch = load(bias[ch]);
-    // Accumulate: w[k, ch] pairs with xbc_in[ti - (kc-1-k), ch].
-    // k=0 → lag (kc-1); k=kc-1 → current token (lag 0).
-    let mut acc = b_ch;
-    for k in range(0u32, kc, 1u32) {
-        let lag = kc - 1u32 - k;
-        // Only include this tap if it's within the valid prefix.
-        if ti >= lag {
-            let src_ti = ti - lag;
-            let v = load(xbc_in[src_ti * conv_dim + ch]);
-            let wk = load(w[k * conv_dim + ch]);
-            acc = acc + wk * v;
-        }
-    }
-    // Silu activation: y = acc / (1 + exp(-acc)).
-    let sig = 1.0f32 / (1.0f32 + exp(0.0f32 - acc));
-    store(y[idx], acc * sig);
-}
-
 // ── Strided column extraction ─────────────────────────────────────────────
 //
 // Extracts a contiguous subrange of columns from a row-major matrix:
@@ -138,7 +34,7 @@ pub fn conv1d_causal_prefill(
 //
 // Grid: [s * width, 1, 1]; one thread per output element.
 #[kernel]
-pub fn strided_col_copy(
+pub fn mt_strided_col_copy(
     src: Tensor<f32>,     // [s * stride] flat row-major
     mut dst: Tensor<f32>, // [s * width] output
     #[constexpr] stride: u32,
@@ -162,7 +58,7 @@ pub fn strided_col_copy(
 //
 // Grid: [s * n, 1, 1]; one thread per output element.
 #[kernel]
-pub fn softplus_add_rows(
+pub fn mt_softplus_add_rows(
     src: Tensor<f32>,     // [s * n]
     bias: Tensor<f32>,    // [n]
     mut dst: Tensor<f32>, // [s * n]
@@ -183,7 +79,7 @@ pub fn softplus_add_rows(
 // This is the decode form. Chunked prefill uses a parallel-scan
 // variant — separate kernel, not in this drop.
 #[kernel]
-pub fn ssm_step<T>(
+pub fn mt_ssm_step<T>(
     x: Tensor<T>,
     a: Tensor<T>,
     b: Tensor<T>,
@@ -216,9 +112,9 @@ pub fn ssm_step<T>(
 }
 
 // Mamba 1 (Jamba) selective-scan single-token decode step — the
-// 2D-`A_log` variant of `ssm_step` above.
+// 2D-`A_log` variant of `mt_ssm_step` above.
 //
-// The scalar `ssm_step` bakes in a per-channel scalar `A` (`a[h_id]`),
+// The scalar `mt_ssm_step` bakes in a per-channel scalar `A` (`a[h_id]`),
 // so the decay `exp(A·dt)` is constant across the state dimension.
 // Jamba's Mamba 1 mixer instead carries a *2-D* `A_log` of shape
 // `[n_heads*head_dim, state_dim]` — one decay coefficient per
@@ -229,7 +125,7 @@ pub fn ssm_step<T>(
 // GPU (it otherwise runs host-side).
 //
 // `A_log` is the raw log-parameter; the kernel applies the canonical
-// Mamba `A = -exp(A_log)` reparam (matching `mt_ssm_step`). Per state
+// Mamba `A = -exp(A_log)` reparam (matching `mt_ssm_step_grouped`). Per state
 // element `(h, d, n)`:
 //
 //   A      = -exp(A_log[(h*head_dim + d), n])
@@ -237,12 +133,12 @@ pub fn ssm_step<T>(
 //   h'     = decay · h_old + dt[h] · B[n] · x[h, d]
 //   y[h,d] = Σ_n C[n] · h'[h, d, n]
 //
-// One thread per `(head, d)` — same Grid3D geometry as `ssm_step`; no
+// One thread per `(head, d)` — same Grid3D geometry as `mt_ssm_step`; no
 // cross-thread sync because each `(head, d)` column of `h` is owned by
 // exactly one thread. The state `h` runs in fp32 (the recurrence
 // drifts in bf16 within a few dozen decode steps).
 #[kernel]
-pub fn ssm_step_a2d<T>(
+pub fn mt_ssm_step_a2d<T>(
     x: Tensor<T>,
     a_log: Tensor<T>,
     b: Tensor<T>,
@@ -278,7 +174,7 @@ pub fn ssm_step_a2d<T>(
     store(y[h_id * head_dim + d], y_d.cast::<T>());
 }
 
-// Faithful port of MLX's `ssm_step<T, Dh, Ds, H, G>` (alpha branch). One
+// Faithful port of MLX's `mt_ssm_step<T, Dh, Ds, H, G>` (alpha branch). One
 // threadgroup per `(d_idx, n)` output element, where `n ∈ [0, n_heads*batch)`
 // and `d_idx ∈ [0, dh)`. Each threadgroup runs 32 threads (one simd-group)
 // and reduces across the state dimension via `simd_sum`.
@@ -288,7 +184,7 @@ pub fn ssm_step_a2d<T>(
 // `heads_per_group` is MLX's `G`: number of Q heads sharing one (B, C)
 // slot. Total distinct (B, C) groups = n_heads / heads_per_group.
 #[kernel]
-pub fn mt_ssm_step<T>(
+pub fn mt_ssm_step_grouped<T>(
     x: Tensor<T>,             // [n_heads*batch, dh]
     a_log: Tensor<T>,         // [n_heads]
     b_mat: Tensor<T>,         // [batch, n_heads/heads_per_group, ds]
@@ -336,19 +232,19 @@ pub fn mt_ssm_step<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::{conv1d_causal_step, mt_ssm_step, ssm_step, ssm_step_a2d};
+    use super::{mt_ssm_step, mt_ssm_step_a2d, mt_ssm_step_grouped};
     use crate::utils::pack_f32;
 
     // ── SSD portable-scan kernels: cross-backend codegen smoke ────────────
     // The Mamba2 SSD chunked-matmul prefill scan (ffai-ops
-    // `ssm_prefill_scan_ssd_portable`) is built from these `ssd_*` #[kernel]
+    // `ssm_prefill_scan_ssd_portable`) is built from these `mt_ssd_*` #[kernel]
     // ops + `ffai_gemm_batched`. The whole point is PORTABILITY — they must
     // codegen cleanly to MSL (Metal), CUDA (Nvidia), HIP (AMD/RDNA4) and
     // SPIR-V/GLSL (Vulkan), NOT raw-CUDA. This asserts every backend emits a
     // kernel definition under the declared name (catches a DSL construct that
     // only lowers on one target).
     #[test]
-    fn ssd_portable_kernels_codegen_all_backends() {
+    fn mt_ssd_portable_kernels_codegen_all_backends() {
         use metaltile::{
             codegen::{
                 CudaGenerator,
@@ -366,48 +262,48 @@ pub mod kernel_tests {
                 k.mode = KernelMode::Reduction;
                 k
             }),
-            ("ssd_lcs", {
-                let mut k = super::ssd_lcs::kernel_ir_for();
+            ("mt_ssd_lcs", {
+                let mut k = super::mt_ssd_lcs::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_gather_bc", {
-                let mut k = super::ssd_gather_bc::kernel_ir_for();
+            ("mt_ssd_gather_bc", {
+                let mut k = super::mt_ssd_gather_bc::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_xt", {
-                let mut k = super::ssd_xt::kernel_ir_for();
+            ("mt_ssd_xt", {
+                let mut k = super::mt_ssd_xt::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_mmask", {
-                let mut k = super::ssd_mmask::kernel_ir_for();
+            ("mt_ssd_mmask", {
+                let mut k = super::mt_ssd_mmask::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_bdt", {
-                let mut k = super::ssd_bdt::kernel_ir_for();
+            ("mt_ssd_bdt", {
+                let mut k = super::mt_ssd_bdt::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_recur", {
-                let mut k = super::ssd_recur::kernel_ir_for();
+            ("mt_ssd_recur", {
+                let mut k = super::mt_ssd_recur::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_combine", {
-                let mut k = super::ssd_combine::kernel_ir_for();
+            ("mt_ssd_combine", {
+                let mut k = super::mt_ssd_combine::kernel_ir_for();
                 k.mode = KernelMode::Grid3D;
                 k
             }),
-            ("ssd_g1_cb", {
-                let mut k = super::ssd_g1_cb::kernel_ir_for();
+            ("mt_ssd_g1_cb", {
+                let mut k = super::mt_ssd_g1_cb::kernel_ir_for();
                 k.mode = KernelMode::Reduction;
                 k
             }),
-            ("ssd_g4_cs", {
-                let mut k = super::ssd_g4_cs::kernel_ir_for();
+            ("mt_ssd_g4_cs", {
+                let mut k = super::mt_ssd_g4_cs::kernel_ir_for();
                 k.mode = KernelMode::Reduction;
                 k
             }),
@@ -432,68 +328,7 @@ pub mod kernel_tests {
         );
     }
 
-    // ── conv1d_causal_step ──────────────────────────────────────────────
-
-    /// CPU oracle: `y[d] = b[d] + w[K-1][d]·x[d] + Σ_{k<K-1} w[k][d]·state[k][d]`,
-    /// then shift state up and append `x`. Returns `(y, shifted_state)`.
-    fn conv1d_oracle(
-        x: &[f32],
-        w: &[f32],
-        b: &[f32],
-        state_in: &[f32],
-        n_channels: usize,
-        kernel_size: usize,
-    ) -> (Vec<f32>, Vec<f32>) {
-        let mut y = vec![0.0_f32; n_channels];
-        let mut state = state_in.to_vec();
-        let k_last = kernel_size - 1;
-        for d in 0..n_channels {
-            let mut acc = b[d] + w[k_last * n_channels + d] * x[d];
-            for k in 0..k_last {
-                acc += w[k * n_channels + d] * state_in[k * n_channels + d];
-            }
-            y[d] = acc;
-        }
-        for d in 0..n_channels {
-            for k in 0..kernel_size.saturating_sub(2) {
-                state[k * n_channels + d] = state_in[(k + 1) * n_channels + d];
-            }
-            if kernel_size >= 2 {
-                state[(kernel_size - 2) * n_channels + d] = x[d];
-            }
-        }
-        (y, state)
-    }
-
-    fn conv1d_setup(n_channels: usize, kernel_size: usize, dt: DType) -> TestSetup {
-        let x: Vec<f32> = (0..n_channels).map(|i| ((i as f32) * 0.013).sin()).collect();
-        let w: Vec<f32> =
-            (0..kernel_size * n_channels).map(|i| 0.1 + ((i as f32) * 0.019).cos() * 0.2).collect();
-        let b: Vec<f32> = (0..n_channels).map(|i| (i as f32) * 0.001 - 0.05).collect();
-        let state_in: Vec<f32> =
-            (0..(kernel_size - 1) * n_channels).map(|i| ((i as f32) * 0.007).sin() * 0.5).collect();
-
-        let (y_exp, state_exp) = conv1d_oracle(&x, &w, &b, &state_in, n_channels, kernel_size);
-
-        TestSetup::new(conv1d_causal_step::kernel_ir_for(dt))
-            .mode(KernelMode::Grid3D)
-            .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
-            .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
-            .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
-            .input(TestBuffer::from_vec("state", pack_f32(&state_in, dt), dt))
-            .input(TestBuffer::zeros("y", n_channels, dt))
-            .constexpr("n_channels", n_channels as u32)
-            .constexpr("kernel_size", kernel_size as u32)
-            .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
-            .expect(TestBuffer::from_vec("state", pack_f32(&state_exp, dt), dt))
-            .grid_3d(n_channels as u32, 1, 1, [1, 1, 1])
-    }
-
-    // Mamba 2 short-conv: kernel_size=4. One thread per channel.
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
-    fn test_conv1d_causal_step(dt: DType) -> TestSetup { conv1d_setup(128, 4, dt) }
-
-    // ── ssm_step ────────────────────────────────────────────────────────
+    // ── mt_ssm_step ────────────────────────────────────────────────────────
 
     /// CPU oracle for the scalar-A selective-scan decode step. `h` is f32;
     /// returns `(y, h_new)`.
@@ -543,7 +378,7 @@ pub mod kernel_tests {
             ssm_step_oracle(&x, &a, &b_vec, &c_vec, &dt_in, &h_state, n_heads, head_dim, state_dim);
 
         // `h` is always f32 in the kernel signature; `y` carries the tested dt.
-        TestSetup::new(ssm_step::kernel_ir_for(dt))
+        TestSetup::new(mt_ssm_step::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
@@ -564,7 +399,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
     fn test_ssm_step(dt: DType) -> TestSetup { ssm_step_setup(4, 16, 8, dt) }
 
-    // ── ssm_step_a2d (Mamba 1 / Jamba: 2-D per-(channel,state) A_log) ────
+    // ── mt_ssm_step_a2d (Mamba 1 / Jamba: 2-D per-(channel,state) A_log) ────
 
     /// CPU oracle for the 2-D-A_log selective-scan step. Per state element
     /// `(h, d, n)`: `A = -exp(A_log[(h*head_dim+d), n])`, `decay = exp(A·dt[h])`,
@@ -628,7 +463,7 @@ pub mod kernel_tests {
             &x, &a_log, &b_vec, &c_vec, &dt_in, &h_state, n_heads, head_dim, state_dim,
         );
 
-        TestSetup::new(ssm_step_a2d::kernel_ir_for(dt))
+        TestSetup::new(mt_ssm_step_a2d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -647,15 +482,15 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
     fn test_ssm_step_a2d(dt: DType) -> TestSetup { ssm_step_a2d_setup(4, 16, 8, dt) }
 
-    // ── mt_ssm_step (MLX-aligned ssm_step<T,Dh,Ds,H,G>) ─────────────────
+    // ── mt_ssm_step_grouped (MLX-aligned mt_ssm_step<T,Dh,Ds,H,G>) ─────────────────
     //
-    // Distinct from `ssm_step`: separate `state_in`/`state_out` buffers (not
+    // Distinct from `mt_ssm_step`: separate `state_in`/`state_out` buffers (not
     // in-place), a `d_skip` residual (`out = Σ C·state' + x·D`), GQA per-group
     // B/C sharing (`g = n/heads_per_group`), and a per-state simd_sum across
     // a 32-thread group (`ds % 32 == 0`, each thread owns `ds/32` states).
     // Grid: `(dh, n_heads*batch, 1)` threadgroups of 32.
 
-    /// CPU oracle mirroring `mt_ssm_step` exactly (batch folded into `n`).
+    /// CPU oracle mirroring `mt_ssm_step_grouped` exactly (batch folded into `n`).
     #[allow(clippy::too_many_arguments)]
     fn mt_ssm_step_oracle(
         x: &[f32],
@@ -728,7 +563,7 @@ pub mod kernel_tests {
             heads_per_group,
         );
 
-        TestSetup::new(mt_ssm_step::kernel_ir_for(dt))
+        TestSetup::new(mt_ssm_step_grouped::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -753,57 +588,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
     fn test_mt_ssm_step(dt: DType) -> TestSetup { mt_ssm_step_setup(4, 16, 32, 4, 2, dt) }
 
-    // ── conv1d_causal_prefill ─────────────────────────────────────────────
-
-    fn conv1d_causal_prefill_oracle(
-        xbc: &[f32],
-        w: &[f32],
-        bias: &[f32],
-        s: usize,
-        conv_dim: usize,
-        kc: usize,
-    ) -> Vec<f32> {
-        let mut y = vec![0.0f32; s * conv_dim];
-        for ti in 0..s {
-            for ch in 0..conv_dim {
-                let mut acc = bias[ch];
-                for k in 0..kc {
-                    let lag = kc - 1 - k;
-                    if ti >= lag {
-                        acc += w[k * conv_dim + ch] * xbc[(ti - lag) * conv_dim + ch];
-                    }
-                }
-                let sig = 1.0 / (1.0f32 + (-acc).exp());
-                y[ti * conv_dim + ch] = acc * sig;
-            }
-        }
-        y
-    }
-
-    fn conv1d_causal_prefill_setup(s: usize, conv_dim: usize, kc: usize) -> TestSetup {
-        let dt = DType::F32;
-        let xbc: Vec<f32> = (0..s * conv_dim).map(|i| ((i as f32) * 0.011).sin() * 0.5).collect();
-        let w: Vec<f32> =
-            (0..kc * conv_dim).map(|i| 0.1 + ((i as f32) * 0.019).cos() * 0.2).collect();
-        let bias: Vec<f32> = (0..conv_dim).map(|i| (i as f32) * 0.001 - 0.05).collect();
-        let y_exp = conv1d_causal_prefill_oracle(&xbc, &w, &bias, s, conv_dim, kc);
-        use super::conv1d_causal_prefill;
-        TestSetup::new(conv1d_causal_prefill::kernel_ir_for())
-            .mode(KernelMode::Grid3D)
-            .input(TestBuffer::from_vec("xbc_in", pack_f32(&xbc, dt), dt))
-            .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
-            .input(TestBuffer::from_vec("bias", pack_f32(&bias, dt), dt))
-            .input(TestBuffer::zeros("y", s * conv_dim, dt))
-            .constexpr("conv_dim", conv_dim as u32)
-            .constexpr("kc", kc as u32)
-            .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
-            .grid_3d((s * conv_dim) as u32, 1, 1, [1, 1, 1])
-    }
-
-    #[test_kernel(dtypes = [f32], tol = [1e-5])]
-    fn test_conv1d_causal_prefill(_dt: DType) -> TestSetup { conv1d_causal_prefill_setup(8, 32, 4) }
-
-    // ── strided_col_copy ──────────────────────────────────────────────────
+    // ── mt_strided_col_copy ──────────────────────────────────────────────────
 
     fn strided_col_copy_oracle(
         src: &[f32],
@@ -819,8 +604,8 @@ pub mod kernel_tests {
         let dt = DType::F32;
         let src: Vec<f32> = (0..s * stride).map(|i| ((i as f32) * 0.017).sin()).collect();
         let exp_v = strided_col_copy_oracle(&src, s, stride, col_off, width);
-        use super::strided_col_copy;
-        TestSetup::new(strided_col_copy::kernel_ir_for())
+        use super::mt_strided_col_copy;
+        TestSetup::new(mt_strided_col_copy::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::zeros("dst", s * width, dt))
@@ -834,7 +619,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32], tol = [1e-6])]
     fn test_strided_col_copy(_dt: DType) -> TestSetup { strided_col_copy_setup(4, 10, 2, 3) }
 
-    // ── softplus_add_rows ─────────────────────────────────────────────────
+    // ── mt_softplus_add_rows ─────────────────────────────────────────────────
 
     fn softplus_add_rows_oracle(src: &[f32], bias: &[f32], n: usize) -> Vec<f32> {
         let s = src.len() / n;
@@ -853,8 +638,8 @@ pub mod kernel_tests {
         let src: Vec<f32> = (0..s * n).map(|i| ((i as f32) * 0.023).sin() * 2.0).collect();
         let bias: Vec<f32> = (0..n).map(|i| (i as f32) * 0.01 - 0.2).collect();
         let exp_v = softplus_add_rows_oracle(&src, &bias, n);
-        use super::softplus_add_rows;
-        TestSetup::new(softplus_add_rows::kernel_ir_for())
+        use super::mt_softplus_add_rows;
+        TestSetup::new(mt_softplus_add_rows::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::from_vec("bias", pack_f32(&bias, dt), dt))
@@ -868,38 +653,21 @@ pub mod kernel_tests {
     fn test_softplus_add_rows(_dt: DType) -> TestSetup { softplus_add_rows_setup(4, 8) }
 }
 
-/// New-syntax benchmarks for all four `ffai::ssm` kernels. `conv1d_causal_step`
-/// and `ssm_step` are also correctness-tested above; `ssm_step_a2d` (2-D
-/// per-(channel,state) A_log) and `mt_ssm_step` (MLX-aligned reduction form)
+/// New-syntax benchmarks for the selective-scan step kernels. `mt_ssm_step` is
+/// also correctness-tested above; `mt_ssm_step_a2d` (2-D
+/// per-(channel,state) A_log) and `mt_ssm_step_grouped` (MLX-aligned reduction form)
 /// are bench-only — both carry recurrent state with no clean one-step oracle
 /// inside this harness. All MLX-less (`class=GenericEmpty`), `Ref(GB/s)` blank.
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::{conv1d_causal_step, mt_ssm_step, ssm_step, ssm_step_a2d};
-
-    // Mamba 2 short-conv at a realistic channel count, K=4. One thread/channel.
-    #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_conv1d_causal_step(dt: DType) -> BenchSetup {
-        let (n_channels, kernel_size) = (1536usize, 4usize);
-        BenchSetup::new(conv1d_causal_step::kernel_ir_for(dt))
-            .mode(KernelMode::Grid3D)
-            .buffer(BenchBuffer::random("x", n_channels, dt))
-            .buffer(BenchBuffer::random("w", kernel_size * n_channels, dt))
-            .buffer(BenchBuffer::random("b", n_channels, dt))
-            .buffer(BenchBuffer::random("state", (kernel_size - 1) * n_channels, dt).output())
-            .buffer(BenchBuffer::zeros("y", n_channels, dt).output())
-            .constexpr("n_channels", n_channels as u32)
-            .constexpr("kernel_size", kernel_size as u32)
-            .grid_3d(n_channels as u32, 1, 1, [1, 1, 1])
-            .bytes_moved((kernel_size * n_channels * dt.size_bytes()) as u64)
-    }
+    use super::{mt_ssm_step, mt_ssm_step_a2d, mt_ssm_step_grouped};
 
     // Scalar-A selective-scan decode. One thread per (head, d).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_ssm_step(dt: DType) -> BenchSetup {
         let (n_heads, head_dim, state_dim) = (32usize, 64usize, 16usize);
-        BenchSetup::new(ssm_step::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_step::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("x", n_heads * head_dim, dt))
             .buffer(BenchBuffer::random("a", n_heads, dt))
@@ -919,7 +687,7 @@ pub mod kernel_benches {
     fn bench_ssm_step_a2d(dt: DType) -> BenchSetup {
         let (n_heads, head_dim, state_dim) = (32usize, 64usize, 16usize);
         let channels = n_heads * head_dim;
-        BenchSetup::new(ssm_step_a2d::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_step_a2d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("x", channels, dt))
             .buffer(BenchBuffer::random("a_log", channels * state_dim, dt))
@@ -941,7 +709,7 @@ pub mod kernel_benches {
         let (n_heads, heads_per_group, batch, dh, ds) = (8usize, 2usize, 2usize, 64usize, 32usize);
         let n_total = n_heads * batch;
         let groups = n_total / heads_per_group;
-        BenchSetup::new(mt_ssm_step::kernel_ir_for(dt))
+        BenchSetup::new(mt_ssm_step_grouped::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", n_total * dh, dt))
             .buffer(BenchBuffer::random("a_log", n_heads, dt))
@@ -963,7 +731,7 @@ pub mod kernel_benches {
 
 // ── Fused Mamba projection split ─────────────────────────────────────────
 //
-// Replaces the 3 sequential `strided_col_copy` calls that carve z, xbc, and
+// Replaces the 3 sequential `mt_strided_col_copy` calls that carve z, xbc, and
 // dt_raw out of the [s, in_proj_out] projection tensor.  One thread per
 // output column × token: reads from the same source row once and writes to
 // the appropriate output buffer.  Eliminates two round-trip dispatch launches.
@@ -976,7 +744,7 @@ pub mod kernel_benches {
 // Grid: [s * in_proj_out, 1, 1]; one thread per source element.
 // Each thread identifies which output slice it belongs to and writes there.
 #[kernel]
-pub fn mamba_split_proj(
+pub fn mt_mamba_split_proj(
     proj: Tensor<f32>,        // [s * in_proj_out] flat row-major
     mut z_out: Tensor<f32>,   // [s * di]
     mut xbc_out: Tensor<f32>, // [s * conv_dim]
@@ -1001,7 +769,7 @@ pub fn mamba_split_proj(
 
 // ── Fused Mamba conv output split ────────────────────────────────────────
 //
-// Replaces the 3 sequential `strided_col_copy` calls that carve x_ssm, b,
+// Replaces the 3 sequential `mt_strided_col_copy` calls that carve x_ssm, b,
 // and c out of yc_silu [s, conv_dim].  Grid matches source size.
 //
 // Layout (conv_dim = di + 2*ng*ds = 4096 + 2*8*128 = 4096 + 2048 = 6144):
@@ -1011,7 +779,7 @@ pub fn mamba_split_proj(
 //
 // Grid: [s * conv_dim, 1, 1]; one thread per source element.
 #[kernel]
-pub fn mamba_split_conv(
+pub fn mt_mamba_split_conv(
     yc: Tensor<f32>,        // [s * conv_dim] flat row-major
     mut x_out: Tensor<f32>, // [s * di]
     mut b_out: Tensor<f32>, // [s * ng_ds]
@@ -1048,7 +816,7 @@ pub fn mamba_split_conv(
 //   One thread-group per (token, norm-group) pair.
 //   Each thread in the block handles 4 consecutive elements.
 #[kernel]
-pub fn gated_group_rmsnorm_batched(
+pub fn mt_gated_group_rmsnorm_batched(
     y: Tensor<f32>,       // [s * di] flat
     z: Tensor<f32>,       // [s * di] flat
     w: Tensor<f32>,       // [di]     norm weights (shared across tokens)
@@ -1096,7 +864,7 @@ pub fn gated_group_rmsnorm_batched(
 // Mamba2 SSD chunked-matmul prefill scan — PORTABLE elementwise kernels.
 //
 // These are the portable (MSL/HIP/SPIRV-codegen) analogs of the raw-CUDA
-// helper kernels in `ffai-ops/src/ssd_scan.rs`. They prepare the operands for
+// helper kernels in `ffai-ops/src/mt_ssd_scan.rs`. They prepare the operands for
 // the 4 batched GEMMs (run via `ffai_gemm_batched`) and combine the result.
 // Everything runs in f32 (no f16 dependency) for portability + correctness.
 //
@@ -1109,7 +877,7 @@ pub fn gated_group_rmsnorm_batched(
 //   A = -exp(a_log[h]),  Lcs[bh, i] = Σ_{k≤i} A·dt[c*L+k]
 // dt layout [T, H]; lcs layout [nc*H, L]. Grid: [nc*H, 1, 1].
 #[kernel]
-pub fn ssd_lcs(
+pub fn mt_ssd_lcs(
     dt: Tensor<f32>,      // [T, H]
     a_log: Tensor<f32>,   // [H]
     mut lcs: Tensor<f32>, // [nc*H, L]
@@ -1141,7 +909,7 @@ pub fn ssd_lcs(
 // Gather/broadcast B,C from [T,G,ds] into [nc*H, L, ds] (head h uses group
 // h/hpg). One thread per output element. Grid: [nc*H*L*ds, 1, 1].
 #[kernel]
-pub fn ssd_gather_bc(
+pub fn mt_ssd_gather_bc(
     b_mat: Tensor<f32>,     // [T, G, ds]
     c_mat: Tensor<f32>,     // [T, G, ds]
     mut b_out: Tensor<f32>, // [nc*H, L, ds]
@@ -1177,7 +945,7 @@ pub fn ssd_gather_bc(
 // Transpose x [T,H,dh] → xt [nc*H, dh, L]. One thread per output element.
 // Grid: [nc*H*dh*L, 1, 1].
 #[kernel]
-pub fn ssd_xt(
+pub fn mt_ssd_xt(
     x: Tensor<f32>,      // [T, H, dh]
     mut xt: Tensor<f32>, // [nc*H, dh, L]
     #[constexpr] t_total: u32,
@@ -1206,7 +974,7 @@ pub fn ssd_xt(
 // CB is the output of G1 ([nc*H, L, L]). One thread per element.
 // Grid: [nc*H*L*L, 1, 1].
 #[kernel]
-pub fn ssd_mmask(
+pub fn mt_ssd_mmask(
     cb: Tensor<f32>,        // [nc*H, L, L] = C·Bᵀ
     lcs: Tensor<f32>,       // [nc*H, L]
     dt: Tensor<f32>,        // [T, H]
@@ -1244,7 +1012,7 @@ pub fn ssd_mmask(
 // (decayed, dt-weighted, transposed B for the chunk-state G3). One thread/elem.
 // Grid: [nc*H*ds*L, 1, 1].
 #[kernel]
-pub fn ssd_bdt(
+pub fn mt_ssd_bdt(
     b_mat: Tensor<f32>,   // [T, G, ds]
     lcs: Tensor<f32>,     // [nc*H, L]
     dt: Tensor<f32>,      // [T, H]
@@ -1283,7 +1051,7 @@ pub fn ssd_bdt(
 // state (after chunk nc-1) → state_out [H, dh, ds].
 // Grid: [H*ds*dh, 1, 1]; one thread per (head, s, p), loops nc serially.
 #[kernel]
-pub fn ssd_recur(
+pub fn mt_ssd_recur(
     s_chunk: Tensor<f32>,       // [nc*H, ds, dh]
     lcs: Tensor<f32>,           // [nc*H, L]
     state_in: Tensor<f32>,      // [H, dh, ds]
@@ -1322,7 +1090,7 @@ pub fn ssd_recur(
 // One thread per (bh, i, p) element; tail rows (t≥T) skipped.
 // Grid: [nc*H*L*dh, 1, 1].
 #[kernel]
-pub fn ssd_combine(
+pub fn mt_ssd_combine(
     y_intra: Tensor<f32>, // [nc*H, L, dh]
     cs: Tensor<f32>,      // [nc*H, L, dh]
     lcs: Tensor<f32>,     // [nc*H, L]
@@ -1373,14 +1141,14 @@ pub fn ssd_combine(
 
 // G1 fused: CB[i,j] = Σ_s C[t_i,g,s] · B[t_j,g,s], then the mmask epilogue
 //   M[i,j] = CB[i,j] · exp(Lcs[bh,i] - Lcs[bh,j]) · dt[t_j,h], causal (i≥j).
-// → writes M [nc*H, L, L] directly. Fuses the separate `ssd_mmask` [L,L]
+// → writes M [nc*H, L, L] directly. Fuses the separate `mt_ssd_mmask` [L,L]
 // HBM round-trip (read CB, write M) into the GEMM epilogue: the `cb` scratch
 // is gone and the decay-mask multiply rides on the GEMM store.
 //   weight role = B (col j → t_j), input role = C (row i → t_i), k = ds.
 // Reads B,C directly from [T, G, ds]; equivalent to ffai_gemm_batched on
 // (b_g, c_g) but without ever materializing them or CB.
 #[kernel]
-pub fn ssd_g1_cb(
+pub fn mt_ssd_g1_cb(
     b_mat: Tensor<f32>,   // [T, G, ds]   (weight role)
     c_mat: Tensor<f32>,   // [T, G, ds]   (input role)
     lcs: Tensor<f32>,     // [nc*H, L]
@@ -1456,7 +1224,7 @@ pub fn ssd_g1_cb(
 //   weight role = sin_t[bz] [dh, ds] (col p), input role = C (row i → t_i),
 //   k = ds. sin_t is already per-batch [nc*H, dh, ds]; only C is broadcast.
 #[kernel]
-pub fn ssd_g4_cs(
+pub fn mt_ssd_g4_cs(
     sin_t: Tensor<f32>,   // [nc*H, dh, ds]   (weight role, per-batch)
     c_mat: Tensor<f32>,   // [T, G, ds]       (input role, broadcast)
     mut out: Tensor<f32>, // [nc*H, L, dh]
