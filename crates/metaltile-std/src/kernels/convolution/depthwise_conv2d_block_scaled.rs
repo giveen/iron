@@ -40,13 +40,49 @@
 
 use metaltile::kernel;
 
-/// mxfp4 quantized depthwise conv2d — E2M1 weight (block 32), E8M0 pow-2 scale.
-#[kernel]
+/// Quantized-weight depthwise conv2d, folded over the 28-format axis (§7). One
+/// weight row per channel (no in-channel sum); per-column filter decode +
+/// per-block scale fold onto `(BITS, WDEC, SKIND)` (buffer types `(WT, ST)`;
+/// legend in `gemm/block_scaled_matmul`). `col = ky·k + kx`, `C = k·k`. Decodes
+/// through `kernels/primitives.rs`. Produces `mt_<FMT>_depthwise_conv2d`.
+#[kernel(variants(
+    (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
+        (mxfp4,        4u32, u32, u8,  0u32, 0u32),
+        (nvfp4,        4u32, u32, u8,  0u32, 1u32),
+        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
+        (int2,         2u32, u32, f32, 1u32, 2u32),
+        (int3,         3u32, u32, f32, 1u32, 2u32),
+        (int4,         4u32, u32, f32, 1u32, 2u32),
+        (int5,         5u32, u32, f32, 1u32, 2u32),
+        (int6,         6u32, u32, f32, 1u32, 2u32),
+        (mxint2,       2u32, u32, u8,  1u32, 0u32),
+        (mxint3,       3u32, u32, u8,  1u32, 0u32),
+        (mxint4,       4u32, u32, u8,  1u32, 0u32),
+        (mxint5,       5u32, u32, u8,  1u32, 0u32),
+        (mxint6,       6u32, u32, u8,  1u32, 0u32),
+        (int2_f16,     2u32, u32, f16, 1u32, 2u32),
+        (int3_f16,     3u32, u32, f16, 1u32, 2u32),
+        (int4_f16,     4u32, u32, f16, 1u32, 2u32),
+        (int5_f16,     5u32, u32, f16, 1u32, 2u32),
+        (int6_f16,     6u32, u32, f16, 1u32, 2u32),
+        (mxfp8_e4m3,   8u32, u8,  u8,  2u32, 0u32),
+        (mxfp8_e5m2,   8u32, u8,  u8,  3u32, 0u32),
+        (mxint8,       8u32, u8,  u8,  4u32, 0u32),
+        (nvfp8,        8u32, u8,  f32, 2u32, 2u32),
+        (fp8_e5m2,     8u32, u8,  f32, 3u32, 2u32),
+        (int8,         8u32, u8,  f32, 4u32, 2u32),
+        (nvfp8_f16,    8u32, u8,  f16, 2u32, 2u32),
+        (fp8_e5m2_f16, 8u32, u8,  f16, 3u32, 2u32),
+        (int8_f16,     8u32, u8,  f16, 4u32, 2u32),
+    ],
+    suffix = "{FMT}_depthwise_conv2d",
+))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp4_depthwise_conv2d<T>(
+pub fn mt<T>(
     input: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
+    weight: Tensor<WT>,
+    scales: Tensor<ST>,
     bias: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] batch: u32,
@@ -60,182 +96,7 @@ pub fn mt_mxfp4_depthwise_conv2d<T>(
     #[constexpr] pad: u32,
     #[constexpr] dilation: u32,
     #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let w_packs_per_row = cols / 8u32;
-    let n_blocks = cols / block_size;
-    let w_row_pack = c * w_packs_per_row;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-            let scale = exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-            let wt = mt_decode_e2m1(nib) * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// nvfp4 quantized depthwise conv2d — E2M1 weight (block 16), E4M3 micro-scale × global.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp4_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-    #[constexpr] global: f32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let w_packs_per_row = cols / 8u32;
-    let n_blocks = cols / block_size;
-    let w_row_pack = c * w_packs_per_row;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-            let scale =
-                mt_decode_e4m3(load(scales[w_row_blk + col / block_size]).cast::<u32>()) * global;
-            let wt = mt_decode_e2m1(nib) * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp4 quantized depthwise conv2d — E2M1 weight (group 32), per-group FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp4_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let w_packs_per_row = cols / 8u32;
-    let n_blocks = cols / block_size;
-    let w_row_pack = c * w_packs_per_row;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-            let scale = load(scales[w_row_blk + col / block_size]);
-            let wt = mt_decode_e2m1(nib) * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// mxfp8 (E4M3) quantized depthwise conv2d — 8-bit weight (block 32), E8M0 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp8_e4m3_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
+    #[constexpr(only_when = "SKIND == 1u32")] global: f32,
 ) {
     let idx = program_id::<0>();
     let ow = idx % out_w;
@@ -249,8 +110,12 @@ pub fn mt_mxfp8_e4m3_depthwise_conv2d<T>(
     let in_c_base = (n * ch + c) * in_h * in_w;
     let cols = k * k;
     let n_blocks = cols / block_size;
-    let w_row = c * cols;
+    let w_row_pack = c * (cols / 8u32);
+    let w_row_word = c * (cols * BITS / 32u32);
+    let w_row_byte = c * cols;
     let w_row_blk = c * n_blocks;
+    let half = 1u32 << (BITS - 1u32);
+    let full = (1u32 << BITS).cast::<f32>();
     let mut acc = load(bias[c]).cast::<f32>();
     for ky in range(0u32, k, 1u32) {
         let ph = ph0 + ky * dilation;
@@ -264,810 +129,42 @@ pub fn mt_mxfp8_e4m3_depthwise_conv2d<T>(
             let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
             let x_m = select(valid, x, 0.0f32);
             let col = ky * k + kx;
-            let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-            let scale = exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// mxfp8 (E5M2) quantized depthwise conv2d — 8-bit weight (block 32), E8M0 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxfp8_e5m2_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-            let scale = exp2(load(scales[w_row_blk + col / block_size]).cast::<f32>() - 127.0f32);
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Legacy fp8 (E5M2) quantized depthwise conv2d — 8-bit weight (group 32), FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp8_e5m2_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]);
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// nvfp8 quantized depthwise conv2d — E4M3 weight (block 16), per-block FP32 scale.
-/// Also serves **fp8_e4m3** (same 8-bit-E4M3 + f32-scale shape).
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp8_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]);
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// Symmetric int8 quantized depthwise conv2d — 8-bit codes (group 64), FP32 scale.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_int8_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]);
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-// ── Symmetric sub-byte integer depthwise conv (int2/3/4/5/6 + MXINT2..6) ─────
-// The filter element is a signed N-bit two's-complement code. Unlike the
-// per-row word-aligned GEMV (`mlx/block_scaled_matmul.rs`, where `in_dim` is a
-// multiple of 32), the depthwise filter squeezes to `[ch, C]` with `C = k*k` —
-// which is generally NOT a multiple of 32, so **per-row bit-streams are not
-// word-aligned**. `quant::format::pack` packs the whole `[ch, C]` matrix as ONE
-// flat LSB-first bit-stream keyed on the *global* flat element index
-// `flat = c * C + col` (it never re-bases per row), so the decode here must use
-// that same global index: `bit_off = (c·C + col)·bits`, then a straddle-aware
-// two-word read into the flat `weight` buffer (no per-row word base). This is
-// exact whether or not `C` is a multiple of 32. Everything else — the
-// (n, c, oh, ow) flattening, the padding/dilation/stride loop, the per-block
-// scale index `c·n_blocks + col/block_size`, the Grid3D geometry — is identical
-// to the existing 8-bit int kernel. `$half`/`$full` are passed as literals
-// (2^(N-1) / 2^N) to keep the constexpr math out of the DSL shift operands.
-
-/// FP32-scaled symmetric int depthwise conv (int2/3/4/5/6): per-tap bit-stream
-/// code × per-group FP32 scale. The filter is one flat `[ch, C]` bit-stream, so
-/// tap `(c, col)` decodes at the GLOBAL bit offset `(c·C + col)·bits`.
-macro_rules! int_dw_conv_f32 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            input: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f32>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] batch: u32,
-            #[constexpr] ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] out_h: u32,
-            #[constexpr] out_w: u32,
-            #[constexpr] k: u32,
-            #[constexpr] stride: u32,
-            #[constexpr] pad: u32,
-            #[constexpr] dilation: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let ow = idx % out_w;
-            let t1 = idx / out_w;
-            let oh = t1 % out_h;
-            let t2 = t1 / out_h;
-            let c = t2 % ch;
-            let n = t2 / ch;
-            let ph0 = oh * stride;
-            let pw0 = ow * stride;
-            let in_c_base = (n * ch + c) * in_h * in_w;
-            let cols = k * k;
-            let n_blocks = cols / block_size;
-            // Flat global element base for this channel's filter row (codes are a
-            // single `[ch, C]` bit-stream keyed on `c·C + col`, never per-row
-            // word-aligned), and the per-channel block base for the scales.
-            let w_row_elem = c * cols;
-            let w_row_blk = c * n_blocks;
-            let mut acc = load(bias[c]).cast::<f32>();
-            for ky in range(0u32, k, 1u32) {
-                let ph = ph0 + ky * dilation;
-                let valid_h = (ph >= pad) & (ph < pad + in_h);
-                let ih = select(valid_h, ph - pad, 0u32);
-                for kx in range(0u32, k, 1u32) {
-                    let pw = pw0 + kx * dilation;
-                    let valid_w = (pw >= pad) & (pw < pad + in_w);
-                    let iw = select(valid_w, pw - pad, 0u32);
-                    let valid = valid_h & valid_w;
-                    let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-                    let x_m = select(valid, x, 0.0f32);
-                    let col = ky * k + kx;
-                    // Straddle-aware two-word read at the GLOBAL bit offset.
-                    let bit_off = (w_row_elem + col) * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weight[word_idx]);
-                    let w1 = load(weight[select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let elem = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales[w_row_blk + col / block_size]);
-                    let wt = elem * scale;
-                    acc = acc + x_m * wt;
+            let elem = if WDEC == 0u32 {
+                mt_decode_e2m1(
+                    (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32,
+                )
+            } else if WDEC == 1u32 {
+                let bit_off = col * BITS;
+                let word_idx = bit_off / 32u32;
+                let bit_in_w = bit_off & 31u32;
+                let bits_in_w0 = 32u32 - bit_in_w;
+                let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                let spill = BITS - lo_bits;
+                let w0 = load(weight[w_row_word + word_idx]);
+                let w1 =
+                    load(weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)]);
+                let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                let qf = q.cast::<f32>();
+                select(q >= half, qf - full, qf)
+            } else {
+                let raw = load(weight[w_row_byte + col]).cast::<u32>();
+                if WDEC == 2u32 {
+                    mt_decode_e4m3(raw)
+                } else if WDEC == 3u32 {
+                    mt_decode_e5m2(raw)
+                } else {
+                    mt_decode_int8(raw)
                 }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_dw_conv_f32!(mt_int2_depthwise_conv2d, 2u32, 2u32, 4.0f32);
-int_dw_conv_f32!(mt_int3_depthwise_conv2d, 3u32, 4u32, 8.0f32);
-int_dw_conv_f32!(mt_int4_depthwise_conv2d, 4u32, 8u32, 16.0f32);
-int_dw_conv_f32!(mt_int5_depthwise_conv2d, 5u32, 16u32, 32.0f32);
-int_dw_conv_f32!(mt_int6_depthwise_conv2d, 6u32, 32u32, 64.0f32);
-
-/// E8M0-scaled symmetric int depthwise conv (MXINT2/3/4/5/6): per-tap bit-stream
-/// code × pow-2 (E8M0) block scale `2^(bits-127)`. Same flat-bit-stream decode as
-/// `int_dw_conv_f32`; only the scale axis differs (one u8 exponent per block).
-macro_rules! int_dw_conv_e8m0 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            input: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<u8>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] batch: u32,
-            #[constexpr] ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] out_h: u32,
-            #[constexpr] out_w: u32,
-            #[constexpr] k: u32,
-            #[constexpr] stride: u32,
-            #[constexpr] pad: u32,
-            #[constexpr] dilation: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let ow = idx % out_w;
-            let t1 = idx / out_w;
-            let oh = t1 % out_h;
-            let t2 = t1 / out_h;
-            let c = t2 % ch;
-            let n = t2 / ch;
-            let ph0 = oh * stride;
-            let pw0 = ow * stride;
-            let in_c_base = (n * ch + c) * in_h * in_w;
-            let cols = k * k;
-            let n_blocks = cols / block_size;
-            let w_row_elem = c * cols;
-            let w_row_blk = c * n_blocks;
-            let mut acc = load(bias[c]).cast::<f32>();
-            for ky in range(0u32, k, 1u32) {
-                let ph = ph0 + ky * dilation;
-                let valid_h = (ph >= pad) & (ph < pad + in_h);
-                let ih = select(valid_h, ph - pad, 0u32);
-                for kx in range(0u32, k, 1u32) {
-                    let pw = pw0 + kx * dilation;
-                    let valid_w = (pw >= pad) & (pw < pad + in_w);
-                    let iw = select(valid_w, pw - pad, 0u32);
-                    let valid = valid_h & valid_w;
-                    let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-                    let x_m = select(valid, x, 0.0f32);
-                    let col = ky * k + kx;
-                    let bit_off = (w_row_elem + col) * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weight[word_idx]);
-                    let w1 = load(weight[select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let elem = select(q >= $half, qf - $full, qf); // sign-extend
-                    let sbits = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                    let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                    let wt = elem * scale;
-                    acc = acc + x_m * wt;
-                }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_dw_conv_e8m0!(mt_mxint2_depthwise_conv2d, 2u32, 2u32, 4.0f32);
-int_dw_conv_e8m0!(mt_mxint3_depthwise_conv2d, 3u32, 4u32, 8.0f32);
-int_dw_conv_e8m0!(mt_mxint4_depthwise_conv2d, 4u32, 8u32, 16.0f32);
-int_dw_conv_e8m0!(mt_mxint5_depthwise_conv2d, 5u32, 16u32, 32.0f32);
-int_dw_conv_e8m0!(mt_mxint6_depthwise_conv2d, 6u32, 32u32, 64.0f32);
-
-/// MXINT8 quantized depthwise conv2d — 8-bit symmetric codes (byte layout,
-/// block 32), E8M0 pow-2 block scale `2^(bits-127)`. Byte-per-code layout
-/// (one `uchar` each) identical to the 8-bit float formats, so it indexes
-/// `weight[c·C + col]` like `mt_int8`; only the decode + E8M0 scale differ.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_mxint8_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-            let sbits = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-// ── FP16-scale twins (Track-1 fp16-scale formats) ───────────────────────────
-// Each kernel below is a verbatim clone of its FP32-scaled twin above; the ONLY
-// change is the scale tensor (`Tensor<f16>` instead of `Tensor<f32>`) and the
-// scale read (`load(scales[...]).cast::<f32>()` instead of `load(scales[...])`).
-// Element decode, weight indexing (including the sub-byte GLOBAL flat bit-offset
-// `(c·C + col)·bits`), Grid3D geometry, and the conv loop are all IDENTICAL to
-// the twin. fp8_e4m3_f16 reuses the nvfp8_f16 kernel (same 8-bit-E4M3 + f16-scale
-// shape), exactly as fp8_e4m3 reuses nvfp8 today.
-
-/// fp4 (FP16 scale) quantized depthwise conv2d — E2M1 weight (group 32),
-/// per-group FP16 scale. Clone of `mt_fp4_depthwise_conv2d`, scale → f16.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp4_f16_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let w_packs_per_row = cols / 8u32;
-    let n_blocks = cols / block_size;
-    let w_row_pack = c * w_packs_per_row;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let nib = (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-            let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-            let wt = mt_decode_e2m1(nib) * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// fp8 (E5M2, FP16 scale) quantized depthwise conv2d — 8-bit weight (group 32),
-/// per-group FP16 scale. Clone of `mt_fp8_e5m2_depthwise_conv2d`, scale → f16.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_fp8_e5m2_f16_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_e5m2(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// nvfp8 (FP16 scale) quantized depthwise conv2d — E4M3 weight (block 16),
-/// per-block FP16 scale. Clone of `mt_nvfp8_depthwise_conv2d`, scale → f16.
-/// Also serves **fp8_e4m3_f16** (same 8-bit-E4M3 + f16-scale shape).
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_nvfp8_f16_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_e4m3(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
-        }
-    }
-    store(out[idx], acc.cast::<T>());
-}
-
-/// FP16-scaled symmetric int depthwise conv (int2/3/4/5/6, FP16-scale twins of
-/// `int_dw_conv_f32`): per-tap bit-stream code × per-group FP16 scale. The filter
-/// is one flat `[ch, C]` bit-stream, so tap `(c, col)` decodes at the GLOBAL bit
-/// offset `(c·C + col)·bits` — identical to the FP32 twin; only the scale differs.
-macro_rules! int_dw_conv_f16 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        #[allow(clippy::too_many_arguments)]
-        pub fn $name<T>(
-            input: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f16>,
-            bias: Tensor<T>,
-            out: Tensor<T>,
-            #[constexpr] batch: u32,
-            #[constexpr] ch: u32,
-            #[constexpr] in_h: u32,
-            #[constexpr] in_w: u32,
-            #[constexpr] out_h: u32,
-            #[constexpr] out_w: u32,
-            #[constexpr] k: u32,
-            #[constexpr] stride: u32,
-            #[constexpr] pad: u32,
-            #[constexpr] dilation: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let idx = program_id::<0>();
-            let ow = idx % out_w;
-            let t1 = idx / out_w;
-            let oh = t1 % out_h;
-            let t2 = t1 / out_h;
-            let c = t2 % ch;
-            let n = t2 / ch;
-            let ph0 = oh * stride;
-            let pw0 = ow * stride;
-            let in_c_base = (n * ch + c) * in_h * in_w;
-            let cols = k * k;
-            let n_blocks = cols / block_size;
-            // Flat global element base for this channel's filter row (codes are a
-            // single `[ch, C]` bit-stream keyed on `c·C + col`, never per-row
-            // word-aligned), and the per-channel block base for the scales.
-            let w_row_elem = c * cols;
-            let w_row_blk = c * n_blocks;
-            let mut acc = load(bias[c]).cast::<f32>();
-            for ky in range(0u32, k, 1u32) {
-                let ph = ph0 + ky * dilation;
-                let valid_h = (ph >= pad) & (ph < pad + in_h);
-                let ih = select(valid_h, ph - pad, 0u32);
-                for kx in range(0u32, k, 1u32) {
-                    let pw = pw0 + kx * dilation;
-                    let valid_w = (pw >= pad) & (pw < pad + in_w);
-                    let iw = select(valid_w, pw - pad, 0u32);
-                    let valid = valid_h & valid_w;
-                    let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-                    let x_m = select(valid, x, 0.0f32);
-                    let col = ky * k + kx;
-                    // Straddle-aware two-word read at the GLOBAL bit offset.
-                    let bit_off = (w_row_elem + col) * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weight[word_idx]);
-                    let w1 = load(weight[select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let elem = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-                    let wt = elem * scale;
-                    acc = acc + x_m * wt;
-                }
-            }
-            store(out[idx], acc.cast::<T>());
-        }
-    };
-}
-int_dw_conv_f16!(mt_int2_f16_depthwise_conv2d, 2u32, 2u32, 4.0f32);
-int_dw_conv_f16!(mt_int3_f16_depthwise_conv2d, 3u32, 4u32, 8.0f32);
-int_dw_conv_f16!(mt_int4_f16_depthwise_conv2d, 4u32, 8u32, 16.0f32);
-int_dw_conv_f16!(mt_int5_f16_depthwise_conv2d, 5u32, 16u32, 32.0f32);
-int_dw_conv_f16!(mt_int6_f16_depthwise_conv2d, 6u32, 32u32, 64.0f32);
-
-/// int8 (FP16 scale) quantized depthwise conv2d — 8-bit codes (byte layout,
-/// group 64), per-group FP16 scale. Clone of `mt_int8_depthwise_conv2d`,
-/// scale → f16.
-#[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn mt_int8_f16_depthwise_conv2d<T>(
-    input: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    bias: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] batch: u32,
-    #[constexpr] ch: u32,
-    #[constexpr] in_h: u32,
-    #[constexpr] in_w: u32,
-    #[constexpr] out_h: u32,
-    #[constexpr] out_w: u32,
-    #[constexpr] k: u32,
-    #[constexpr] stride: u32,
-    #[constexpr] pad: u32,
-    #[constexpr] dilation: u32,
-    #[constexpr] block_size: u32,
-) {
-    let idx = program_id::<0>();
-    let ow = idx % out_w;
-    let t1 = idx / out_w;
-    let oh = t1 % out_h;
-    let t2 = t1 / out_h;
-    let c = t2 % ch;
-    let n = t2 / ch;
-    let ph0 = oh * stride;
-    let pw0 = ow * stride;
-    let in_c_base = (n * ch + c) * in_h * in_w;
-    let cols = k * k;
-    let n_blocks = cols / block_size;
-    let w_row = c * cols;
-    let w_row_blk = c * n_blocks;
-    let mut acc = load(bias[c]).cast::<f32>();
-    for ky in range(0u32, k, 1u32) {
-        let ph = ph0 + ky * dilation;
-        let valid_h = (ph >= pad) & (ph < pad + in_h);
-        let ih = select(valid_h, ph - pad, 0u32);
-        for kx in range(0u32, k, 1u32) {
-            let pw = pw0 + kx * dilation;
-            let valid_w = (pw >= pad) & (pw < pad + in_w);
-            let iw = select(valid_w, pw - pad, 0u32);
-            let valid = valid_h & valid_w;
-            let x = load(input[in_c_base + ih * in_w + iw]).cast::<f32>();
-            let x_m = select(valid, x, 0.0f32);
-            let col = ky * k + kx;
-            let elem = mt_decode_int8(load(weight[w_row + col]).cast::<u32>());
-            let scale = load(scales[w_row_blk + col / block_size]).cast::<f32>();
-            let wt = elem * scale;
-            acc = acc + x_m * wt;
+            };
+            let sraw = load(scales[w_row_blk + col / block_size]);
+            let scale = if SKIND == 0u32 {
+                exp2(sraw.cast::<f32>() - 127.0f32)
+            } else if SKIND == 1u32 {
+                mt_decode_e4m3(sraw.cast::<u32>()) * global
+            } else {
+                sraw.cast::<f32>()
+            };
+            acc = acc + x_m * (elem * scale);
         }
     }
     store(out[idx], acc.cast::<T>());
