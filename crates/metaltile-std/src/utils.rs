@@ -174,6 +174,55 @@ pub fn input_buffer(name: &str, n: usize, dt: DType, domain: InputDomain) -> Ben
     )
 }
 
+// ── Block-scaled dequant-matmul test fixtures ─────────────────────────────────
+// Shared by the `variants(FMT)` block-scaled GEMV / GEMM / MoE correctness
+// tests (§7 format-axis folds), so each folded kernel file is a thin
+// shape-binding wrapper rather than re-deriving the fixture + oracle.
+
+/// Deterministic `[out_dim, in_dim]` weights (mixed signs, per-block magnitude
+/// variation) — the shared fixture for the block-scaled dequant tests.
+pub fn block_scaled_weights(out_dim: usize, in_dim: usize) -> Vec<f32> {
+    (0..out_dim * in_dim)
+        .map(|i| {
+            let r = (i / in_dim) as f32;
+            let c = (i % in_dim) as f32;
+            let mag = (0.5 + r * 0.25) * (0.1 + (c % 13.0) * 0.2);
+            if (i % 3) == 0 { -mag } else { mag }
+        })
+        .collect()
+}
+
+/// Dequant-then-dot GEMV oracle: `out[r] = Σ_c wdq[r, c] · input[c]`.
+pub fn block_scaled_qgemv_oracle(
+    wdq: &[f32],
+    input: &[f32],
+    out_dim: usize,
+    in_dim: usize,
+) -> Vec<f32> {
+    (0..out_dim).map(|r| (0..in_dim).map(|c| wdq[r * in_dim + c] * input[c]).sum()).collect()
+}
+
+/// Dequant-then-matmul GEMM oracle: `out[m, n] = Σ_k wdq[n, k] · x[m, k]`.
+pub fn block_scaled_qmm_oracle(
+    wdq: &[f32],
+    x: &[f32],
+    m_rows: usize,
+    in_dim: usize,
+    out_dim: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; m_rows * out_dim];
+    for mr in 0..m_rows {
+        for n in 0..out_dim {
+            let mut acc = 0.0f32;
+            for k in 0..in_dim {
+                acc += wdq[n * in_dim + k] * x[mr * in_dim + k];
+            }
+            out[mr * out_dim + n] = acc;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

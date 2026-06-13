@@ -171,30 +171,13 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
+        utils::{block_scaled_qgemv_oracle, block_scaled_weights},
         quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
     /// One TG-row's lanes; ≥ 32 and a multiple of 32 (the Reduction contract).
     const TPG: u32 = 64;
-
-    /// Deterministic `[out_dim, in_dim]` weights with mixed signs + per-block
-    /// magnitude variation.
-    fn weights(out_dim: usize, in_dim: usize) -> Vec<f32> {
-        (0..out_dim * in_dim)
-            .map(|i| {
-                let r = (i / in_dim) as f32;
-                let c = (i % in_dim) as f32;
-                let mag = (0.5 + r * 0.25) * (0.1 + (c % 13.0) * 0.2);
-                if (i % 3) == 0 { -mag } else { mag }
-            })
-            .collect()
-    }
-
-    /// Dequant-then-dot reference: `out[r] = Σ_c dequant(W)[r,c] · input[c]`.
-    fn qgemv_oracle(wdq: &[f32], input: &[f32], out_dim: usize, in_dim: usize) -> Vec<f32> {
-        (0..out_dim).map(|r| (0..in_dim).map(|c| wdq[r * in_dim + c] * input[c]).sum()).collect()
-    }
 
     fn qgemv_setup(
         kernel: Kernel,
@@ -203,13 +186,13 @@ pub mod kernel_tests {
         in_dim: usize,
         dt: DType,
     ) -> TestSetup {
-        let w = weights(out_dim, in_dim);
+        let w = block_scaled_weights(out_dim, in_dim);
         let p = crate::quant::format::pack(fmt, &w, out_dim, in_dim);
         let wdq = crate::quant::format::dequant(fmt, &p, out_dim, in_dim);
         let input_f: Vec<f32> = (0..in_dim).map(|i| ((i % 11) as f32 - 5.0) * 0.01).collect();
         // Round-trip the input through `dt` so the oracle sees what the GPU sees.
         let x = unpack_f32(&pack_f32(&input_f, dt), dt);
-        let expected = qgemv_oracle(&wdq, &x, out_dim, in_dim);
+        let expected = block_scaled_qgemv_oracle(&wdq, &x, out_dim, in_dim);
         // 8-bit codes bind as one uchar each; every sub-byte width (4-bit nibble
         // packs + int2/3/5/6 tight bit-streams) binds as packed u32 words. FP32
         // scales bind as f32; FP16 scales as f16; E8M0/E4M3 scales as one byte.
