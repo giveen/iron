@@ -16,7 +16,7 @@ use metaltile::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn ffai_moe_bgemm_iq2xxs_view_u16_bm64<T>(
+pub fn mt_moe_bgemm_iq2xxs_view_u16_bm64<T>(
     x: Tensor<T>,
     view_u16: Tensor<u16>,
     view_f16: Tensor<f16>,
@@ -165,7 +165,7 @@ pub fn ffai_moe_bgemm_iq2xxs_view_u16_bm64<T>(
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_moe_bgemm_iq2xxs_view_u16_bm64;
+    use super::mt_moe_bgemm_iq2xxs_view_u16_bm64;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench(dt: DType) -> BenchSetup {
@@ -174,7 +174,7 @@ pub mod kernel_benches {
         let n_out = 2048usize;
         let t_rows = 256usize;
         let nblk = n_out * k_in / 256;
-        BenchSetup::new(ffai_moe_bgemm_iq2xxs_view_u16_bm64::kernel_ir_for(dt))
+        BenchSetup::new(mt_moe_bgemm_iq2xxs_view_u16_bm64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", t_rows * k_in, dt))
             .buffer(BenchBuffer::random("view_u16", n_experts * nblk * 33, DType::U16))

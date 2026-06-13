@@ -21,9 +21,9 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::{
-    moe_bgemm_iq2xxs_bm64::ffai_moe_bgemm_iq2xxs_bm64,
-    moe_gemv_rows_iq2xxs::ffai_moe_gemv_rows_iq2xxs,
+use metaltile_std::kernels::moe::{
+    bgemm_iq2xxs_bm64::mt_moe_bgemm_iq2xxs_bm64,
+    gemv_rows_iq2xxs::mt_moe_gemv_rows_iq2xxs,
 };
 
 fn read_u32(p: &str) -> Vec<u32> {
@@ -155,7 +155,7 @@ fn run_bm64(
     buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut k = ffai_moe_bgemm_iq2xxs_bm64::kernel_ir_for(dt.to_dtype());
+    let mut k = mt_moe_bgemm_iq2xxs_bm64::kernel_ir_for(dt.to_dtype());
     k.mode = KernelMode::Reduction;
     let gx = n_out / 64;
     let gy = m_total.div_ceil(64);
@@ -191,7 +191,7 @@ fn run_gemv(
     buffers.insert("m_total".into(), (m_total as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut k = ffai_moe_gemv_rows_iq2xxs::kernel_ir_for(dt.to_dtype());
+    let mut k = mt_moe_gemv_rows_iq2xxs::kernel_ir_for(dt.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, m_total, 1], [32, 1, 1])

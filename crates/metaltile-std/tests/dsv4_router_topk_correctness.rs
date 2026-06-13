@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_dsv4_router_topk` — top-K by biased
+//! GPU correctness for `ffai::mt_moe_router_topk_biased` — top-K by biased
 //! score, weights = unbiased[chosen] renormalised to sum 1.
 #![cfg(target_os = "macos")]
 
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes, unpack_u32_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::dsv4_router_topk::{mt_dsv4_router_topk, mt_remap_u32};
+use metaltile_std::kernels::moe::router_topk_biased::{mt_moe_router_topk_biased, mt_remap_u32};
 
 #[test]
 fn dsv4_router_topk_f32() {
@@ -37,7 +37,7 @@ fn dsv4_router_topk_f32() {
     buffers.insert("k".into(), (k as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut kernel = mt_dsv4_router_topk::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = mt_moe_router_topk_biased::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [1, 1, 1], [32, 1, 1])

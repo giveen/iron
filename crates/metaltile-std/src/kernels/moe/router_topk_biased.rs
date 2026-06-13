@@ -26,7 +26,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn mt_dsv4_router_topk<T>(
+pub fn mt_moe_router_topk_biased<T>(
     score_biased: Tensor<T>,
     score_unbiased: Tensor<T>,
     mut indices_out: Tensor<u32>,
@@ -104,13 +104,13 @@ pub fn mt_remap_u32(
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::{mt_dsv4_router_topk, mt_remap_u32};
+    use super::{mt_moe_router_topk_biased, mt_remap_u32};
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_dsv4_router_topk(dt: DType) -> BenchSetup {
+    fn bench_moe_router_topk_biased(dt: DType) -> BenchSetup {
         let n_experts = 256usize;
         let k = 6usize;
-        BenchSetup::new(mt_dsv4_router_topk::kernel_ir_for(dt))
+        BenchSetup::new(mt_moe_router_topk_biased::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("score_biased", n_experts, dt))
             .buffer(BenchBuffer::random("score_unbiased", n_experts, dt))

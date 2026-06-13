@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::moe_gather_down_q2k` — fused 6-expert
+//! GPU correctness for `kernels::moe::gather_down_q2k` — fused 6-expert
 //! Q2_K inline-dequant down-projection + router-weighted sum. Validates
 //! against a CPU reference running the identical (production-proven)
 //! Q2_K dequant formula.
@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::moe_gather_down_q2k::ffai_moe_gather_down_q2k;
+use metaltile_std::kernels::moe::gather_down_q2k::mt_moe_gather_down_q2k;
 // The Q2_K output-index → (qs byte, 2-bit shift) map is the single shared
 // definition in `quant::gguf`: the kernel, the quantizer, and this oracle all
 // read it, so the layout can't drift apart (getting it wrong was PR #264).
@@ -111,7 +111,7 @@ fn run_gpu(
     buffers.insert("n_slots".into(), (N_SLOTS as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let mut kernel = ffai_moe_gather_down_q2k::kernel_ir_for(dt.to_dtype());
+    let mut kernel = mt_moe_gather_down_q2k::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [m_out, 1, 1], [32, 1, 1])

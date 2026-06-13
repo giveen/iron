@@ -1,17 +1,25 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! MPP-backed MoE grouped int4 BGEMM — `mt_moe_gather_qmm_mma_int4_bm64_mpp`.
+//! MPP-backed MoE grouped int8 BGEMM — `mt_moe_gather_qmm_mma_int8_bm64_mpp`.
 //!
-//! BM=BN=64, BK=32 variant of the MPP MoE kernel. Where `…_bm16_mpp`
-//! runs one simdgroup over a 16×32 tile, this runs **4 simdgroups** in a
-//! 2×2 warp grid over a 64×64 tile — each SG owns a 32×32 sub-tile and a
-//! 32×32×32 `matmul2d`. For long-context prefill the larger tile amortizes
-//! the int4 dequant across more output.
+//! BM=BN=64, BK=32 int8 variant of `mt_moe_gather_qmm_mma_int4_bm64_mpp`.
+//! Runs **4 simdgroups** in a 2×2 warp grid over a 64×64 tile — each SG owns
+//! a 32×32 sub-tile and a 32×32×32 `matmul2d`. For long-context prefill the
+//! larger tile amortises the int8 dequant across more output.
 //!
-//! Expressed in the `#[kernel]` DSL via the `coop_tile_*` intrinsics —
-//! no `Op::InlineMsl`. Each SG's `coop_tile_load_*` / `coop_tile_store_c`
-//! takes a per-SG offset into the shared `Xs` / `Ws` / `OutScratch`
-//! threadgroup buffers.
+//! ## int4 → int8 lane mapping (BM=64)
+//!
+//! W tile size: BN(64) × BK(32) = 2048 elements.
+//!
+//! - **int4**: 128 lanes × 2 packs/lane × 8 nibbles/pack = 2048 ✓
+//!   - pack_id = lane_in_tg*2 + _pi; w_row = pack_id/4; pack_in_row = pack_id%4
+//!   - k_off = kb + pack_in_row*8; ws_base = w_row*32 + pack_in_row*8
+//!   - Extracts 8 nibbles: `(packed >> (j*4)) & 0xf`
+//!
+//! - **int8**: 128 lanes × 4 packs/lane × 4 bytes/pack = 2048 ✓
+//!   - pack_id = lane_in_tg*4 + _pi; w_row = pack_id/8; pack_in_row = pack_id%8
+//!   - k_off = kb + pack_in_row*4; ws_base = w_row*32 + pack_in_row*4
+//!   - Extracts 4 bytes: `(packed >> (j*8)) & 0xff`
 //!
 //! ## Descriptor
 //!
@@ -31,15 +39,15 @@
 //!   `[128, 1, 1]` (4 simdgroups, 2×2 warp grid).
 //! - `k_in % 32 == 0`, `n_out % 64 == 0`, `group_size` divides `k_in`.
 //!
-//! Correctness validated by `tests/moe_gather_qmm_mpp_bm64_correctness.rs`.
+//! Correctness validated by `tests/moe_gather_qmm_mpp_bm64_int8_correctness.rs`.
 
 use metaltile::kernel;
 
-/// MPP MoE int4 grouped BGEMM, BM=BN=64 / BK=32, 4 simdgroups (2×2).
-/// Signature matches `…_bm16_mpp`.
+/// MPP MoE int8 grouped BGEMM, BM=BN=64 / BK=32, 4 simdgroups (2×2).
+/// Signature matches `…_int4_bm64_mpp`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma_int4_bm64_mpp<T>(
+pub fn mt_moe_gather_qmm_mma_int8_bm64_mpp<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -55,10 +63,11 @@ pub fn mt_moe_gather_qmm_mma_int4_bm64_mpp<T>(
     let m_tile_base = tgid_y * 64u32;
     let sg = simd_group_id();
     let lane_in_tg = sg * 32u32 + simd_lane;
-    // 2×2 warp grid: sm/sn select this SG's 32×32 sub-tile.
+    // 2×2 warp grid: sg_m_base / sg_n_base select this SG's 32×32 sub-tile.
     let sg_m_base = (sg / 2u32) * 32u32;
     let sg_n_base = (sg & 1u32) * 32u32;
-    let packs_per_row = k_in / 8u32;
+    // int8: 4 bytes per u32 → k_in / 4 packs per weight row.
+    let packs_per_row = k_in / 4u32;
     let groups_per_row = k_in / group_size;
     // X coop-load: 128 lanes × 16 contiguous K = 2048 = BM(64)×TG_LD(32).
     let x_m_row = lane_in_tg / 2u32;
@@ -85,6 +94,8 @@ pub fn mt_moe_gather_qmm_mma_int4_bm64_mpp<T>(
         let cur_row = m_tile_base + sub_offset;
         let cur_in_range = (sub_offset < 64u32) & (cur_row < m_total);
         let cur_expert = select(cur_in_range, load(indices[cur_row]), 4294967295u32);
+        // Walk forward to find the first row whose expert differs, clamping
+        // sub_end at the tile boundary or at m_total.
         let mut sub_end = 64u32;
         let mut found = 0u32;
         for _ii in range(0u32, 64u32, 1u32) {
@@ -119,24 +130,37 @@ pub fn mt_moe_gather_qmm_mma_int4_bm64_mpp<T>(
                     let xv = load(x[x_dev_base + _i]).cast::<f32>();
                     threadgroup_store("Xs", x_ws_base + _i, select(in_run_x, xv, 0.0f32));
                 }
-                // Dequant W → Ws. 128 lanes × 2 packs/lane = 256 packs.
-                for _pi in range(0u32, 2u32, 1u32) {
-                    let pack_id = lane_in_tg * 2u32 + _pi;
-                    let w_row = pack_id / 4u32; // 0..63 (BN rows)
-                    let pack_in_row = pack_id & 3u32; // 0..3 (BK=32 → 4 packs)
+                // Dequant W → Ws.
+                //
+                // int8 lane mapping: 128 lanes × 4 packs/lane × 4 bytes/pack
+                //   = 2048 = BN(64) × BK(32).
+                //
+                // pack_id     = lane_in_tg*4 + _pi   (0..511)
+                // w_row       = pack_id / 8           (0..63 = BN rows)
+                // pack_in_row = pack_id % 8           (0..7 — BK=32 → 8 u32s of 4 bytes)
+                //
+                // k_off   = kb + pack_in_row*4
+                // ws_base = w_row*32 + pack_in_row*4
+                //
+                // Each pack holds 4 bytes (one per K-element); inner _j in 0..4
+                // extracts byte j via (packed >> (j*8)) & 0xff.
+                for _pi in range(0u32, 4u32, 1u32) {
+                    let pack_id = lane_in_tg * 4u32 + _pi;
+                    let w_row = pack_id / 8u32; // 0..63 (BN rows)
+                    let pack_in_row = pack_id & 7u32; // 0..7 (BK=32 → 8 packs)
                     let pack_dev = w_expert_base
                         + (n_tile_base + w_row) * packs_per_row
-                        + kb / 8u32
+                        + kb / 4u32
                         + pack_in_row;
                     let packed = load(w[pack_dev]);
-                    let k_off = kb + pack_in_row * 8u32;
+                    let k_off = kb + pack_in_row * 4u32;
                     let g = k_off / group_size;
                     let sb_off = sb_expert_base + (n_tile_base + w_row) * groups_per_row + g;
                     let s = load(scales[sb_off]).cast::<f32>();
                     let b = load(biases[sb_off]).cast::<f32>();
-                    let ws_base = w_row * 32u32 + pack_in_row * 8u32;
-                    for _j in range(0u32, 8u32, 1u32) {
-                        let q = ((packed >> (_j * 4u32)) & 15u32).cast::<f32>();
+                    let ws_base = w_row * 32u32 + pack_in_row * 4u32;
+                    for _j in range(0u32, 4u32, 1u32) {
+                        let q = ((packed >> (_j * 8u32)) & 255u32).cast::<f32>();
                         threadgroup_store("Ws", ws_base + _j, s * q + b);
                     }
                 }
@@ -184,7 +208,7 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(dt);
+            let k = mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(dt);
             assert_eq!(k.params.len(), 6);
             assert_eq!(k.constexprs.len(), 4);
             let all_ops =
@@ -197,7 +221,7 @@ mod tests {
 
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(DType::BF16);
+        let k = mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -210,23 +234,25 @@ mod tests {
     }
 }
 
-/// New-syntax correctness test for the MPP MoE int4 BGEMM (BM=BN=64). Shares
-/// the per-row-`indices` int4 dequant-then-matmul oracle with the BM=16
-/// sibling; the 4-SG 2x2 warp grid over a 64x64 tile changes only the tile
-/// geometry (BN=64 → n_out/64 n-tiles, BM=64 → ceil(M/64) m-tiles, tpg=128).
+/// New-syntax correctness test for the MPP MoE int8 BGEMM (BM=BN=64, 4 SGs).
+/// Oracle is the shared per-row-`indices` int8 dequant-then-grouped-matmul
+/// (4 unsigned bytes per u32). Inputs are dtype-rounded; tolerance is wide
+/// because the 2×2 warp-grid cooperative-tensor accumulator reorders the K
+/// reduction.
 ///
 /// Grid (Reduction, 4 simdgroups per TG): `grid_3d(n_out/64, ceil(m_total/64), 1, [128,1,1])`.
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::mt_moe_gather_qmm_mma_int4_bm64_mpp;
-    use crate::ffai::moe_mpp_shared::{MmaTestShape, int4_indexed_setup};
+    use super::mt_moe_gather_qmm_mma_int8_bm64_mpp;
+    use crate::kernels::moe::mpp_shared::{MmaTestShape, int8_indexed_setup};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_moe_gather_qmm_mma_int4_bm64_mpp(dt: DType) -> TestSetup {
-        // BN=64 → 64/64=1 n-tile, BM=64 → ceil(64/64)=1 m-tile.
-        int4_indexed_setup(
-            mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(dt),
+    fn test_moe_gather_qmm_mma_int8_bm64_mpp(dt: DType) -> TestSetup {
+        // BN=64 → 64/64=1 n-tile, BM=64 → ceil(64/64)=1 m-tile. BK=32 → k_in=64
+        // is 2 K-blocks; group_size=32 aligns to the BK stride.
+        int8_indexed_setup(
+            mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
             64,  // bn
             64,  // bm
@@ -236,19 +262,22 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for the MPP MoE int4 BGEMM (BM=BN=64). Qwen3.6-A3B-ish.
+/// New-syntax benchmark for the MPP MoE int8 BGEMM (BM=BN=64). `bits=8` →
+/// `k_in/4` u32 weight words/row.
+///
+/// Grid (Reduction, 4 simdgroups per TG): `grid_3d(n_out/64, ceil(m_total/64), 1, [128,1,1])`.
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::mt_moe_gather_qmm_mma_int4_bm64_mpp;
-    use crate::ffai::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
+    use super::mt_moe_gather_qmm_mma_int8_bm64_mpp;
+    use crate::kernels::moe::mpp_shared::{MmaBenchShape, int4_mma_bench};
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_moe_gather_qmm_mma_int4_bm64_mpp(dt: DType) -> BenchSetup {
+    fn bench_moe_gather_qmm_mma_int8_bm64_mpp(dt: DType) -> BenchSetup {
         int4_mma_bench(
-            mt_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(dt),
+            mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(dt),
             MmaBenchShape {
-                bits: 4,
+                bits: 8,
                 bn: 64,
                 bm: 64,
                 tpg: 128,

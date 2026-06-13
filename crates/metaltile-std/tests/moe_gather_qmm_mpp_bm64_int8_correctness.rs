@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `ffai::moe_mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp`.
+//! GPU correctness for `kernels::moe::mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp`.
 //!
 //! BM=BN=64 MPP MoE int8 kernel — same output semantics as the int4 BM=64
 //! sibling but the weight layout changes from 8 nibbles/u32 to 4 bytes/u32.
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::{moe::mt_moe_gather_qmm_b8, moe_mpp_bm64_int8};
+use metaltile_std::kernels::moe::{orchestration::mt_moe_gather_qmm_b8, mpp_bm64_int8};
 
 /// Pack a row of int8 weight codes into uint32s (4 codes per uint, LE byte
 /// order). Code values must be in 0..=255.
@@ -134,7 +134,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_clean_tile() {
         buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = moe_mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
+        let mut k = mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
             Dt::F32.to_dtype(),
         );
         k.mode = KernelMode::Reduction;
@@ -250,7 +250,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_multi_tile() {
         buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = moe_mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
+        let mut k = mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
             Dt::F32.to_dtype(),
         );
         k.mode = KernelMode::Reduction;
@@ -370,7 +370,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_bf16_matches_b8_clean_tile() {
         buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = moe_mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
+        let mut k = mpp_bm64_int8::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(
             Dt::Bf16.to_dtype(),
         );
         k.mode = KernelMode::Reduction;

@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::moe_gather_gemv_iq2xxs` — the fused
+//! GPU correctness for `kernels::moe::gather_gemv_iq2xxs` — the fused
 //! 6-expert IQ2_XXS inline-dequant gather GEMV used by the DSv4 decode
 //! FFN. Validates GPU output against a CPU reference that runs the
 //! identical (production-proven) IQ2_XXS dequant formula, so a wrong
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::moe_gather_gemv_iq2xxs::ffai_moe_gather_gemv_iq2xxs;
+use metaltile_std::kernels::moe::gather_gemv_iq2xxs::mt_moe_gather_gemv_iq2xxs;
 
 const N_SLOTS: usize = 6;
 
@@ -109,7 +109,7 @@ fn run_gpu(
     buffers.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let mut kernel = ffai_moe_gather_gemv_iq2xxs::kernel_ir_for(dt.to_dtype());
+    let mut kernel = mt_moe_gather_gemv_iq2xxs::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     // grid (threadgroups) = [m_out, n_slots, 1], one 32-lane simdgroup each.

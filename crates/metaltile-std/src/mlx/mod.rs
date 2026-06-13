@@ -14,10 +14,9 @@
 //! expected to wire up eventually, it lives in `ffai/` until the
 //! comparison lands.
 
-// block_scaled_dequant → quant family; block_scaled_moe → moe family
-// (migrated later). The quantized matmuls moved to kernels/gemm/.
+// block_scaled_dequant → quant family (migrated later); block_scaled_moe →
+// kernels/moe/. The quantized matmuls moved to kernels/gemm/.
 pub mod block_scaled_dequant;
-pub mod block_scaled_moe;
 pub mod scaled_dot_product_attention;
 pub mod sdpa_vector;
 pub mod steel;

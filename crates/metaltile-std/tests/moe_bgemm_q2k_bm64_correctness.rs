@@ -1,7 +1,7 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
 //! bm64 Q2_K BGEMM must match the proven 16×32 pool kernel
-//! (ffai_moe_gather_bgemm_q2k_mpp). cosine ≥ 0.999. NO 86GB model load.
+//! (mt_moe_gather_bgemm_q2k_mpp). cosine ≥ 0.999. NO 86GB model load.
 #![cfg(target_os = "macos")]
 
 mod common;
@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::{
-    moe_bgemm_q2k_bm64::ffai_moe_bgemm_q2k_bm64,
-    moe_bgemm_q2k_mpp::ffai_moe_gather_bgemm_q2k_mpp,
+use metaltile_std::kernels::moe::{
+    bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
+    bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
 };
 
 fn xorshift(s: &mut u32) -> u32 {
@@ -64,7 +64,7 @@ fn bgemm_q2k_bm64_matches_pool_kernel() {
     pool.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
     pool.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
     pool.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
-    let mut kp = ffai_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kp = mt_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
     kp.mode = KernelMode::Reduction;
     let rp = ctx
         .dispatch_with_grid(&kp, &pool, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [
@@ -75,7 +75,7 @@ fn bgemm_q2k_bm64_matches_pool_kernel() {
 
     let mut b = pool.clone();
     b.insert("out".into(), pack_bytes(&vec![0.0f32; t_rows * n_out], Dt::F32));
-    let mut kb = ffai_moe_bgemm_q2k_bm64::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kb = mt_moe_bgemm_q2k_bm64::kernel_ir_for(Dt::F32.to_dtype());
     kb.mode = KernelMode::Reduction;
     let rb = ctx
         .dispatch_with_grid(&kb, &b, &BTreeMap::new(), [n_out / 64, t_rows.div_ceil(64), 1], [

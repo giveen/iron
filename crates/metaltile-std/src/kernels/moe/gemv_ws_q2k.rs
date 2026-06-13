@@ -1,7 +1,7 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill MoE Q2_K WEIGHT-STATIONARY gemv (down projection) — the Q2_K
-//! twin of ffai_moe_gemv_ws_iq2xxs. Dequants each expert's weight row
+//! twin of mt_moe_gemv_ws_iq2xxs. Dequants each expert's weight row
 //! W_down[expert,m,:] ONCE into threadgroup memory and reuses it across
 //! all rows of that expert in the tile (amortized like bm64 but at gemv
 //! speed). Rows are pre-permuted by expert (contiguous), so a tile is
@@ -16,7 +16,7 @@ use metaltile::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn ffai_moe_gemv_ws_q2k<T>(
+pub fn mt_moe_gemv_ws_q2k<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     scales: Tensor<u8>,
@@ -104,7 +104,7 @@ pub fn ffai_moe_gemv_ws_q2k<T>(
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_moe_gemv_ws_q2k;
+    use super::mt_moe_gemv_ws_q2k;
 
     // M=256 rows, production down dims (m_out=4096 hidden, k_in=2048).
     #[bench(dtypes = [f32, f16, bf16])]
@@ -115,7 +115,7 @@ pub mod kernel_benches {
         let k_in = 2048usize;
         let rows_per_tile = 8usize;
         let nblk = m_out * (k_in / 256);
-        BenchSetup::new(ffai_moe_gemv_ws_q2k::kernel_ir_for(dt))
+        BenchSetup::new(mt_moe_gemv_ws_q2k::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m_total * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_experts * nblk * 16, DType::U32))

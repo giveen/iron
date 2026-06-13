@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::ffai_moe_gather_bgemm_q2k_mpp` — prefill Q2_K
+//! GPU correctness for `ffai::mt_moe_gather_bgemm_q2k_mpp` — prefill Q2_K
 //! grouped BGEMM. Oracle: per-row Q2_K dequant gemv. Cosine ≥ 0.99.
 #![cfg(target_os = "macos")]
 
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::moe_bgemm_q2k_mpp::ffai_moe_gather_bgemm_q2k_mpp;
+use metaltile_std::kernels::moe::bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp;
 // Shared Q2_K output-index → (qs byte, 2-bit shift) map (see PR #264/#265): the
 // kernel, quantizer, and this oracle all read the one definition in quant::gguf.
 use metaltile_std::quant::gguf::q2_k_qpos;
@@ -96,7 +96,7 @@ fn bgemm_q2k_mpp_matches_gemv_oracle() {
     buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = ffai_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = mt_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [

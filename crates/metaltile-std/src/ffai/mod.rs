@@ -27,8 +27,6 @@ pub mod aura_value;
 // batched_* projection GEMV/GEMM + dequant_gemv migrated to kernels/gemm/.
 pub mod dequant_gather;
 pub mod dequant_gather_block_scaled;
-pub mod dequant_gemv_expert_indexed;
-pub mod dequant_gemv_expert_indexed_block_scaled;
 pub mod dsv4_compressor_pool;
 pub mod dsv4_csa_sdpa_decode;
 pub mod dsv4_fp8_block_dequant;
@@ -37,7 +35,6 @@ pub mod dsv4_indexer_topk;
 pub mod dsv4_mhc;
 pub mod dsv4_mhc_sinkhorn_split;
 pub mod dsv4_mxfp4_dequant;
-pub mod dsv4_router_topk;
 pub mod dsv4_swiglu_limit;
 pub mod ffai_dequant_q4;
 pub mod flash_block_scaled_sdpa;
@@ -51,38 +48,9 @@ pub mod gguf_dequant_q2_k;
 pub mod gguf_dequant_q8_0;
 pub mod gguf_iq2_xxs_extract_qs;
 pub mod leaky_relu;
-pub mod moe;
-pub mod moe_bgemm_iq2xxs_bm64;
-pub mod moe_bgemm_iq2xxs_mpp;
-pub mod moe_bgemm_iq2xxs_view;
-pub mod moe_bgemm_iq2xxs_view_u16_bm64;
-pub mod moe_bgemm_q2k_bm64;
-pub mod moe_bgemm_q2k_mpp;
-pub mod moe_bgemm_q2k_view;
-pub mod moe_bgemm_q2k_view_u16_bm64;
-pub mod moe_bgemm_q4_bm64;
-pub mod moe_down_swiglu_accum;
-pub mod moe_down_weighted_sum_f16;
-pub mod moe_gather_down_q2k;
-pub mod moe_gather_gemv_iq2xxs;
-pub mod moe_gemv_rows_iq2xxs;
-pub mod moe_gemv_rows_q2k;
-pub mod moe_gemv_rows_view_iq2xxs;
-pub mod moe_gemv_ws_iq2xxs;
-pub mod moe_gemv_ws_q2k;
-pub mod moe_mpp;
-pub mod moe_mpp_block_scaled;
-pub mod moe_mpp_bm64;
-pub mod moe_mpp_bm64_block_scaled;
-pub mod moe_mpp_bm64_int8;
-pub mod moe_mpp_bm8;
-pub mod moe_mpp_bm8_block_scaled;
-pub mod moe_mpp_bm8_int8;
-pub mod moe_mpp_int8;
-pub mod moe_mpp_shared;
-pub mod moe_router_sigmoid_bias;
-pub mod moe_router_sqrtsoftplus;
-// patch_embed_block_scaled / patch_embed_mma_block_scaled → kernels/gemm/.
+// moe family (moe* · dsv4_router_topk · dequant_gemv_expert_indexed*) →
+// kernels/moe/. patch_embed_block_scaled / patch_embed_mma_block_scaled →
+// kernels/gemm/.
 pub mod sdpa_bidirectional;
 pub mod sdpa_bidirectional_d128_relpos;
 pub mod sdpa_bidirectional_windowed;
