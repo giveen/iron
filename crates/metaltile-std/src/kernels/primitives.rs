@@ -1,19 +1,19 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! Decode primitives for block-scaled quantised-weight convolutions.
+//! Cross-family decode primitives for block-scaled / quantised weights.
 //!
 //! Each function is a `#[kernel]` primitive that takes a raw integer code and
-//! writes the decoded f32 value to an output slot. Callers use the cross-kernel
-//! call syntax (`let v = mt_decode_e2m1(nib)`); `KernelInlinePass` splices the body
-//! inline so there is no memory round-trip and no extra preamble helper needed.
+//! writes the decoded f32 value to an output slot. Callers in any kernel family
+//! use the cross-kernel call syntax (`let v = mt_decode_e2m1(nib)`);
+//! `KernelInlinePass` splices the body inline at codegen, so there is no memory
+//! round-trip — exactly as fast as pasting the body, written once. They are the
+//! kernel-side mirror of `quant::codec` (the Rust host-side source of truth);
+//! kernel and oracle decode through the same math so they cannot drift.
 //!
-//! The bit-level encodings match `crates/metaltile-std/src/quant/codec.rs`
-//! exactly — `codec.rs` is the Rust-side source of truth; these are the
-//! kernel-side mirrors.
+//! Used by the `variants(FMT = […])` format-axis folds across the weight-bearing
+//! families (convolution, gemm, moe, …) — see the consolidation plan §7.
 
 use metaltile::kernel;
-
-/// TODO: This should be moved to a shared quant primitive, keeping here for my convenience while drafting.
 
 /// Decode a 4-bit E2M1 (fp4) code → f32.
 ///

@@ -29,7 +29,7 @@
 //!
 //! The decode primitives (`mt_decode_e2m1`, `mt_decode_e4m3`,
 //! `mt_decode_e5m2`, `mt_decode_int8`, `mt_decode_e8m0`,
-//! `mt_unpack_nbit`) live in `super::primitives` and are inlined at
+//! `mt_unpack_nbit`) live in `crate::kernels::primitives` and are inlined at
 //! codegen by `KernelInlinePass`. The body parser lowers `if` to
 //! `Op::If` (no value), so the active branch updates a pre-declared
 //! mutable accumulator (`let mut acc: f32 = 0.0; ... acc = ...;`) rather

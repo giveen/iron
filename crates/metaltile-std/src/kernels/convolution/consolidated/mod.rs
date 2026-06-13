@@ -7,4 +7,3 @@
 //! phases are done.
 
 pub mod conv1d;
-pub mod primitives;

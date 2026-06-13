@@ -11,6 +11,7 @@ pub mod audio;
 pub mod convolution;
 pub mod gemm;
 pub mod kv_cache;
+pub mod primitives;
 pub mod moe;
 pub mod norm;
 pub mod ops;
