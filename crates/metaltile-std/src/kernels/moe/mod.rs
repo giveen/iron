@@ -26,11 +26,8 @@ pub mod moe_sigmoid_bias;
 // test/bench helpers in `moe_mpp_shared`).
 pub mod moe_mpp;
 pub mod moe_mpp_shared;
-pub mod moe_mpp_int8;
 pub mod moe_mpp_bm8;
-pub mod moe_mpp_bm8_int8;
 pub mod moe_mpp_bm64;
-pub mod moe_mpp_bm64_int8;
 pub mod moe_mpp_block_scaled;
 pub mod moe_mpp_bm8_block_scaled;
 pub mod moe_mpp_bm64_block_scaled;

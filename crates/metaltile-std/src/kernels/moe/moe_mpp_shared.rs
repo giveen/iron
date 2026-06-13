@@ -2,14 +2,15 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Shared test/bench helpers for the MPP MoE grouped BGEMM family.
 //!
-//! Every MPP MoE kernel (`moe_mpp{,_int8,_bm8,_bm8_int8,_bm64,_bm64_int8}`)
-//! shares one ABI — `x, w, scales, biases, indices, out` plus the four
+//! Every MPP MoE kernel (`moe_mpp{,_bm8,_bm64}`, each a `variants(BITS=[4,8])`
+//! pair) shares one ABI — `x, w, scales, biases, indices, out` plus the four
 //! `{m_total, n_out, k_in, group_size}` constexprs — and the same math:
 //! per-row expert routing via `indices[t]`, dequant-then-grouped-matmul.
-//! Only the tile geometry (BM/BN/BK, SG count) and the weight bit-width
-//! differ. These helpers centralise the int4 dequant oracle, the
-//! per-variant `TestSetup`, and the per-variant `BenchSetup` so each
-//! kernel file stays a thin shape-binding wrapper.
+//! Only the tile geometry (BM/BN/BK, SG count) differs per file; the int4/int8
+//! weight bit-width is folded onto the `BITS` axis within each file. These
+//! helpers centralise the int4 and int8 dequant oracles, the per-variant
+//! `TestSetup`, and the per-variant `BenchSetup` so each kernel file stays a
+//! thin shape-binding wrapper.
 
 use metaltile::{
     core::{DType, ir::Kernel},

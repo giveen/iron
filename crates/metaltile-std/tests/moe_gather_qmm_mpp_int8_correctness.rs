@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::moe_mpp_int8::mt_moe_gather_qmm_mma_int8_bm16_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp::mt_moe_gather_qmm_mma_int8_bm16_mpp`.
 //!
 //! MPP (MetalPerformancePrimitives) int8 MoE BGEMM — same algorithm as
 //! `mt_moe_gather_qmm_mma_int4_bm16_mpp` but with pack-aligned 8-bit
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::moe_mpp_int8;
+use metaltile_std::kernels::moe::moe_mpp;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ fn skip_unless_apple10() -> bool {
     let family = probe.chip_family();
     if family.is_none_or(|lvl| lvl < 10) {
         eprintln!(
-            "skip moe_mpp_int8: needs Apple10+ GPU (chip_family={family:?}); \
+            "skip moe_mpp: needs Apple10+ GPU (chip_family={family:?}); \
              kernel emits a zero-write stub on older silicon"
         );
         true
@@ -132,7 +132,7 @@ fn run_mpp_int8(
     buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new");
-    let mut k = moe_mpp_int8::mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt.to_dtype());
+    let mut k = moe_mpp::mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt.to_dtype());
     k.mode = KernelMode::Reduction;
     // Grid: [N/BN=32, ceil(T/BM=16), 1], TG: [32, 1, 1] (1 SG — MPP matmul2d).
     let r = ctx
