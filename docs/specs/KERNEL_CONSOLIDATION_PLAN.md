@@ -56,8 +56,9 @@ crates/metaltile-std/src/kernels/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
               aura_flash · steel/attn
   moe/        ✅ DONE — router_topk · permute (+unpermute) · gather_qmm (per-expert BGEMM) ·
-              router_topk_biased / sigmoid_bias / sqrtsoftplus · mpp(bm8/bm64 × int8 ×
-              block_scaled) + mpp_shared · bgemm/gemv (q2k/iq2xxs/q4, view/ws/rows) · gather_q4 ·
+              router_topk_biased / sigmoid_bias / sqrtsoftplus · mpp{,_bm8,_bm64} (int4+int8
+              folded onto a BITS variant axis) + mpp_*_block_scaled + mpp_shared ·
+              bgemm/gemv (q2k/iq2xxs/q4, view/ws/rows) · gather_q4 ·
               down_swiglu_accum / down_weighted_sum · dequant_gemv_expert_indexed(_block_scaled) ·
               block_scaled. Filenames keep the moe_ prefix (match kernel names); format-axis fold deferred (§7).
               (orchestration split into router_topk / permute / gather_qmm.)
