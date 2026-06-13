@@ -21,12 +21,10 @@ pub mod block_scaled_moe;
 pub mod block_scaled_qmm;
 pub mod block_scaled_qmm_mpp;
 pub mod block_scaled_qmm_nax;
-pub mod clamped_swiglu;
 pub mod fft;
 pub mod fp_quantized;
 pub mod fp_quantized_mma;
 pub mod fp_quantized_nax;
-pub mod fused_gate_activation;
 pub mod gemv;
 pub mod gemv_masked;
 pub mod quantized;
@@ -37,9 +35,7 @@ pub mod quantized_nax;
 pub mod quantized_nax_int8;
 pub mod scaled_dot_product_attention;
 pub mod sdpa_vector;
-pub mod sgload_smoke;
 pub mod steel;
-pub mod swiglu;
 
 // `conv.rs` and `shared.rs` are placeholder/stale stubs left over from
 // the old `metaltile-bench` crate. They reference `crate::runner` which

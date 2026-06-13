@@ -3,8 +3,9 @@
 //! Core / elementwise primitive kernels — the ops family (see
 //! `docs/specs/KERNEL_CONSOLIDATION_PLAN.md`): binary / unary / ternary
 //! elementwise, copy (+ strided), arange, random, reduce / arg_reduce, scan,
-//! indexing, gather / scatter, hadamard, fence, logsumexp, clamp, axpy, and
-//! vector add. Migrated from the legacy `mlx/` + `ffai/` split.
+//! indexing, gather / scatter, hadamard, fence, logsumexp, clamp, axpy,
+//! vector add, and the gated MLP activations (SwiGLU / GeGLU). Migrated from
+//! the legacy `mlx/` + `ffai/` split.
 //!
 //! `ffai/arg_reduce.rs` (`ffai_argmax`) was a byte-for-byte duplicate of
 //! `mt_argmax` (in `arg_reduce.rs`) and was dropped, not moved.
@@ -19,6 +20,7 @@ pub mod copy;
 // `fence.rs` is intentionally NOT declared: device/system memory fences and
 // atomics have no `#[kernel]` DSL representation (the "1 out of scope" op in the
 // audit). The file is kept for the implementation notes in its header.
+pub mod gated_activation;
 pub mod gather;
 pub mod gather_axis;
 pub mod hadamard;

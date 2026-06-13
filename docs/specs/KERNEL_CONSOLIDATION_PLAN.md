@@ -45,7 +45,7 @@ the FFAI emit path is unaffected).
 crates/metaltile-std/src/kernels/
   ops/        ✅ DONE — elementwise/core primitives: binary · unary · ternary · copy · arange ·
               random · reduce · arg_reduce · scan · indexing · gather/scatter · hadamard ·
-              fence · clamp · logsumexp · vector_add · axpy · strided
+              fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation
   gemm/       gemm · gemv(_masked) · batched-projection (qkv / 4) · patch_embed · steel/gemm
   sdpa/       ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
