@@ -33,17 +33,56 @@
 
 use metaltile::kernel;
 
-/// mxfp4 fused RMSNorm + GEMV — E2M1 weights (block 32), E8M0 pow-2 scale.
-#[kernel]
-pub fn mt_mxfp4_rms_norm_qgemv<T>(
+/// Fused RMSNorm + block-scaled dequantizing GEMV, folded over the 28-format
+/// axis (§7). Phase 1 computes `inv_rms` over `x`; phase 2 does the GEMV on the
+/// normalized activation `normed[i] = x[i]·norm_weight[i]·inv_rms`. Per-element
+/// weight decode + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer
+/// types by `(WT, ST)` — see `gemm/block_scaled_matmul` for the legend. Decodes
+/// through `kernels/primitives.rs`. Produces `mt_<FMT>_rms_norm_qgemv`.
+#[kernel(variants(
+    (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
+        (mxfp4,        4u32, u32, u8,  0u32, 0u32),
+        (nvfp4,        4u32, u32, u8,  0u32, 1u32),
+        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
+        (int2,         2u32, u32, f32, 1u32, 2u32),
+        (int3,         3u32, u32, f32, 1u32, 2u32),
+        (int4,         4u32, u32, f32, 1u32, 2u32),
+        (int5,         5u32, u32, f32, 1u32, 2u32),
+        (int6,         6u32, u32, f32, 1u32, 2u32),
+        (mxint2,       2u32, u32, u8,  1u32, 0u32),
+        (mxint3,       3u32, u32, u8,  1u32, 0u32),
+        (mxint4,       4u32, u32, u8,  1u32, 0u32),
+        (mxint5,       5u32, u32, u8,  1u32, 0u32),
+        (mxint6,       6u32, u32, u8,  1u32, 0u32),
+        (int2_f16,     2u32, u32, f16, 1u32, 2u32),
+        (int3_f16,     3u32, u32, f16, 1u32, 2u32),
+        (int4_f16,     4u32, u32, f16, 1u32, 2u32),
+        (int5_f16,     5u32, u32, f16, 1u32, 2u32),
+        (int6_f16,     6u32, u32, f16, 1u32, 2u32),
+        (mxfp8_e4m3,   8u32, u8,  u8,  2u32, 0u32),
+        (mxfp8_e5m2,   8u32, u8,  u8,  3u32, 0u32),
+        (mxint8,       8u32, u8,  u8,  4u32, 0u32),
+        (nvfp8,        8u32, u8,  f32, 2u32, 2u32),
+        (fp8_e5m2,     8u32, u8,  f32, 3u32, 2u32),
+        (int8,         8u32, u8,  f32, 4u32, 2u32),
+        (nvfp8_f16,    8u32, u8,  f16, 2u32, 2u32),
+        (fp8_e5m2_f16, 8u32, u8,  f16, 3u32, 2u32),
+        (int8_f16,     8u32, u8,  f16, 4u32, 2u32),
+    ],
+    suffix = "{FMT}_rms_norm_qgemv",
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn mt<T>(
     x: Tensor<T>,
     norm_weight: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
+    weight: Tensor<WT>,
+    scales: Tensor<ST>,
     output: Tensor<T>,
     eps_buf: Tensor<f32>,
     #[constexpr] in_dim: u32,
     #[constexpr] block_size: u32,
+    #[constexpr(only_when = "SKIND == 1u32")] global: f32,
 ) {
     let row = program_id::<0>();
     // Phase 1: RMSNorm — per-thread Σx², TG reduce + rsqrt via cross-kernel call.
@@ -57,875 +96,84 @@ pub fn mt_mxfp4_rms_norm_qgemv<T>(
         }
     }
     let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    // Phase 2: pack-strided E2M1 GEMV over the normalized activation.
-    let n_packs_per_row = in_dim / 8u32; // 8 nibbles per u32
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let row_pack_off = row * n_packs_per_row;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let blk = pack_idx / packs_per_block;
-            let sbits = load(scales[row_block_off + blk]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-            let packed = load(weight[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                let xi = load(x[p_off + i]).cast::<f32>();
-                let nw = load(norm_weight[p_off + i]).cast::<f32>();
-                acc = acc + (val * scale) * (xi * nw * inv_rms);
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// nvfp4 fused RMSNorm + GEMV — E2M1 weights (block 16), E4M3 micro-scale × global.
-#[kernel]
-pub fn mt_nvfp4_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<u8>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-    #[constexpr] global: f32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let row_pack_off = row * n_packs_per_row;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let blk = pack_idx / packs_per_block;
-            let scale = mt_decode_e4m3(load(scales[row_block_off + blk]).cast::<u32>()) * global;
-            let packed = load(weight[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                let xi = load(x[p_off + i]).cast::<f32>();
-                let nw = load(norm_weight[p_off + i]).cast::<f32>();
-                acc = acc + (val * scale) * (xi * nw * inv_rms);
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// mxfp8 (E4M3) fused RMSNorm + GEMV — 8-bit weights (block 32), E8M0 scale.
-#[kernel]
-pub fn mt_mxfp8_e4m3_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
+    // Phase 2: block-scaled GEMV over `normed[i] = x[i]·norm_weight[i]·inv_rms`.
     let n_blocks = in_dim / block_size;
     let row_block_off = row * n_blocks;
-
     let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weight[row_off + c]).cast::<u32>());
-            let sbits = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
 
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// mxfp8 (E5M2) fused RMSNorm + GEMV — 8-bit weights (block 32), E8M0 scale.
-#[kernel]
-pub fn mt_mxfp8_e5m2_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weight[row_off + c]).cast::<u32>());
-            let sbits = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// nvfp8 fused RMSNorm + GEMV — E4M3 weights (block 16), per-block FP32 scale.
-#[kernel]
-pub fn mt_nvfp8_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── Legacy float-scale (fp4 / fp8) + symmetric int8 fused RMSNorm GEMVs ─────
-// These share the fused framework but carry a raw per-group FP32 scale (no
-// E8M0/E4M3/global). fp8_e4m3 has the same shape as nvfp8 (8-bit E4M3 + f32
-// scale), so it reuses `mt_nvfp8_rms_norm_qgemv` — only fp4 (4-bit E2M1),
-// fp8_e5m2 (8-bit E5M2), and int8 (8-bit symmetric) need their own decode.
-
-/// Legacy fp4 fused RMSNorm + GEMV — E2M1 weights (group 32), per-group FP32 scale.
-#[kernel]
-pub fn mt_fp4_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f32>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let row_pack_off = row * n_packs_per_row;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let blk = pack_idx / packs_per_block;
-            let scale = load(scales[row_block_off + blk]);
-            let packed = load(weight[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                let xi = load(x[p_off + i]).cast::<f32>();
-                let nw = load(norm_weight[p_off + i]).cast::<f32>();
-                acc = acc + (val * scale) * (xi * nw * inv_rms);
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// Legacy fp8 (E5M2) fused RMSNorm + GEMV — 8-bit weights (group 32), FP32 scale.
-#[kernel]
-pub fn mt_fp8_e5m2_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// Symmetric int8 fused RMSNorm + GEMV — 8-bit codes (group 64), per-group FP32
-/// scale (affine, scale-only). Decode is sign-extend → `code · scale`.
-#[kernel]
-pub fn mt_int8_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f32>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── Symmetric sub-byte integer fused RMSNorm GEMVs (int2/3/4/5/6 + MXINT2..6) ─
-// The weight element is a signed N-bit two's-complement code, tight-bit-packed
-// LSB-first into u32 words (per-row word-aligned; element `c` at bit `c·bits`
-// within the row's bit-stream). The decode mirrors `block_scaled_matmul.rs`'s
-// proven `int_qgemv_*` macros exactly: extract the low N bits with a straddle-
-// aware two-word read, sign-extend in float (subtract 2^N when the top bit is
-// set; `$half`/`$full` are 2^(N-1) / 2^N), then multiply by the block scale.
-// The shared RMSNorm prologue (Phase 1 Σx² + `mt_rms_inv_scalar`) is identical
-// to the other fused kernels; only the Phase-2 weight decode + scale read change.
-// Element-strided like `mt_int8_rms_norm_qgemv` — one TG per output row, threads
-// stride over the row's elements, `reduce_sum` folds the partials. `$half`/`$full`
-// are passed as literals to keep the constexpr math out of the DSL shift operands.
-// The dispatch geometry is unchanged from the rest of the family (Reduction,
-// `grid = [out_dim, 1, 1]`, `tpg = [64, 1, 1]`).
-
-/// FP32-scaled symmetric int fused RMSNorm + GEMV (int2/3/4/5/6): per-element
-/// bit-stream code × per-group FP32 scale, dotted with the normalized activation
-/// `x[c]·nw[c]·inv_rms`. `row_word_off` indexes the row's tight bit-stream
-/// (`in_dim · bits / 32` u32 words per row).
-macro_rules! int_rms_qgemv_f32 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            norm_weight: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f32>,
-            output: Tensor<T>,
-            eps_buf: Tensor<f32>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            // Phase 1: RMSNorm — per-thread Σx², TG reduce + rsqrt (shared decode).
-            let mut ssq = 0.0f32;
-            let n_iters = (in_dim + lsize - 1u32) / lsize;
-            for _iter in range(0u32, n_iters, 1u32) {
-                let d = _iter * lsize + tid;
-                if d < in_dim {
-                    let v = load(x[d]).cast::<f32>();
-                    ssq = ssq + v * v;
+    if WDEC == 0u32 {
+        let n_packs_per_row = in_dim / 8u32;
+        let packs_per_block = block_size / 8u32;
+        let row_pack_off = row * n_packs_per_row;
+        let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
+        for p_iter in range(0u32, p_iters, 1u32) {
+            let pack_idx = p_iter * lsize + tid;
+            if pack_idx < n_packs_per_row {
+                let blk = pack_idx / packs_per_block;
+                let sraw = load(scales[row_block_off + blk]);
+                let scale = if SKIND == 0u32 {
+                    exp2(sraw.cast::<f32>() - 127.0f32)
+                } else if SKIND == 1u32 {
+                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                } else {
+                    sraw.cast::<f32>()
+                };
+                let packed = load(weight[row_pack_off + pack_idx]);
+                let p_off = pack_idx * 8u32;
+                for i in range(0u32, 8u32, 1u32) {
+                    let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                    let d = p_off + i;
+                    let normed = load(x[d]).cast::<f32>() * load(norm_weight[d]).cast::<f32>()
+                        * inv_rms;
+                    acc = acc + (val * scale) * normed;
                 }
             }
-            let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-            // Phase 2: element-strided bit-stream int GEMV over the normalized x.
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
+        }
+    } else {
+        let half = 1u32 << (BITS - 1u32);
+        let full = (1u32 << BITS).cast::<f32>();
+        let words_per_row = in_dim * BITS / 32u32;
+        let row_word_off = row * words_per_row;
+        let row_off = row * in_dim;
+        let iters = (in_dim + lsize - 1u32) / lsize;
+        for it in range(0u32, iters, 1u32) {
+            let c = it * lsize + tid;
+            if c < in_dim {
+                let blk = c / block_size;
+                let sraw = load(scales[row_block_off + blk]);
+                let scale = if SKIND == 0u32 {
+                    exp2(sraw.cast::<f32>() - 127.0f32)
+                } else {
+                    sraw.cast::<f32>()
+                };
+                let val = if WDEC == 1u32 {
+                    let bit_off = c * BITS;
                     let word_idx = bit_off / 32u32;
                     let bit_in_w = bit_off & 31u32;
                     let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
+                    let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                    let spill = BITS - lo_bits;
                     let w0 = load(weight[row_word_off + word_idx]);
                     let w1 = load(
                         weight[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
+                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales[row_block_off + c / block_size]);
-                    let xi = load(x[c]).cast::<f32>();
-                    let nw = load(norm_weight[c]).cast::<f32>();
-                    acc = acc + (val * scale) * (xi * nw * inv_rms);
-                }
+                    select(q >= half, qf - full, qf)
+                } else {
+                    let raw = load(weight[row_off + c]).cast::<u32>();
+                    if WDEC == 2u32 {
+                        mt_decode_e4m3(raw)
+                    } else if WDEC == 3u32 {
+                        mt_decode_e5m2(raw)
+                    } else {
+                        mt_decode_int8(raw)
+                    }
+                };
+                let normed =
+                    load(x[c]).cast::<f32>() * load(norm_weight[c]).cast::<f32>() * inv_rms;
+                acc = acc + (val * scale) * normed;
             }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_rms_qgemv_f32!(mt_int2_rms_norm_qgemv, 2u32, 2u32, 4.0f32);
-int_rms_qgemv_f32!(mt_int3_rms_norm_qgemv, 3u32, 4u32, 8.0f32);
-int_rms_qgemv_f32!(mt_int4_rms_norm_qgemv, 4u32, 8u32, 16.0f32);
-int_rms_qgemv_f32!(mt_int5_rms_norm_qgemv, 5u32, 16u32, 32.0f32);
-int_rms_qgemv_f32!(mt_int6_rms_norm_qgemv, 6u32, 32u32, 64.0f32);
-
-/// E8M0-scaled symmetric int fused RMSNorm + GEMV (MXINT2/3/4/5/6): per-element
-/// bit-stream code × pow-2 (E8M0) block scale `2^(bits-127)`, dotted with the
-/// normalized activation. Same straddle-aware decode and element-strided
-/// reduction as `int_rms_qgemv_f32`; only the scale axis differs (one u8
-/// exponent per block instead of a raw f32).
-macro_rules! int_rms_qgemv_e8m0 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            norm_weight: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<u8>,
-            output: Tensor<T>,
-            eps_buf: Tensor<f32>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            let mut ssq = 0.0f32;
-            let n_iters = (in_dim + lsize - 1u32) / lsize;
-            for _iter in range(0u32, n_iters, 1u32) {
-                let d = _iter * lsize + tid;
-                if d < in_dim {
-                    let v = load(x[d]).cast::<f32>();
-                    ssq = ssq + v * v;
-                }
-            }
-            let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weight[row_word_off + word_idx]);
-                    let w1 = load(
-                        weight[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                    );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let sbits = load(scales[row_block_off + c / block_size]).cast::<f32>();
-                    let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                    let xi = load(x[c]).cast::<f32>();
-                    let nw = load(norm_weight[c]).cast::<f32>();
-                    acc = acc + (val * scale) * (xi * nw * inv_rms);
-                }
-            }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_rms_qgemv_e8m0!(mt_mxint2_rms_norm_qgemv, 2u32, 2u32, 4.0f32);
-int_rms_qgemv_e8m0!(mt_mxint3_rms_norm_qgemv, 3u32, 4u32, 8.0f32);
-int_rms_qgemv_e8m0!(mt_mxint4_rms_norm_qgemv, 4u32, 8u32, 16.0f32);
-int_rms_qgemv_e8m0!(mt_mxint5_rms_norm_qgemv, 5u32, 16u32, 32.0f32);
-int_rms_qgemv_e8m0!(mt_mxint6_rms_norm_qgemv, 6u32, 32u32, 64.0f32);
-
-/// MXINT8 fused RMSNorm + GEMV — 8-bit symmetric codes (byte layout, block 32),
-/// E8M0 pow-2 block scale `2^(bits-127)`. Element-strided like the 8-bit float
-/// formats (one byte per code); decode is `mt_decode_int8 → val · scale`.
-#[kernel]
-pub fn mt_mxint8_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<u8>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weight[row_off + c]).cast::<u32>());
-            let sbits = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let scale = exp2(sbits - 127.0f32);
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-// ── FP16-scale twins of the FP32-scaled fused RMSNorm GEMVs ─────────────────
-// Each kernel below is a verbatim clone of its FP32-scaled twin above, changing
-// ONLY the scale axis: `scales` binds as `Tensor<f16>` (native `half`) and the
-// per-block scale read becomes `load(...).cast::<f32>()`. The element decode
-// (E2M1 / E4M3 / E5M2 / sub-byte int bit-stream + sign-extend), weight indexing,
-// shared RMSNorm prologue, reduction geometry, and grid/tpg are all IDENTICAL to
-// the twin — only the scale storage type differs. The half load matches the host
-// `f16_scale_decode`, so the dequant-then-dot oracle still holds exactly. The
-// GPU-verified decode + f16 scale read mirror `mlx/block_scaled_dequant.rs`'s
-// `mt_*_f16_dequant` family. `fp8_e4m3_f16` reuses `mt_nvfp8_f16_rms_norm_qgemv`
-// (same 8-bit-E4M3 + scale shape), exactly as `fp8_e4m3` reuses the nvfp8 kernel.
-
-/// nvfp8 (FP16 scale) fused RMSNorm + GEMV — E4M3 weights (block 16), per-block
-/// FP16 scale. Twin of `mt_nvfp8_rms_norm_qgemv`; also serves `fp8_e4m3_f16`.
-#[kernel]
-pub fn mt_nvfp8_f16_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e4m3(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// fp4 (FP16 scale) fused RMSNorm + GEMV — E2M1 weights (group 32), per-group
-/// FP16 scale. Twin of `mt_fp4_rms_norm_qgemv`.
-#[kernel]
-pub fn mt_fp4_f16_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u32>,
-    scales: Tensor<f16>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let n_packs_per_row = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let row_pack_off = row * n_packs_per_row;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let p_iters = (n_packs_per_row + lsize - 1u32) / lsize;
-    for p_iter in range(0u32, p_iters, 1u32) {
-        let pack_idx = p_iter * lsize + tid;
-        if pack_idx < n_packs_per_row {
-            let blk = pack_idx / packs_per_block;
-            let scale = load(scales[row_block_off + blk]).cast::<f32>();
-            let packed = load(weight[row_pack_off + pack_idx]);
-            let p_off = pack_idx * 8u32;
-            for i in range(0u32, 8u32, 1u32) {
-                let nib = (packed >> (i * 4u32)) & 0xFu32;
-                let val = mt_decode_e2m1(nib);
-                let xi = load(x[p_off + i]).cast::<f32>();
-                let nw = load(norm_weight[p_off + i]).cast::<f32>();
-                acc = acc + (val * scale) * (xi * nw * inv_rms);
-            }
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// fp8 (E5M2, FP16 scale) fused RMSNorm + GEMV — 8-bit weights (group 32),
-/// per-group FP16 scale. Twin of `mt_fp8_e5m2_rms_norm_qgemv`.
-#[kernel]
-pub fn mt_fp8_e5m2_f16_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_e5m2(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
-        }
-    }
-
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        store(output[row], total.cast::<T>());
-    }
-}
-
-/// FP16-scaled symmetric int fused RMSNorm + GEMV (int2/3/4/5/6): identical
-/// straddle-aware bit-stream decode + element-strided reduction as
-/// `int_rms_qgemv_f32`; only the scale axis differs (native `half` per group,
-/// read as `load(scales[...]).cast::<f32>()`).
-macro_rules! int_rms_qgemv_f16 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            norm_weight: Tensor<T>,
-            weight: Tensor<u32>,
-            scales: Tensor<f16>,
-            output: Tensor<T>,
-            eps_buf: Tensor<f32>,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let row = program_id::<0>();
-            // Phase 1: RMSNorm — per-thread Σx², TG reduce + rsqrt (shared decode).
-            let mut ssq = 0.0f32;
-            let n_iters = (in_dim + lsize - 1u32) / lsize;
-            for _iter in range(0u32, n_iters, 1u32) {
-                let d = _iter * lsize + tid;
-                if d < in_dim {
-                    let v = load(x[d]).cast::<f32>();
-                    ssq = ssq + v * v;
-                }
-            }
-            let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-            // Phase 2: element-strided bit-stream int GEMV over the normalized x.
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-
-            let mut acc = 0.0f32;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let bit_off = c * $bits;
-                    let word_idx = bit_off / 32u32;
-                    let bit_in_w = bit_off & 31u32;
-                    let bits_in_w0 = 32u32 - bit_in_w;
-                    let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                    let spill = $bits - lo_bits;
-                    let w0 = load(weight[row_word_off + word_idx]);
-                    let w1 = load(
-                        weight[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                    );
-                    let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                    let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                    let q = lo | hi;
-                    let qf = q.cast::<f32>();
-                    let val = select(q >= $half, qf - $full, qf); // sign-extend
-                    let scale = load(scales[row_block_off + c / block_size]).cast::<f32>();
-                    let xi = load(x[c]).cast::<f32>();
-                    let nw = load(norm_weight[c]).cast::<f32>();
-                    acc = acc + (val * scale) * (xi * nw * inv_rms);
-                }
-            }
-
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                store(output[row], total.cast::<T>());
-            }
-        }
-    };
-}
-int_rms_qgemv_f16!(mt_int2_f16_rms_norm_qgemv, 2u32, 2u32, 4.0f32);
-int_rms_qgemv_f16!(mt_int3_f16_rms_norm_qgemv, 3u32, 4u32, 8.0f32);
-int_rms_qgemv_f16!(mt_int4_f16_rms_norm_qgemv, 4u32, 8u32, 16.0f32);
-int_rms_qgemv_f16!(mt_int5_f16_rms_norm_qgemv, 5u32, 16u32, 32.0f32);
-int_rms_qgemv_f16!(mt_int6_f16_rms_norm_qgemv, 6u32, 32u32, 64.0f32);
-
-/// int8 (FP16 scale) fused RMSNorm + GEMV — 8-bit symmetric codes (byte layout,
-/// group 64), per-group FP16 scale. Twin of `mt_int8_rms_norm_qgemv`.
-#[kernel]
-pub fn mt_int8_f16_rms_norm_qgemv<T>(
-    x: Tensor<T>,
-    norm_weight: Tensor<T>,
-    weight: Tensor<u8>,
-    scales: Tensor<f16>,
-    output: Tensor<T>,
-    eps_buf: Tensor<f32>,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let row = program_id::<0>();
-    let mut ssq = 0.0f32;
-    let n_iters = (in_dim + lsize - 1u32) / lsize;
-    for _iter in range(0u32, n_iters, 1u32) {
-        let d = _iter * lsize + tid;
-        if d < in_dim {
-            let v = load(x[d]).cast::<f32>();
-            ssq = ssq + v * v;
-        }
-    }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    let row_off = row * in_dim;
-    let n_blocks = in_dim / block_size;
-    let row_block_off = row * n_blocks;
-
-    let mut acc = 0.0f32;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    for it in range(0u32, iters, 1u32) {
-        let c = it * lsize + tid;
-        if c < in_dim {
-            let elem = mt_decode_int8(load(weight[row_off + c]).cast::<u32>());
-            let scale = load(scales[row_block_off + c / block_size]).cast::<f32>();
-            let xi = load(x[c]).cast::<f32>();
-            let nw = load(norm_weight[c]).cast::<f32>();
-            acc = acc + (elem * scale) * (xi * nw * inv_rms);
         }
     }
 
@@ -940,6 +188,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
+        utils::block_scaled_weights,
         quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
@@ -947,19 +196,6 @@ pub mod kernel_tests {
     /// One TG-row's lanes; ≥ 32 and a multiple of 32 (the Reduction contract).
     const TPG: u32 = 64;
     const EPS: f32 = 1e-5;
-
-    /// Deterministic `[out_dim, in_dim]` weights with mixed signs + per-block
-    /// magnitude variation (same generator as `block_scaled_matmul.rs`).
-    fn weights(out_dim: usize, in_dim: usize) -> Vec<f32> {
-        (0..out_dim * in_dim)
-            .map(|i| {
-                let r = (i / in_dim) as f32;
-                let c = (i % in_dim) as f32;
-                let mag = (0.5 + r * 0.25) * (0.1 + (c % 13.0) * 0.2);
-                if (i % 3) == 0 { -mag } else { mag }
-            })
-            .collect()
-    }
 
     /// Fused RMSNorm + dequant-dot reference:
     /// `inv_rms = 1/√(mean(x²)+eps)`, `out[r] = Σ_c W_dq[r,c]·(x[c]·nw[c]·inv_rms)`.
@@ -984,7 +220,7 @@ pub mod kernel_tests {
         in_dim: usize,
         dt: DType,
     ) -> TestSetup {
-        let w = weights(out_dim, in_dim);
+        let w = block_scaled_weights(out_dim, in_dim);
         let p = crate::quant::format::pack(fmt, &w, out_dim, in_dim);
         let wdq = crate::quant::format::dequant(fmt, &p, out_dim, in_dim);
         // Round x / norm_weight through `dt` so the oracle sees what the GPU sees.
