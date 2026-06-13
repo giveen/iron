@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::orchestration::{
+use metaltile_std::kernels::moe::gather_qmm::{
     mt_moe_gather_qmm_int4_m8,
     mt_moe_gather_qmm_int4_m16,
     mt_moe_gather_qmm_int4_m32,

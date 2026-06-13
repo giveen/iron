@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::{orchestration::mt_moe_gather_qmm_b8, mpp_bm8_int8};
+use metaltile_std::kernels::moe::{gather_qmm::mt_moe_gather_qmm_b8, mpp_bm8_int8};
 
 /// Pack a row of int8 weight codes into uint32s (4 codes per uint, LE byte
 /// order). Code values must be in 0..=255.

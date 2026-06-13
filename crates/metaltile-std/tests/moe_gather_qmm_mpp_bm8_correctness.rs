@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::moe::{orchestration::mt_moe_gather_qmm_int4, mpp_bm8};
+use metaltile_std::kernels::moe::{gather_qmm::mt_moe_gather_qmm_int4, mpp_bm8};
 
 /// Pack a row of int4 weights into uint32s (8 per uint, LSB-first per
 /// nibble). Same helper used by the bm16_mpp / bm64_mpp test files —

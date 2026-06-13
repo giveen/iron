@@ -9,11 +9,13 @@
 //!
 //! Filenames drop the redundant `moe_` prefix (the folder provides it); kernel
 //! names keep `mt_moe_*`. The per-format `*_block_scaled` matrices move as-is;
-//! the format-axis fold (plan §7) is deferred. `orchestration.rs` is large and
-//! is slated for a follow-up split (router_topk / permute / gather_qmm).
+//! the format-axis fold (plan §7) is deferred. The former `orchestration.rs`
+//! is split into `router_topk` / `permute` / `gather_qmm`.
 
 // Routing — top-k expert selection, permute/unpermute, router pre-scores.
-pub mod orchestration;
+pub mod router_topk;
+pub mod permute;
+pub mod gather_qmm;
 pub mod router_topk_biased;
 pub mod router_sigmoid_bias;
 pub mod router_sqrtsoftplus;

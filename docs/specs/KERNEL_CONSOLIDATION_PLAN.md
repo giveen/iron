@@ -55,12 +55,12 @@ crates/metaltile-std/src/kernels/
   sdpa/       ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
               aura_flash · steel/attn
-  moe/        ✅ DONE — orchestration (router_topk + permute/unpermute + gather_qmm) ·
+  moe/        ✅ DONE — router_topk · permute (+unpermute) · gather_qmm (per-expert BGEMM) ·
               router_topk_biased / sigmoid_bias / sqrtsoftplus · mpp(bm8/bm64 × int8 ×
               block_scaled) + mpp_shared · bgemm/gemv (q2k/iq2xxs/q4, view/ws/rows) · gather_q4 ·
               down_swiglu_accum / down_weighted_sum · dequant_gemv_expert_indexed(_block_scaled) ·
               block_scaled. Filenames drop the moe_ prefix; format-axis fold deferred (§7).
-              orchestration.rs (~4k lines) slated for a follow-up split.
+              (orchestration split into router_topk / permute / gather_qmm.)
   norm/       ✅ DONE — rms_norm(+residual/rope/qgemv/gated) · layer_norm · adain1d
   rope/       ✅ DONE — rope · rope_2d · rope_banded · rope_yarn · partial_rope
   convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv · conv1d_causal(_roll) (see §4)
