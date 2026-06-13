@@ -7,7 +7,7 @@
 //! the inline-dequant `gemv_q4`, which is bandwidth-bound — perfect at
 //! batch 1. Prefill is COMPUTE-bound: many tokens reuse each weight, so
 //! the right move is to dequant the weight ONCE to f16 and feed the
-//! tensor-core `ffai_gemm`. This kernel is that one-time expansion.
+//! tensor-core `mt_gemm`. This kernel is that one-time expansion.
 //!
 //! ## Q4 block layout (matches `ffai_ops::quantize_q4`)
 //!

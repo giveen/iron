@@ -2098,7 +2098,7 @@ pub fn safe_glsl_ident(name: &str) -> String {
         "image3D",
         // GLSL reserves these for future use, even though they aren't
         // currently used; shaderc rejects them. The corpus hit them on
-        // conv* / depthwise_conv2d / aura_value_int4 / ffai_gemm kernels.
+        // conv* / depthwise_conv2d / aura_value_int4 / mt_gemm kernels.
         "input",
         "output",
         "texture",

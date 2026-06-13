@@ -20,7 +20,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_gemv_axpy_inplace<T>(
+pub fn mt_gemv_axpy_inplace<T>(
     mat: Tensor<T>,
     vec: Tensor<T>,
     mut accum: Tensor<T>,
@@ -39,7 +39,7 @@ pub fn ffai_gemv_axpy_inplace<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_gemv_axpy_inplace;
+    use super::mt_gemv_axpy_inplace;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(m: usize, k: usize, weight: f32, dt: DType) -> TestSetup {
@@ -55,7 +55,7 @@ pub mod kernel_tests {
                 accum_dt[r] + weight * dot
             })
             .collect();
-        TestSetup::new(ffai_gemv_axpy_inplace::kernel_ir_for(dt))
+        TestSetup::new(mt_gemv_axpy_inplace::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("mat", pack_f32(&mat, dt), dt))
             .input(TestBuffer::from_vec("vec", pack_f32(&vec, dt), dt))
@@ -84,12 +84,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_gemv_axpy_inplace;
+    use super::mt_gemv_axpy_inplace;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemv_axpy(dt: DType) -> BenchSetup {
         let (m, k) = (4096usize, 2048usize);
-        BenchSetup::new(ffai_gemv_axpy_inplace::kernel_ir_for(dt))
+        BenchSetup::new(mt_gemv_axpy_inplace::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("mat", m * k, dt))
             .buffer(BenchBuffer::random("vec", k, dt))

@@ -34,7 +34,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_gemm<T>(
+pub fn mt_gemm<T>(
     weight: Tensor<T>,
     input: Tensor<T>,
     out: Tensor<T>,
@@ -91,7 +91,7 @@ pub fn ffai_gemm<T>(
 //
 // Computes, for each batch `z ∈ [0, batch)`:
 //   out[z][r, o] = Σ_k weight[z][o, k] · input[z][r, k]
-// i.e. the SAME `out = input · weightᵀ` contraction as `ffai_gemm`, replicated
+// i.e. the SAME `out = input · weightᵀ` contraction as `mt_gemm`, replicated
 // over a batch axis. Each operand is a contiguous stack of per-batch matrices
 // with element strides `w_stride` / `x_stride` / `o_stride` (counted in T
 // elements, NOT bytes) — the wrapper passes `out_dim*in_dim`, `n_rows*in_dim`,
@@ -100,15 +100,15 @@ pub fn ffai_gemm<T>(
 // This is what the Mamba2 SSD chunked-matmul prefill scan runs its 4 batched
 // GEMMs on (batch = n_chunks·n_heads) on Apple/HIP/Vulkan hardware MMA, where
 // cuBLAS strided-batched is unavailable. Same 32×32 / 16-K tiling as
-// `ffai_gemm`; the batch index rides the 3rd grid axis (`tgid_z`).
+// `mt_gemm`; the batch index rides the 3rd grid axis (`tgid_z`).
 //
-// ## DISPATCH INVARIANTS (identical to `ffai_gemm` plus the batch axis)
+// ## DISPATCH INVARIANTS (identical to `mt_gemm` plus the batch axis)
 // - TPG = 1024 (BM·BN). `in_dim % 16 == 0`.
 // - Grid: `((out_dim+31)/32, (n_rows+31)/32, batch)` Reduction-mode TGs.
 // - All operands row-major within each batch slice; out-of-range row/col edges
 //   handled in-kernel (clamp-load to 0, skip-store).
 #[kernel]
-pub fn ffai_gemm_batched<T>(
+pub fn mt_gemm_batched<T>(
     weight: Tensor<T>,
     input: Tensor<T>,
     out: Tensor<T>,
@@ -163,7 +163,7 @@ pub fn ffai_gemm_batched<T>(
     }
 }
 
-/// New-syntax correctness tests for `ffai_gemm` — the multi-row 32×32-tiled
+/// New-syntax correctness tests for `mt_gemm` — the multi-row 32×32-tiled
 /// GEMM `out[r, :] = weight · input[r, :]`. Reduction-mode (threadgroup-memory
 /// tiles + barriers).
 ///
@@ -179,7 +179,7 @@ pub fn ffai_gemm_batched<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_gemm;
+    use super::mt_gemm;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Triple-loop reference: out[r, o] = Σ_k weight[o, k] · input[r, k].
@@ -211,7 +211,7 @@ pub mod kernel_tests {
         let w = unpack_f32(&pack_f32(&weight_f, dt), dt);
         let x = unpack_f32(&pack_f32(&input_f, dt), dt);
         let expected = gemm_oracle(&w, &x, n_rows, in_dim, out_dim);
-        TestSetup::new(ffai_gemm::kernel_ir_for(dt))
+        TestSetup::new(mt_gemm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("weight", pack_f32(&weight_f, dt), dt))
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
@@ -231,8 +231,8 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_gemm_edge(dt: DType) -> TestSetup { gemm_setup(20, 48, 100, dt) }
 
-    // ── ffai_gemm_batched ────────────────────────────────────────────────
-    use super::ffai_gemm_batched;
+    // ── mt_gemm_batched ────────────────────────────────────────────────
+    use super::mt_gemm_batched;
 
     fn gemm_batched_setup(
         batch: usize,
@@ -257,7 +257,7 @@ pub mod kernel_tests {
             let eb = gemm_oracle(wb, xb, n_rows, in_dim, out_dim);
             expected[b * n_rows * out_dim..(b + 1) * n_rows * out_dim].copy_from_slice(&eb);
         }
-        TestSetup::new(ffai_gemm_batched::kernel_ir_for(dt))
+        TestSetup::new(mt_gemm_batched::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("weight", pack_f32(&weight_f, dt), dt))
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
@@ -283,19 +283,19 @@ pub mod kernel_tests {
     fn test_gemm_batched_edge(dt: DType) -> TestSetup { gemm_batched_setup(2, 20, 48, 100, dt) }
 }
 
-/// New-syntax benchmark for `ffai_gemm`. Nemotron-class block-diffusion shape:
+/// New-syntax benchmark for `mt_gemm`. Nemotron-class block-diffusion shape:
 /// a 32-row block projected through a `[out_dim, in_dim]` weight (hidden 4096).
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_gemm;
+    use super::mt_gemm;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemm(dt: DType) -> BenchSetup {
         let (n_rows, in_dim, out_dim) = (32usize, 4096usize, 4096usize);
         let sz = dt.size_bytes();
         let bytes = out_dim * in_dim * sz + n_rows * in_dim * sz + n_rows * out_dim * sz;
-        BenchSetup::new(ffai_gemm::kernel_ir_for(dt))
+        BenchSetup::new(mt_gemm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("weight", out_dim * in_dim, dt))
             .buffer(BenchBuffer::random("input", n_rows * in_dim, dt))

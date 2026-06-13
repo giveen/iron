@@ -72,7 +72,7 @@ use metaltile::kernel;
 /// Correctness pinned by the in-source `#[test_kernel]`s.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn patch_embed_mma<T>(
+pub fn mt_patch_embed_mma<T>(
     image: Tensor<T>,
     weight: Tensor<T>,
     bias: Tensor<T>,
@@ -292,7 +292,7 @@ pub fn patch_embed_mma<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::patch_embed_mma;
+    use super::mt_patch_embed_mma;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -367,7 +367,7 @@ pub mod kernel_tests {
         let expected = naive_patch_embed_mma(
             &image, &weight, &bias, in_ch, in_h, in_w, patch_h, patch_w, hidden,
         );
-        TestSetup::new(patch_embed_mma::kernel_ir_for(dt))
+        TestSetup::new(mt_patch_embed_mma::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("image", pack_f32(&image_f, dt), dt))
             .input(TestBuffer::from_vec("weight", pack_f32(&weight_f, dt), dt))
@@ -392,12 +392,12 @@ pub mod kernel_tests {
     fn test_patch_embed_mma_4x4(dt: DType) -> TestSetup { mma_setup(8, 32, 32, 4, 4, 32, dt) }
 }
 
-/// New-syntax bench for `patch_embed_mma` (ViT-L-ish 8×8 patch, hidden 1024).
+/// New-syntax bench for `mt_patch_embed_mma` (ViT-L-ish 8×8 patch, hidden 1024).
 /// Reduction mode, `grid_3d(hidden/32, num_patches/32, 1, [128,1,1])`.
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::patch_embed_mma;
+    use super::mt_patch_embed_mma;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_patch_embed_mma(dt: DType) -> BenchSetup {
@@ -408,7 +408,7 @@ pub mod kernel_benches {
         let num_patches = (in_h / patch_h) * (in_w / patch_w);
         let patch_dim = in_ch * patch_h * patch_w;
         let n_out = num_patches * hidden;
-        BenchSetup::new(patch_embed_mma::kernel_ir_for(dt))
+        BenchSetup::new(mt_patch_embed_mma::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("image", in_ch * in_h * in_w, dt))
             .buffer(BenchBuffer::random("weight", hidden * patch_dim, dt))

@@ -32,7 +32,7 @@ fn run_case(dt: Dt, in_dim: usize, out_dim: usize, n_rows: usize, tol: f32) {
         (0..n_rows * in_dim).map(|_| ((xorshift(&mut st) % 2000) as f32 / 1000.0) - 1.0).collect();
     // Round inputs to the kernel's dtype so the f32 oracle sees the same
     // values the kernel loads (f16 input rounding, amplified by cancellation
-    // over in_dim terms, otherwise dominates the diff). Matches ffai_gemm's test.
+    // over in_dim terms, otherwise dominates the diff). Matches mt_gemm's test.
     if matches!(dt, Dt::F16) {
         input = unpack_bytes(&pack_bytes(&input, Dt::F16), Dt::F16);
     }

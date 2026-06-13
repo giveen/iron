@@ -8,6 +8,7 @@
 //! consumer is regenerated from the new inventory after each family lands.
 
 pub mod convolution;
+pub mod gemm;
 pub mod norm;
 pub mod ops;
 pub mod rope;

@@ -25,8 +25,6 @@ pub mod fft;
 pub mod fp_quantized;
 pub mod fp_quantized_mma;
 pub mod fp_quantized_nax;
-pub mod gemv;
-pub mod gemv_masked;
 pub mod quantized;
 pub mod quantized_mma_dynamic_m;
 pub mod quantized_mpp;

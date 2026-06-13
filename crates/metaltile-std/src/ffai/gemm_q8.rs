@@ -10,10 +10,10 @@
 //!
 //! Weight is the resident Q8 split (`qs` int8 packed 4/u32 + per-32-block
 //! `d` scale), laid out as `[out_dim, in_dim]` (row-major over values).
-//! Mirrors `ffai_gemm`'s geometry exactly so the dispatch wrapper is
+//! Mirrors `mt_gemm`'s geometry exactly so the dispatch wrapper is
 //! identical apart from the two extra weight buffers.
 //!
-//! ## DISPATCH INVARIANTS (same as ffai_gemm)
+//! ## DISPATCH INVARIANTS (same as mt_gemm)
 //! - TPG = 1024 (32×32). Grid: (out_dim/32) × (n_rows/32) threadgroups.
 //! - `in_dim % 16 == 0` (K-tile) AND `in_dim % 32 == 0` (Q8 block).
 //! - Row/col edges handled in-kernel (clamp loads to 0, skip OOB stores).

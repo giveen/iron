@@ -361,8 +361,8 @@ pub mod kernel_tests {
         };
 
         let kernels: Vec<(&str, metaltile::core::Kernel)> = vec![
-            ("ffai_gemm_batched", {
-                let mut k = super::super::gemm::ffai_gemm_batched::kernel_ir_for(DType::F32);
+            ("mt_gemm_batched", {
+                let mut k = crate::kernels::gemm::dense::mt_gemm_batched::kernel_ir_for(DType::F32);
                 k.mode = KernelMode::Reduction;
                 k
             }),

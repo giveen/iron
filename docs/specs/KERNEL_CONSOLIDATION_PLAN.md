@@ -46,7 +46,9 @@ crates/metaltile-std/src/kernels/
   ops/        ✅ DONE — elementwise/core primitives: binary · unary · ternary · copy · arange ·
               random · reduce · arg_reduce · scan · indexing · gather/scatter · hadamard ·
               fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation
-  gemm/       gemm · gemv(_masked) · batched-projection (qkv / 4) · patch_embed · steel/gemm
+  gemm/       🔨 DENSE DONE — gemm · gemv(_masked,_axpy) · patch_embed(_mma) · steel/gemm;
+              quantized matmuls (qmm/qgemv q4/q8/block_scaled/fp_quantized + batched qkv/4)
+              land in a follow-up pass (same folder; format-axis fold deferred, §7)
   sdpa/       ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
               aura_flash · steel/attn
@@ -157,7 +159,7 @@ payoff last:
 | Wave | Families | Rationale | Payoff |
 |---|---|---|---|
 | ✅ done | `convolution/`, `rope/`, `norm/`, `sampling/`, `ops/` | exemplar + all of wave 1 | 24k → ~1.6k |
-| 2 | `gemm/`, `ssm/`, `audio/`, `vision/`, `kv_cache/` | moderate size, few cross-deps | medium |
+| 2 | `gemm/` (🔨 dense in; quantized matmuls next), `ssm/`, `audio/`, `vision/`, `kv_cache/` | moderate size, few cross-deps | medium |
 | 3 | `sdpa/`, `moe/`, **`quant/`** | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
 ## 7. The `quant/` umbrella — collapsing the op × format matrix

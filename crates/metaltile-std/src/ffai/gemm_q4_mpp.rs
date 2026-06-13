@@ -5,7 +5,7 @@
 //! bench's Q4 weight layout (signed 4-bit, per-32-block scale `amax/7` stored
 //! f16) instead of Q8_0. Compute-bound prefill projections (q/k/v/o, mamba
 //! in/out_proj, shared experts, lm_head) run on this instead of the f32
-//! scalar `ffai_gemm` (which sat at ~0.1% of the tensor-core peak).
+//! scalar `mt_gemm` (which sat at ~0.1% of the tensor-core peak).
 //!
 //! Same 64×64×32 coop_tile geometry as `ffai_gemm_q8_mpp` (4 simdgroups,
 //! 2×2 warp grid, 128 threads/tg). Only the weight-dequant block differs.
