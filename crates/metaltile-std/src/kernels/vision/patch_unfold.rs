@@ -38,7 +38,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_patch_unfold_qwen<T>(
+pub fn mt_patch_unfold<T>(
     frames: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] channels: u32,
@@ -88,7 +88,7 @@ pub fn ffai_patch_unfold_qwen<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_patch_unfold_qwen;
+    use super::mt_patch_unfold;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -179,7 +179,7 @@ pub mod kernel_tests {
             grid_t,
             is_image,
         );
-        TestSetup::new(ffai_patch_unfold_qwen::kernel_ir_for(dt))
+        TestSetup::new(mt_patch_unfold::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("frames", pack_f32(&frames_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
@@ -198,11 +198,11 @@ pub mod kernel_tests {
     // Still image: 3 ch, patch 2, temporal 2 (frame reused), merge 2, 2 blocks
     // (side 4, img 8×8), grid_t 1. real_dim = 2·3·4 = 24, padded to 32.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
-    fn test_qwen_image(dt: DType) -> TestSetup { setup(dt, 3, 2, 2, 2, 2, 32, 1, true) }
+    fn test_patch_unfold_image(dt: DType) -> TestSetup { setup(dt, 3, 2, 2, 2, 2, 32, 1, true) }
 
     // Video: distinct frames, grid_t 2 (4 frames), same geometry.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
-    fn test_qwen_video(dt: DType) -> TestSetup { setup(dt, 3, 2, 2, 2, 2, 32, 2, false) }
+    fn test_patch_unfold_video(dt: DType) -> TestSetup { setup(dt, 3, 2, 2, 2, 2, 32, 2, false) }
 }
 
 /// New-syntax bench: Qwen2.5-VL image unfold (3 ch, patch 14, temporal 2,
@@ -210,10 +210,10 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_patch_unfold_qwen;
+    use super::mt_patch_unfold;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_patch_unfold_qwen(dt: DType) -> BenchSetup {
+    fn bench_patch_unfold(dt: DType) -> BenchSetup {
         let (channels, patch, temporal_patch, merge, merge_blocks) =
             (3usize, 14usize, 2usize, 2usize, 8usize);
         let side = merge_blocks * merge;
@@ -222,7 +222,7 @@ pub mod kernel_benches {
         let patch_dim_padded = patch_dim.div_ceil(16) * 16;
         let n_patches = side * side;
         let n_out = n_patches * patch_dim_padded;
-        BenchSetup::new(ffai_patch_unfold_qwen::kernel_ir_for(dt))
+        BenchSetup::new(mt_patch_unfold::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("frames", channels * img_side * img_side, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

@@ -15,3 +15,4 @@ pub mod norm;
 pub mod ops;
 pub mod rope;
 pub mod sampling;
+pub mod vision;

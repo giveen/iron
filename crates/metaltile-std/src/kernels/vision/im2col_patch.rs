@@ -28,7 +28,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn im2col_patch<T>(
+pub fn mt_im2col_patch<T>(
     input: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] channels: u32,
@@ -58,7 +58,7 @@ pub fn im2col_patch<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::im2col_patch;
+    use super::mt_im2col_patch;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -102,7 +102,7 @@ pub mod kernel_tests {
         let input_f = ramp(channels * in_h * in_w, 17, 5.0);
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let expected = naive(&input, channels, in_h, in_w, patch, grid_h, grid_w);
-        TestSetup::new(im2col_patch::kernel_ir_for(dt))
+        TestSetup::new(mt_im2col_patch::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
@@ -128,7 +128,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::im2col_patch;
+    use super::mt_im2col_patch;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_im2col_patch(dt: DType) -> BenchSetup {
@@ -136,7 +136,7 @@ pub mod kernel_benches {
         let in_h = grid_h * patch;
         let in_w = grid_w * patch;
         let n_out = grid_h * grid_w * channels * patch * patch;
-        BenchSetup::new(im2col_patch::kernel_ir_for(dt))
+        BenchSetup::new(mt_im2col_patch::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", channels * in_h * in_w, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

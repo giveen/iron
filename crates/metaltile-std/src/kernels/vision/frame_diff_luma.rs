@@ -28,7 +28,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn frame_diff_luma<T>(
+pub fn mt_frame_diff_luma<T>(
     frame0: Tensor<T>,
     frame1: Tensor<T>,
     out: Tensor<T>,
@@ -73,7 +73,7 @@ pub fn frame_diff_luma<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::frame_diff_luma;
+    use super::mt_frame_diff_luma;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, step: f32, start: f32) -> Vec<f32> {
@@ -116,7 +116,7 @@ pub mod kernel_tests {
         let f0 = unpack_f32(&pack_f32(&f0_f, dt), dt);
         let f1 = unpack_f32(&pack_f32(&f1_f, dt), dt);
         let expected = naive(&f0, &f1, in_w, out_h, out_w, ds);
-        TestSetup::new(frame_diff_luma::kernel_ir_for(dt))
+        TestSetup::new(mt_frame_diff_luma::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("frame0", pack_f32(&f0_f, dt), dt))
             .input(TestBuffer::from_vec("frame1", pack_f32(&f1_f, dt), dt))
@@ -142,14 +142,14 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::frame_diff_luma;
+    use super::mt_frame_diff_luma;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_frame_diff_luma(dt: DType) -> BenchSetup {
         let (in_h, in_w, ds) = (720usize, 1280usize, 16usize);
         let out_h = in_h / ds;
         let out_w = in_w / ds;
-        BenchSetup::new(frame_diff_luma::kernel_ir_for(dt))
+        BenchSetup::new(mt_frame_diff_luma::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("frame0", in_h * in_w * 3, dt))
             .buffer(BenchBuffer::random("frame1", in_h * in_w * 3, dt))

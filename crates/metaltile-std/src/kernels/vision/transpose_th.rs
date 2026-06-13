@@ -3,7 +3,7 @@
 //! A vision (or audio) tower's attention stage-1 — per-head RMSNorm plus
 //! `mt_rope_2d` — emits Q/K/V in **token-major** layout
 //! `[n_tokens, n_heads, head_dim]` (one contiguous head block per token).
-//! But `ffai_sdpa_bidirectional` reads K/V **head-major**
+//! But `mt_sdpa_bidirectional` reads K/V **head-major**
 //! `[n_heads, n_tokens, head_dim]` — its `kv_slab = kvh * kv_stride *
 //! head_dim` indexing walks one head's full token run contiguously. This
 //! kernel performs that physical reshape on the GPU so the whole attention
@@ -37,7 +37,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_transpose_th<T>(
+pub fn mt_transpose_th<T>(
     input: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n_tokens: u32,
@@ -52,14 +52,14 @@ pub fn ffai_transpose_th<T>(
     store(out[out_idx], load(input[in_idx]));
 }
 
-/// New-syntax correctness for `ffai_transpose_th`. Grid3D, grid
+/// New-syntax correctness for `mt_transpose_th`. Grid3D, grid
 /// `[n_tokens, n_heads, head_dim]`, tpg `[1,1,1]`. Oracle moves element
 /// `(token, head, d)` of the token-major input to `(head, token, d)` of
 /// the head-major output.
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_transpose_th;
+    use super::mt_transpose_th;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn oracle(input: &[f32], n_tokens: usize, n_heads: usize, head_dim: usize) -> Vec<f32> {
@@ -87,7 +87,7 @@ pub mod kernel_tests {
         // tol = 0.
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let exp = oracle(&input, n_tokens, n_heads, head_dim);
-        TestSetup::new(ffai_transpose_th::kernel_ir_for(dt))
+        TestSetup::new(mt_transpose_th::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::zeros("out", n_tokens * n_heads * head_dim, dt))
@@ -99,17 +99,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `ffai_transpose_th` at the SigLIP production
+/// New-syntax benchmark for `mt_transpose_th` at the SigLIP production
 /// shape (576 patches, 16 heads, head_dim 64).
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_transpose_th;
+    use super::mt_transpose_th;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_transpose_th(dt: DType) -> BenchSetup {
         let (n_tokens, n_heads, head_dim) = (576usize, 16usize, 64usize);
-        BenchSetup::new(ffai_transpose_th::kernel_ir_for(dt))
+        BenchSetup::new(mt_transpose_th::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", n_tokens * n_heads * head_dim, dt))
             .buffer(BenchBuffer::zeros("out", n_tokens * n_heads * head_dim, dt).output())

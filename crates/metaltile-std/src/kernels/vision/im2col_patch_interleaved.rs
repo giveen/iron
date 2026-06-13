@@ -32,7 +32,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_im2col_patch_interleaved<T>(
+pub fn mt_im2col_patch_interleaved<T>(
     input: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] channels: u32,
@@ -71,7 +71,7 @@ pub fn ffai_im2col_patch_interleaved<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_im2col_patch_interleaved;
+    use super::mt_im2col_patch_interleaved;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -141,7 +141,7 @@ pub mod kernel_tests {
             scale,
             bias,
         );
-        TestSetup::new(ffai_im2col_patch_interleaved::kernel_ir_for(dt))
+        TestSetup::new(mt_im2col_patch_interleaved::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
@@ -171,7 +171,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_im2col_patch_interleaved;
+    use super::mt_im2col_patch_interleaved;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_interleaved(dt: DType) -> BenchSetup {
@@ -180,7 +180,7 @@ pub mod kernel_benches {
         let in_h = grid_h * patch;
         let in_w = grid_w * patch;
         let n_out = grid_h * grid_w * patch_dim_padded;
-        BenchSetup::new(ffai_im2col_patch_interleaved::kernel_ir_for(dt))
+        BenchSetup::new(mt_im2col_patch_interleaved::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", channels * in_h * in_w, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

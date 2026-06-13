@@ -31,7 +31,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn pos_emb_2d_add<T>(
+pub fn mt_pos_emb_2d_add<T>(
     tokens: Tensor<T>,
     pos_x: Tensor<f32>,
     pos_y: Tensor<f32>,
@@ -53,7 +53,7 @@ pub fn pos_emb_2d_add<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::pos_emb_2d_add;
+    use super::mt_pos_emb_2d_add;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, step: f32, start: f32) -> Vec<f32> {
@@ -87,7 +87,7 @@ pub mod kernel_tests {
         let pos_y = ramp(grid_h * hidden, 0.009, 0.1);
         let tokens = unpack_f32(&pack_f32(&tokens_f, dt), dt);
         let expected = naive(&tokens, &pos_x, &pos_y, hidden, grid_h, grid_w);
-        TestSetup::new(pos_emb_2d_add::kernel_ir_for(dt))
+        TestSetup::new(mt_pos_emb_2d_add::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("tokens", pack_f32(&tokens_f, dt), dt))
             .input(TestBuffer::from_vec("pos_x", pack_f32(&pos_x, DType::F32), DType::F32))
@@ -112,13 +112,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::pos_emb_2d_add;
+    use super::mt_pos_emb_2d_add;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pos_emb_2d_add(dt: DType) -> BenchSetup {
         let (hidden, grid_h, grid_w) = (1152usize, 28usize, 28usize);
         let n_patches = grid_h * grid_w;
-        BenchSetup::new(pos_emb_2d_add::kernel_ir_for(dt))
+        BenchSetup::new(mt_pos_emb_2d_add::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("tokens", n_patches * hidden, dt))
             .buffer(BenchBuffer::random("pos_x", grid_w * hidden, DType::F32))
