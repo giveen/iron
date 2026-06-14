@@ -126,7 +126,8 @@ pub fn mt<T>(
                         let p_off = pack_idx * 8u32;
                         for i in range(0u32, 8u32, 1u32) {
                             let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                            acc =
+                                acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
                         }
                     }
                 }
@@ -189,7 +190,8 @@ pub fn mt<T>(
                         let p_off = pack_idx * 8u32;
                         for i in range(0u32, 8u32, 1u32) {
                             let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                            acc =
+                                acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
                         }
                     }
                 }
@@ -252,7 +254,8 @@ pub fn mt<T>(
                         let p_off = pack_idx * 8u32;
                         for i in range(0u32, 8u32, 1u32) {
                             let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                            acc =
+                                acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
                         }
                     }
                 }

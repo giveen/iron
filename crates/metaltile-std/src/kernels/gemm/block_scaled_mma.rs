@@ -168,8 +168,7 @@ pub fn mt<T>(
                 let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
                 let spill = BITS - lo_bits;
                 let w0 = load(w[w_word_row_base + word_idx]);
-                let w1 =
-                    load(w[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
+                let w1 = load(w[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
                 let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 let qf = q.cast::<f32>();
                 let elem = select(q >= half, qf - full, qf);

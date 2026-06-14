@@ -130,8 +130,9 @@ pub fn mt<T>(
                 let pix_m = select(valid, pix, 0.0f32);
                 let col = col_ic + ky * kw + kx;
                 let elem = if WDEC == 0u32 {
-                    mt_decode_e2m1((load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32))
-                        & 0xFu32)
+                    mt_decode_e2m1(
+                        (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32,
+                    )
                 } else if WDEC == 1u32 {
                     let bit_off = col * BITS;
                     let word_idx = bit_off / 32u32;
@@ -140,9 +141,8 @@ pub fn mt<T>(
                     let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
                     let spill = BITS - lo_bits;
                     let w0 = load(weight[w_row_word + word_idx]);
-                    let w1 = load(
-                        weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                    );
+                    let w1 =
+                        load(weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)]);
                     let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
                     select(q >= half, qf - full, qf)

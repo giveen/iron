@@ -130,7 +130,17 @@ pub fn mt<T>(
     threadgroup_alloc("ws", 512, coop_stage(T));
     threadgroup_alloc("out_scratch", 512, f32);
     coop_tile_setup(
-        "gemm", 16, 32, 16, coop_stage(T), "accumulate", "simdgroup", f32, false, true, false,
+        "gemm",
+        16,
+        32,
+        16,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
     );
     let mut sub_offset = 0u32;
     for _sub_iter in range(0u32, 16u32, 1u32) {
@@ -191,7 +201,8 @@ pub fn mt<T>(
                         } else {
                             sraw.cast::<f32>()
                         };
-                        let packed = load(w[w_expert_pack + g_row * packs_per_row + kb / 8u32 + stripe]);
+                        let packed =
+                            load(w[w_expert_pack + g_row * packs_per_row + kb / 8u32 + stripe]);
                         let dst = w_row * 16u32 + stripe * 8u32;
                         for _j in range(0u32, 8u32, 1u32) {
                             let nib = (packed >> (_j * 4u32)) & 15u32;
@@ -236,8 +247,11 @@ pub fn mt<T>(
                     let g_row = n_tile_base + w_row;
                     let sb_off = sb_expert_base + g_row * groups_per_row + kb / block_size;
                     let sraw = load(scales[sb_off]);
-                    let scale =
-                        if SKIND == 0u32 { exp2(sraw.cast::<f32>() - 127.0f32) } else { sraw.cast::<f32>() };
+                    let scale = if SKIND == 0u32 {
+                        exp2(sraw.cast::<f32>() - 127.0f32)
+                    } else {
+                        sraw.cast::<f32>()
+                    };
                     let w_dev = w_expert_byte + g_row * k_in + kb;
                     for kc in range(0u32, 16u32, 1u32) {
                         let raw = load(w[w_dev + kc]).cast::<u32>();

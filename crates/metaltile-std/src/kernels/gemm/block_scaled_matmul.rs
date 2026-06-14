@@ -165,15 +165,13 @@ pub fn mt<T>(
     }
 }
 
-
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
     use super::*;
     use crate::{
-        utils::{block_scaled_qgemv_oracle, block_scaled_weights},
         quant::format::QFormat,
-        utils::{pack_f32, unpack_f32},
+        utils::{block_scaled_qgemv_oracle, block_scaled_weights, pack_f32, unpack_f32},
     };
 
     /// One TG-row's lanes; ≥ 32 and a multiple of 32 (the Reduction contract).

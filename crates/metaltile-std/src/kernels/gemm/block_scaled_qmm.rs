@@ -168,9 +168,8 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        utils::{block_scaled_qmm_oracle, block_scaled_weights},
         quant::format::QFormat,
-        utils::{pack_f32, unpack_f32},
+        utils::{block_scaled_qmm_oracle, block_scaled_weights, pack_f32, unpack_f32},
     };
 
     /// Reduction-contract threadgroup width (≥ 32, multiple of 32).

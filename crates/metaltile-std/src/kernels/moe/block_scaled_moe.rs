@@ -165,9 +165,8 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        utils::block_scaled_weights,
         quant::format::QFormat,
-        utils::{pack_f32, unpack_f32},
+        utils::{block_scaled_weights, pack_f32, unpack_f32},
     };
 
     const TPG: u32 = 64;

@@ -23,7 +23,6 @@
 
 use metaltile::kernel;
 
-
 /// Block-scaled MPP (cooperative-tensor) dequantizing matmul, folded over the
 /// 28-format axis (§7). `out = X · dequant(W)` via a 16×16×32 `matmul2d`
 /// (2×2 simdgroups). Only the per-format W-staging decode into the `Ws`
@@ -88,7 +87,16 @@ pub fn mt<T>(
     threadgroup_alloc("Ws", 1152u32, coop_stage(T));
     threadgroup_alloc("OutScratch", 1024u32, f32);
     coop_tile_setup(
-        "gemm", 16u32, 16u32, 32u32, coop_stage(T), "accumulate", "simdgroup", f32, false, true,
+        "gemm",
+        16u32,
+        16u32,
+        32u32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
         false,
     );
     coop_tile_zero("gemm");
@@ -141,8 +149,7 @@ pub fn mt<T>(
                 let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
                 let spill = BITS - lo_bits;
                 let w0 = load(w[w_word_row_base + word_idx]);
-                let w1 =
-                    load(w[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
+                let w1 = load(w[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
                 let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 let qf = q.cast::<f32>();
                 let elem = select(q >= half, qf - full, qf);

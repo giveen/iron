@@ -164,7 +164,17 @@ pub fn mt<T>(
     threadgroup_alloc("Ws", 2048, coop_stage(T));
     threadgroup_alloc("OutScratch", 4096, f32);
     coop_tile_setup(
-        "gemm", 32, 32, 32, coop_stage(T), "accumulate", "simdgroup", f32, false, true, false,
+        "gemm",
+        32,
+        32,
+        32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
     );
     let mut sub_offset = 0u32;
     for _sub_iter in range(0u32, 64u32, 1u32) {
@@ -224,8 +234,9 @@ pub fn mt<T>(
                     };
                     let ws_base = w_row * 32u32 + pack_in_row * vals_per_pack;
                     if WDEC == 0u32 {
-                        let packed =
-                            load(w[w_expert_pack + g_row * packs_per_row + kb / 8u32 + pack_in_row]);
+                        let packed = load(
+                            w[w_expert_pack + g_row * packs_per_row + kb / 8u32 + pack_in_row],
+                        );
                         for _j in range(0u32, vals_per_pack, 1u32) {
                             let nib = (packed >> (_j * 4u32)) & 15u32;
                             threadgroup_store("Ws", ws_base + _j, mt_decode_e2m1(nib) * scale);
@@ -240,8 +251,7 @@ pub fn mt<T>(
                             let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
                             let spill = BITS - lo_bits;
                             let w0 = load(w[wwb + word_idx]);
-                            let w1 =
-                                load(w[wwb + select(spill > 0u32, word_idx + 1u32, word_idx)]);
+                            let w1 = load(w[wwb + select(spill > 0u32, word_idx + 1u32, word_idx)]);
                             let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                             let qf = q.cast::<f32>();
                             let elem = select(q >= half, qf - full, qf);

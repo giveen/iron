@@ -139,8 +139,8 @@ pub fn mt<T>(
                     let col_ok = (pw >= pad_w) & (pw < pad_w + in_w);
                     let valid = dep_ok & row_ok & col_ok;
                     let iw = select(col_ok, pw - pad_w, 0u32);
-                    let pix = load(input[in_ic_base + id * input_plane + ih * in_w + iw])
-                        .cast::<f32>();
+                    let pix =
+                        load(input[in_ic_base + id * input_plane + ih * in_w + iw]).cast::<f32>();
                     let pix_m = select(valid, pix, 0.0f32);
                     let col = col_kz + ky * kw + kx;
                     let elem = if WDEC == 0u32 {

@@ -123,8 +123,8 @@ pub fn mt<T>(
                 for i in range(0u32, 8u32, 1u32) {
                     let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
                     let d = p_off + i;
-                    let normed = load(x[d]).cast::<f32>() * load(norm_weight[d]).cast::<f32>()
-                        * inv_rms;
+                    let normed =
+                        load(x[d]).cast::<f32>() * load(norm_weight[d]).cast::<f32>() * inv_rms;
                     acc = acc + (val * scale) * normed;
                 }
             }
@@ -188,9 +188,8 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        utils::block_scaled_weights,
         quant::format::QFormat,
-        utils::{pack_f32, unpack_f32},
+        utils::{block_scaled_weights, pack_f32, unpack_f32},
     };
 
     /// One TG-row's lanes; ≥ 32 and a multiple of 32 (the Reduction contract).

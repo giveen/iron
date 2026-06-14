@@ -152,7 +152,8 @@ pub fn mt<T>(
                     let spill = BITS - lo_bits;
                     let w0 = load(weights_stacked[row_word_off + word_idx]);
                     let w1 = load(
-                        weights_stacked[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
+                        weights_stacked
+                            [row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
                     let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
