@@ -3,7 +3,7 @@
 //! DSv4 Lightning Indexer — top-k index selection over per-position
 //! aggregate scores.
 //!
-//! Sits downstream of [`ffai_dsv4_indexer_score`]. Takes the
+//! Sits downstream of [`mt_indexer_score`]. Takes the
 //! `score[n_kv]` produced by the indexer score kernel and returns the
 //! indices of the K largest entries (DSv4 production: `K = 512`). The
 //! returned indices feed CSA's sparse-gather SDPA inner loop.
@@ -34,7 +34,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_dsv4_indexer_topk_block(
+pub fn mt_indexer_topk_block(
     score: Tensor<f32>,
     mut out_indices: Tensor<u32>,
     #[constexpr] n_kv: u32,
@@ -105,7 +105,7 @@ pub fn ffai_dsv4_indexer_topk_block(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_indexer_topk_block;
+    use super::mt_indexer_topk_block;
     use crate::utils::pack_f32;
 
     /// CPU reference: argsort scores descending, take first `k`
@@ -128,7 +128,7 @@ pub mod kernel_tests {
         // Pack u32 expected as raw little-endian bytes for the test
         // framework — same path mxfp4_dequant uses for u32 outputs.
         let expected_bytes: Vec<u8> = expected.iter().flat_map(|i| i.to_le_bytes()).collect();
-        TestSetup::new(ffai_dsv4_indexer_topk_block::kernel_ir())
+        TestSetup::new(mt_indexer_topk_block::kernel_ir())
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("score", pack_f32(&scores, DType::F32), DType::F32))
             .input(TestBuffer::zeros("out_indices", k, DType::U32))
@@ -154,12 +154,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_indexer_topk_block;
+    use super::mt_indexer_topk_block;
 
     #[bench(dtypes = [f32])]
     fn bench_topk(_dt: DType) -> BenchSetup {
         let (n_kv, k) = (1024usize, 512usize);
-        BenchSetup::new(ffai_dsv4_indexer_topk_block::kernel_ir())
+        BenchSetup::new(mt_indexer_topk_block::kernel_ir())
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("score", n_kv, DType::F32))
             .buffer(BenchBuffer::zeros("out_indices", k, DType::U32).output())

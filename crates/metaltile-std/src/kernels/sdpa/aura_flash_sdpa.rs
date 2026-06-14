@@ -5,14 +5,14 @@
 //! and sliding-window causal masking. Port of `turbo_flash_sdpa.h`
 //! (spec 041 phase 1.1, GPT-OSS sink-attention family).
 //!
-//! Unlike the `aura_flash_p1` + `aura_flash_pass2` pair, this does the
+//! Unlike the `mt_aura_flash_p1` + `mt_aura_flash_pass2` pair, this does the
 //! whole attention in one dispatch — one threadgroup (a single
 //! 32-lane simdgroup) per query, iterating every K/V token with a
 //! running online softmax, then writing the normalized output. This
 //! side-steps the pass2-with-sinks graph-fusion incoherence that the
 //! two-pass β-with-sinks drafts hit on GPT-OSS-20B.
 //!
-//! Layout (matches `aura_flash_p1` / `aura_score` / `aura_value` — all
+//! Layout (matches `mt_aura_flash_p1` / `mt_aura_score` / `mt_aura_value` — all
 //! generic over `T` for the auxiliary float buffers; internal math stays
 //! f32 via cast-at-load. See header note on the dtype unification):
 //!   - q_rot:        [B*nQ, dim] T     (WHT-rotated + pre-scaled by caller)
@@ -27,8 +27,8 @@
 //!
 //! Norms / codebook were f32-typed in the original port (spec 041
 //! phase 1.1), inherited from `mlx-swift-lm`'s TurboQuant codec. The
-//! sibling `aura_flash_p1` / `aura_flash_pass2` / `aura_score` /
-//! `aura_value` kernels were genericised to `Tensor<T>` during the bf16
+//! sibling `mt_aura_flash_p1` / `mt_aura_flash_pass2` / `mt_aura_score` /
+//! `mt_aura_value` kernels were genericised to `Tensor<T>` during the bf16
 //! coverage rollout; this kernel was the last laggard. Unifying the
 //! dtype contract lets FFAI's cache store norms+codebook in the
 //! activation dtype directly — no per-call cast on the decode hot path.
@@ -44,7 +44,7 @@
 //! Lane `program_id::<0>()` ∈ [0,32) owns dim slots `lane + i*32`;
 //! `program_id::<1>()` = query index. The MLX reference fans tokens
 //! across 32 simdgroups; this port keeps the simpler single-simdgroup
-//! shape of `aura_flash_p1` (correctness-equivalent; token-parallelism
+//! shape of `mt_aura_flash_p1` (correctness-equivalent; token-parallelism
 //! is a perf follow-up).
 //!
 //! ## DISPATCH INVARIANTS
@@ -65,10 +65,10 @@ use metaltile::kernel;
 
 /// AURA fused single-pass SDPA, KB=4.
 ///
-/// Produces kernels: `aura_flash_sdpa_kb4_vb2_d64`, `_kb4_vb2_d128`,
+/// Produces kernels: `mt_aura_flash_sdpa_kb4_vb2_d64`, `_kb4_vb2_d128`,
 /// `_kb4_vb4_d64`, `_kb4_vb4_d128`.
 #[kernel(variants(VB = [2, 2, 4, 4], DIM = [64, 128, 64, 128], VL = [4, 4, 16, 16], DPL = [2, 4, 2, 4], suffix = "kb4_vb{VB}_d{DIM}"))]
-pub fn aura_flash_sdpa<T>(
+pub fn mt_aura_flash_sdpa<T>(
     q_rot: Tensor<T>,
     key_packed: Tensor<u32>,
     key_norms: Tensor<T>,
@@ -215,7 +215,7 @@ pub fn aura_flash_sdpa<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::aura_flash_sdpa_kb4_vb4_d128;
+    use super::mt_aura_flash_sdpa_kb4_vb4_d128;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -385,7 +385,7 @@ pub mod kernel_tests {
             window_size,
         );
 
-        TestSetup::new(aura_flash_sdpa_kb4_vb4_d128::kernel_ir_for(dt))
+        TestSetup::new(mt_aura_flash_sdpa_kb4_vb4_d128::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("q_rot", pack_f32(&q_rot, dt), dt))
             .input(TestBuffer::from_vec("key_packed", u32_bytes(&key_packed), DType::U32))
@@ -496,6 +496,6 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(VB = [2, 2, 4, 4], DIM = [64, 128, 64, 128], suffix = "kb4_vb{VB}_d{DIM}"))]
     fn bench_sdpa(dt: DType) -> BenchSetup {
-        setup(aura_flash_sdpa_kb4_vbVB_dDIM::kernel_ir_for(dt), DIM, 4, VB, dt)
+        setup(mt_aura_flash_sdpa_kb4_vbVB_dDIM::kernel_ir_for(dt), DIM, 4, VB, dt)
     }
 }

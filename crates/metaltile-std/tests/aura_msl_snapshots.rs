@@ -32,13 +32,13 @@ use metaltile::{
     codegen::{MslGenerator, msl::MslConfig},
     core::{dtype::DType, ir::KernelMode},
 };
-use metaltile_std::ffai::{
-    aura_dequant_rotated::aura_dequant_rotated_int4,
-    aura_encode::aura_encode_int4,
-    aura_flash_p1::aura_flash_p1_kb4_vb2_d128,
-    aura_flash_pass2::aura_flash_pass2_d128,
-    aura_score::aura_score_int4,
-    aura_value::aura_value_int4,
+use metaltile_std::{
+    ffai::{aura_dequant_rotated::aura_dequant_rotated_int4, aura_encode::aura_encode_int4},
+    kernels::sdpa::{
+        aura_flash_p1::mt_aura_flash_p1_kb4_vb2_d128,
+        aura_flash_pass2::mt_aura_flash_pass2_d128, aura_score::mt_aura_score_int4,
+        aura_value::mt_aura_value_int4,
+    },
 };
 
 /// Generate MSL for an AURA kernel's IR with its declared kernel mode.
@@ -69,34 +69,34 @@ fn aura_dequant_rotated_int4_f32_msl() {
     assert_snapshot!(msl);
 }
 
-/// `aura_score` — per-token Q·K score against the packed AURA cache.
+/// `mt_aura_score` — per-token Q·K score against the packed AURA cache.
 /// Reduction mode.
 #[test]
-fn aura_score_int4_f32_msl() {
-    let msl = aura_msl(aura_score_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
+fn mt_aura_score_int4_f32_msl() {
+    let msl = aura_msl(mt_aura_score_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
     assert_snapshot!(msl);
 }
 
-/// `aura_value` — softmax-weighted accumulation of the packed V cache.
+/// `mt_aura_value` — softmax-weighted accumulation of the packed V cache.
 /// Grid3D mode.
 #[test]
-fn aura_value_int4_f32_msl() {
-    let msl = aura_msl(aura_value_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+fn mt_aura_value_int4_f32_msl() {
+    let msl = aura_msl(mt_aura_value_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 
-/// `aura_flash_p1` — flash-attention pass 1 over the packed cache
+/// `mt_aura_flash_p1` — flash-attention pass 1 over the packed cache
 /// (kb4 / vb2 / d128 recipe). Grid3D mode.
 #[test]
-fn aura_flash_p1_kb4_vb2_d128_f32_msl() {
-    let msl = aura_msl(aura_flash_p1_kb4_vb2_d128::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+fn mt_aura_flash_p1_kb4_vb2_d128_f32_msl() {
+    let msl = aura_msl(mt_aura_flash_p1_kb4_vb2_d128::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 
-/// `aura_flash_pass2` — flash-attention pass 2 reduction (d128 recipe).
+/// `mt_aura_flash_pass2` — flash-attention pass 2 reduction (d128 recipe).
 /// Reduction mode; storage in bf16, online softmax in fp32.
 #[test]
-fn aura_flash_pass2_d128_bf16_msl() {
-    let msl = aura_msl(aura_flash_pass2_d128::kernel_ir_for(DType::BF16), KernelMode::Reduction);
+fn mt_aura_flash_pass2_d128_bf16_msl() {
+    let msl = aura_msl(mt_aura_flash_pass2_d128::kernel_ir_for(DType::BF16), KernelMode::Reduction);
     assert_snapshot!(msl);
 }

@@ -17,8 +17,6 @@
 // block_scaled_dequant → quant family (migrated later); block_scaled_moe →
 // kernels/moe/. The quantized matmuls moved to kernels/gemm/.
 pub mod block_scaled_dequant;
-pub mod scaled_dot_product_attention;
-pub mod sdpa_vector;
 pub mod steel;
 
 // `conv.rs` and `shared.rs` are placeholder/stale stubs left over from

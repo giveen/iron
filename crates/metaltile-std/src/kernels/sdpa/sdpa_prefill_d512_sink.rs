@@ -1,57 +1,36 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! DSv4 CSA sparse-gather SDPA decode for `head_dim == 512`.
+//! Multi-query causal sliding-window SDPA for head_dim=512 with attention
+//! sink — the PREFILL counterpart of `mt_sdpa_decode_d512_sink`. Each
+//! (q_head, q_pos) threadgroup runs the same flash online-softmax over the
+//! KV cache, but bounded causally: query at absolute position
+//! `p = kv_base + q_pos` attends KV `[max(0, p+1-window) .. p]`. For the
+//! DSv4 full-attn (compress_ratio=0) layers, `window=128`; pass a huge
+//! window for full causal. MQA (n_kv_heads via heads_per_group).
 //!
-//! Single-token attention over a **selected subset** of KV cache
-//! positions. Clone of [`crate::ffai::sdpa_decode_d512`] with the
-//! dense `for _t in 0..n_kv` inner loop replaced by an index-gather
-//! over a caller-supplied `selected_indices[n_selected]` buffer.
-//!
-//! The caller builds `selected_indices` by unioning:
-//!   - the top-512 indices returned by the Lightning Indexer
-//!     (`ffai_dsv4_indexer_topk_block`)
-//!   - the trailing `sliding_window` (DSv4 default: 128) most-recent
-//!     cache positions
-//!
-//! …and de-duplicating + sorting on the host. The kernel itself is
-//! oblivious to the union logic — it just gathers `(K, V)` at each
-//! listed index and runs the same online-softmax flash-attention.
-//!
-//! ## DISPATCH INVARIANTS
-//!
-//! Identical to `sdpa_decode_d512`:
-//!   - **TPG = 512** (16 SG × 32 lanes), 16 head-dim elements per lane.
-//!   - **`head_dim == 512`**, hardcoded.
-//!   - **Grid: 1 TG per q_head** — `grid = (nQHeads * 512, 1, 1)`,
-//!     `tg = (512, 1, 1)`.
-//!   - **`nQHeads % nKVHeads == 0`** (GQA integer fan-out).
-//!   - **`n_selected <= kv_stride`** — every selected index must be a
-//!     valid cache slot.
-//!
-//! ## Why a separate kernel
-//!
-//! Could fold sparse / dense as a runtime-selector on a `gather`
-//! function constant, but Apple's MSL spec collapses constant-folded
-//! branches at PSO compile time, so the dispatch hot path is the
-//! same. Keeping the two as parallel kernels preserves the cleanest
-//! emitted MSL for each path (no `if gather` per inner-loop iter).
+//! q/out are `[n_query, n_q_heads, head_dim]`; k/v are `[kv_stride,
+//! head_dim]` per kv-head (the resident/prefill KV cache, absolute pos).
 
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_dsv4_csa_sdpa_decode<T>(
+#[allow(clippy::too_many_arguments)]
+pub fn mt_sdpa_prefill_d512_sink<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
-    selected_indices: Tensor<u32>,
+    sink_logit: Tensor<f32>,
     out: Tensor<T>,
     #[constexpr] head_dim: u32,
-    #[constexpr] n_selected: u32,
+    #[constexpr] n_q_heads: u32,
     #[constexpr] kv_stride: u32,
     #[constexpr] heads_per_group: u32,
+    #[constexpr] window: u32,
+    #[constexpr] kv_base: u32,
     #[constexpr] scale: f32,
 ) {
     let q_head = tgid_x;
+    let q_pos = tgid_y;
     let kv_head = q_head / heads_per_group;
     let sg = simd_id;
     let lane = simd_lane;
@@ -62,7 +41,7 @@ pub fn ffai_dsv4_csa_sdpa_decode<T>(
     threadgroup_alloc("tg_out1", 1056);
     threadgroup_alloc("tg_out2", 1056);
     threadgroup_alloc("tg_out3", 1056);
-    let q_off = q_head * head_dim;
+    let q_off = (q_pos * n_q_heads + q_head) * head_dim;
     let kv_head_base = kv_head * kv_stride * head_dim;
     let d0 = lane * 16u32;
     let q0 = load(q[q_off + d0]).cast::<f32>() * scale;
@@ -99,10 +78,11 @@ pub fn ffai_dsv4_csa_sdpa_decode<T>(
     let mut o13 = 0.0f32;
     let mut o14 = 0.0f32;
     let mut o15 = 0.0f32;
-    // Inner loop walks the gather list instead of [0, n_kv).
-    for _s in range(sg, n_selected, ns) {
-        let t_idx = load(selected_indices[_s]);
-        let base = kv_head_base + t_idx * head_dim;
+    // Causal sliding-window KV range for this query's absolute position.
+    let p1 = kv_base + q_pos + 1u32;
+    let lo = select(p1 > window, p1 - window, 0u32);
+    for _t in range(lo + sg, p1, ns) {
+        let base = kv_head_base + _t * head_dim;
         let kv0 = base + d0;
         let k0 = load(k[kv0]).cast::<f32>();
         let k1 = load(k[kv0 + 1u32]).cast::<f32>();
@@ -192,8 +172,11 @@ pub fn ffai_dsv4_csa_sdpa_decode<T>(
         }
     }
     threadgroup_barrier();
-    let g_max = threadgroup_load("tg_max", 0);
-    let g_sum = threadgroup_load("tg_sum", 0);
+    let g_max0 = threadgroup_load("tg_max", 0);
+    let g_sum0 = threadgroup_load("tg_sum", 0);
+    let sink = load(sink_logit[q_head]);
+    let g_max = select(sink > g_max0, sink, g_max0);
+    let g_sum = g_sum0 * exp(g_max0 - g_max) + exp(sink - g_max);
     let rescale = select(g_sum > 0.0f32, exp(run_max - g_max) / g_sum, 0.0f32);
     let stride = ns + 1u32;
     let idx = lane * stride + sg;
@@ -294,158 +277,32 @@ pub fn ffai_dsv4_csa_sdpa_decode<T>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use metaltile::{
-        codegen::msl::MslGenerator,
-        core::{DType, ir::KernelMode},
-    };
-
-    use super::ffai_dsv4_csa_sdpa_decode;
-
-    fn msl_for(dt: DType) -> String {
-        let mut k = ffai_dsv4_csa_sdpa_decode::kernel_ir_for(dt);
-        k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("ffai_dsv4_csa_sdpa_decode codegen succeeds")
-    }
-
-    #[test]
-    fn codegen_produces_nonempty_msl_for_all_float_dtypes() {
-        for dt in [DType::F32, DType::F16, DType::BF16] {
-            let src = msl_for(dt);
-            assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
-            assert!(
-                src.contains("kernel void ffai_dsv4_csa_sdpa_decode"),
-                "MSL for {dt:?} should declare ffai_dsv4_csa_sdpa_decode:\n{src}",
-            );
-        }
-    }
-}
-
-pub mod kernel_tests {
-    use metaltile::{test::*, test_kernel};
-
-    use super::ffai_dsv4_csa_sdpa_decode;
-    use crate::utils::{pack_f32, unpack_f32};
-
-    /// Sparse-gather oracle: dense SDPA but only over the listed cache
-    /// positions. The online-softmax flash form converges to the same
-    /// result.
-    #[allow(clippy::too_many_arguments)]
-    fn naive_sparse_sdpa(
-        q: &[f32],
-        k: &[f32],
-        v: &[f32],
-        selected: &[u32],
-        n_q_heads: usize,
-        n_kv_heads: usize,
-        head_dim: usize,
-        kv_stride: usize,
-        scale: f32,
-    ) -> Vec<f32> {
-        let gqa = n_q_heads / n_kv_heads;
-        let n_sel = selected.len();
-        let mut out = vec![0.0f32; n_q_heads * head_dim];
-        for qh in 0..n_q_heads {
-            let kvh = qh / gqa;
-            let q_off = qh * head_dim;
-            let kv_slab = kvh * kv_stride * head_dim;
-            let mut scores = vec![0.0f32; n_sel];
-            for (s, &idx) in selected.iter().enumerate() {
-                let k_off = kv_slab + (idx as usize) * head_dim;
-                let mut dot = 0.0f32;
-                for d in 0..head_dim {
-                    dot += q[q_off + d] * k[k_off + d];
-                }
-                scores[s] = dot * scale;
-            }
-            let m = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let mut sum = 0.0f32;
-            for sc in scores.iter_mut() {
-                *sc = (*sc - m).exp();
-                sum += *sc;
-            }
-            let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
-            for d in 0..head_dim {
-                let mut acc = 0.0f32;
-                for (s, &idx) in selected.iter().enumerate() {
-                    let v_off = kv_slab + (idx as usize) * head_dim + d;
-                    acc += scores[s] * inv * v[v_off];
-                }
-                out[q_off + d] = acc;
-            }
-        }
-        out
-    }
-
-    fn ramp(n: usize, step: f32, start: f32) -> Vec<f32> {
-        (0..n).map(|i| ((start + i as f32 * step) % 2.0) - 1.0).collect()
-    }
-
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 3e-3, 1.5e-2])]
-    fn test_dsv4_csa_sdpa_decode(dt: DType) -> TestSetup {
-        let (n_q_heads, n_kv_heads, head_dim) = (8usize, 4usize, 512usize);
-        let (n_selected, kv_stride) = (32usize, 128usize);
-        let heads_per_group = n_q_heads / n_kv_heads;
-        let scale = 1.0f32 / (head_dim as f32).sqrt();
-        let q = unpack_f32(&pack_f32(&ramp(n_q_heads * head_dim, 0.013, -0.4), dt), dt);
-        let k =
-            unpack_f32(&pack_f32(&ramp(n_kv_heads * kv_stride * head_dim, 0.011, -0.5), dt), dt);
-        let v =
-            unpack_f32(&pack_f32(&ramp(n_kv_heads * kv_stride * head_dim, 0.007, -0.3), dt), dt);
-        // Pick a non-trivial gather: every 4th position from
-        // [0, kv_stride), so the kernel walks 32 indices spanning the
-        // full cache stride — exercises the per-thread index load
-        // path under the GQA fan-out.
-        let selected: Vec<u32> = (0..n_selected).map(|i| (i as u32) * 4).collect();
-        let expected = naive_sparse_sdpa(
-            &q, &k, &v, &selected, n_q_heads, n_kv_heads, head_dim, kv_stride, scale,
-        );
-        let sel_bytes: Vec<u8> = selected.iter().flat_map(|i| i.to_le_bytes()).collect();
-        TestSetup::new(ffai_dsv4_csa_sdpa_decode::kernel_ir_for(dt))
-            .mode(KernelMode::Reduction)
-            .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
-            .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
-            .input(TestBuffer::from_vec("v", pack_f32(&v, dt), dt))
-            .input(TestBuffer::from_vec("selected_indices", sel_bytes, DType::U32))
-            .input(TestBuffer::zeros("out", n_q_heads * head_dim, dt))
-            .constexpr("head_dim", head_dim as u32)
-            .constexpr("n_selected", n_selected as u32)
-            .constexpr("kv_stride", kv_stride as u32)
-            .constexpr("heads_per_group", heads_per_group as u32)
-            .constexpr("scale", scale)
-            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
-            .grid_3d(n_q_heads as u32, 1, 1, [512, 1, 1])
-    }
-}
-
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_csa_sdpa_decode;
+    use super::mt_sdpa_prefill_d512_sink;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_csa(dt: DType) -> BenchSetup {
-        let (n_q_heads, n_kv_heads, head_dim) = (32usize, 8usize, 512usize);
-        let (n_selected, kv_stride) = (640usize, 4096usize); // 512 top-k + 128 sliding window
-        let heads_per_group = n_q_heads / n_kv_heads;
-        let scale = 1.0f32 / (head_dim as f32).sqrt();
-        let bytes = (2 * n_q_heads * head_dim + 2 * n_kv_heads * kv_stride * head_dim)
-            * dt.size_bytes()
-            + n_selected * 4;
-        BenchSetup::new(ffai_dsv4_csa_sdpa_decode::kernel_ir_for(dt))
+    fn bench_sdpa_prefill_d512_sink(dt: DType) -> BenchSetup {
+        let hd = 512usize;
+        let n_q = 64usize;
+        let n_query = 256usize;
+        let kv = 256usize;
+        BenchSetup::new(mt_sdpa_prefill_d512_sink::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
-            .buffer(BenchBuffer::random("q", n_q_heads * head_dim, dt))
-            .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))
-            .buffer(BenchBuffer::random("v", n_kv_heads * kv_stride * head_dim, dt))
-            .buffer(BenchBuffer::random("selected_indices", n_selected, DType::U32))
-            .buffer(BenchBuffer::zeros("out", n_q_heads * head_dim, dt).output())
-            .constexpr("head_dim", head_dim as u32)
-            .constexpr("n_selected", n_selected as u32)
-            .constexpr("kv_stride", kv_stride as u32)
-            .constexpr("heads_per_group", heads_per_group as u32)
-            .constexpr("scale", scale)
-            .grid_3d(n_q_heads as u32, 1, 1, [512, 1, 1])
-            .bytes_moved(bytes as u64)
+            .buffer(BenchBuffer::random("q", n_query * n_q * hd, dt))
+            .buffer(BenchBuffer::random("k", kv * hd, dt))
+            .buffer(BenchBuffer::random("v", kv * hd, dt))
+            .buffer(BenchBuffer::random("sink_logit", n_q, DType::F32))
+            .buffer(BenchBuffer::zeros("out", n_query * n_q * hd, dt).output())
+            .constexpr("head_dim", hd as u32)
+            .constexpr("n_q_heads", n_q as u32)
+            .constexpr("kv_stride", kv as u32)
+            .constexpr("heads_per_group", n_q as u32)
+            .constexpr("window", 128u32)
+            .constexpr("kv_base", 0u32)
+            .constexpr("scale", 0.044194174f32)
+            .grid_3d(n_q as u32, n_query as u32, 1, [32, 1, 1])
+            .bytes_moved(((kv * hd * 2 + n_query * n_q * hd) * dt.size_bytes()) as u64)
     }
 }

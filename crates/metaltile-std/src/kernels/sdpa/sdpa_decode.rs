@@ -4,11 +4,11 @@
 //!
 //! | Kernel                  | elems | Phases | Sink | Window |
 //! |-------------------------|-------|--------|------|--------|
-//! | `ffai_sdpa_decode_d64`  |   2   |   1×2  |  ✓  |        |
-//! | `ffai_sdpa_decode_d96`  |   3   |   1×3  |      |        |
-//! | `ffai_sdpa_decode`      |   4   |   1×4  |  ✓  |   ✓    |
-//! | `ffai_sdpa_decode_d256` |   8   |   2×4  |  ✓  |        |
-//! | `ffai_sdpa_decode_d512` |  16   |   4×4  |      |        |
+//! | `mt_sdpa_decode_d64`  |   2   |   1×2  |  ✓  |        |
+//! | `mt_sdpa_decode_d96`  |   3   |   1×3  |      |        |
+//! | `mt_sdpa_decode`      |   4   |   1×4  |  ✓  |   ✓    |
+//! | `mt_sdpa_decode_d256` |   8   |   2×4  |  ✓  |        |
+//! | `mt_sdpa_decode_d512` |  16   |   4×4  |      |        |
 //!
 //! Each inner `range(0u32, N, 1u32)` loop uses a literal bound so the
 //! DSL's `UnrollPass` unrolls it to constant-indexed `stack_alloc`
@@ -25,7 +25,7 @@ use metaltile::kernel;
 // ── d64: 2-slot single phase, sink-aware reduction ──────────────────────
 
 #[kernel]
-pub fn ffai_sdpa_decode_d64<T>(
+pub fn mt_sdpa_decode_d64<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -127,7 +127,7 @@ pub fn ffai_sdpa_decode_d64<T>(
 // ── d96: 3-slot single phase, simple reduction ──────────────────────────
 
 #[kernel]
-pub fn ffai_sdpa_decode_d96<T>(
+pub fn mt_sdpa_decode_d96<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -231,7 +231,7 @@ pub fn ffai_sdpa_decode_d96<T>(
 // Dense path: sink_end=0, window_start=0 → only second pass fires.
 
 #[kernel]
-pub fn ffai_sdpa_decode<T>(
+pub fn mt_sdpa_decode<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -368,7 +368,7 @@ pub fn ffai_sdpa_decode<T>(
 // ── d256: 4-slot × 2 phases, sink-aware reduction ───────────────────────
 
 #[kernel]
-pub fn ffai_sdpa_decode_d256<T>(
+pub fn mt_sdpa_decode_d256<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -509,7 +509,7 @@ pub fn ffai_sdpa_decode_d256<T>(
 // 1024-thread pipeline cap, so we use 512 threads.
 
 #[kernel]
-pub fn ffai_sdpa_decode_d512<T>(
+pub fn mt_sdpa_decode_d512<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -698,11 +698,11 @@ mod tests {
     };
 
     use super::{
-        ffai_sdpa_decode,
-        ffai_sdpa_decode_d64,
-        ffai_sdpa_decode_d96,
-        ffai_sdpa_decode_d256,
-        ffai_sdpa_decode_d512,
+        mt_sdpa_decode,
+        mt_sdpa_decode_d64,
+        mt_sdpa_decode_d96,
+        mt_sdpa_decode_d256,
+        mt_sdpa_decode_d512,
     };
 
     fn check(name: &str, src: &str) {
@@ -713,30 +713,30 @@ mod tests {
     #[test]
     fn codegen_d64() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = ffai_sdpa_decode_d64::kernel_ir_for(dt);
+            let mut k = mt_sdpa_decode_d64::kernel_ir_for(dt);
             k.mode = KernelMode::Reduction;
             let src = MslGenerator::default().generate(&k).unwrap();
-            check("ffai_sdpa_decode_d64", &src);
+            check("mt_sdpa_decode_d64", &src);
         }
     }
 
     #[test]
     fn codegen_d96() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = ffai_sdpa_decode_d96::kernel_ir_for(dt);
+            let mut k = mt_sdpa_decode_d96::kernel_ir_for(dt);
             k.mode = KernelMode::Reduction;
             let src = MslGenerator::default().generate(&k).unwrap();
-            check("ffai_sdpa_decode_d96", &src);
+            check("mt_sdpa_decode_d96", &src);
         }
     }
 
     #[test]
     fn codegen_d128() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = ffai_sdpa_decode::kernel_ir_for(dt);
+            let mut k = mt_sdpa_decode::kernel_ir_for(dt);
             k.mode = KernelMode::Reduction;
             let src = MslGenerator::default().generate(&k).unwrap();
-            check("ffai_sdpa_decode", &src);
+            check("mt_sdpa_decode", &src);
             for tok in &["simd_group", "simd_lane", "threadgroup_barrier", "simd_sum", "simd_max"] {
                 assert!(src.contains(tok), "d128 MSL missing `{tok}`:\n{src}");
             }
@@ -746,20 +746,20 @@ mod tests {
     #[test]
     fn codegen_d256() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = ffai_sdpa_decode_d256::kernel_ir_for(dt);
+            let mut k = mt_sdpa_decode_d256::kernel_ir_for(dt);
             k.mode = KernelMode::Reduction;
             let src = MslGenerator::default().generate(&k).unwrap();
-            check("ffai_sdpa_decode_d256", &src);
+            check("mt_sdpa_decode_d256", &src);
         }
     }
 
     #[test]
     fn codegen_d512() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = ffai_sdpa_decode_d512::kernel_ir_for(dt);
+            let mut k = mt_sdpa_decode_d512::kernel_ir_for(dt);
             k.mode = KernelMode::Reduction;
             let src = MslGenerator::default().generate(&k).unwrap();
-            check("ffai_sdpa_decode_d512", &src);
+            check("mt_sdpa_decode_d512", &src);
         }
     }
 }
@@ -770,11 +770,11 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::{
-        ffai_sdpa_decode,
-        ffai_sdpa_decode_d64,
-        ffai_sdpa_decode_d96,
-        ffai_sdpa_decode_d256,
-        ffai_sdpa_decode_d512,
+        mt_sdpa_decode,
+        mt_sdpa_decode_d64,
+        mt_sdpa_decode_d96,
+        mt_sdpa_decode_d256,
+        mt_sdpa_decode_d512,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -848,7 +848,7 @@ pub mod kernel_tests {
         let expected = naive_sdpa(
             &q, &k, &v, nqh, nkh, hd, n_kv, kv_stride, 0, 0, has_sink, sink_logit, scale,
         );
-        TestSetup::new(ffai_sdpa_decode_d64::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode_d64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -884,7 +884,7 @@ pub mod kernel_tests {
         let v = unpack_f32(&pack_f32(&ramp(nkh * kv_stride * hd, 0.007, -0.3), dt), dt);
         let expected =
             naive_sdpa(&q, &k, &v, nqh, nkh, hd, n_kv, kv_stride, 0, 0, false, 0.0, scale);
-        TestSetup::new(ffai_sdpa_decode_d96::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode_d96::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -932,7 +932,7 @@ pub mod kernel_tests {
             sink_logit,
             scale,
         );
-        TestSetup::new(ffai_sdpa_decode::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -995,7 +995,7 @@ pub mod kernel_tests {
         let expected = naive_sdpa(
             &q, &k, &v, nqh, nkh, hd, n_kv, kv_stride, 0, 0, has_sink, sink_logit, scale,
         );
-        TestSetup::new(ffai_sdpa_decode_d256::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode_d256::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -1031,7 +1031,7 @@ pub mod kernel_tests {
         let v = unpack_f32(&pack_f32(&ramp(nkh * kv_stride * hd, 0.007, -0.3), dt), dt);
         let expected =
             naive_sdpa(&q, &k, &v, nqh, nkh, hd, n_kv, kv_stride, 0, 0, false, 0.0, scale);
-        TestSetup::new(ffai_sdpa_decode_d512::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode_d512::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -1053,11 +1053,11 @@ pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
     use super::{
-        ffai_sdpa_decode,
-        ffai_sdpa_decode_d64,
-        ffai_sdpa_decode_d96,
-        ffai_sdpa_decode_d256,
-        ffai_sdpa_decode_d512,
+        mt_sdpa_decode,
+        mt_sdpa_decode_d64,
+        mt_sdpa_decode_d96,
+        mt_sdpa_decode_d256,
+        mt_sdpa_decode_d512,
     };
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -1065,7 +1065,7 @@ pub mod kernel_benches {
         let (nqh, nkh, hd) = (32usize, 8usize, 64usize);
         let (n_kv, kv_stride) = (4096usize, 4096usize);
         let bytes = (2 * nqh * hd + 2 * nkh * n_kv * hd) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode_d64::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode_d64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", nqh * hd, dt))
             .buffer(BenchBuffer::random("k", nkh * kv_stride * hd, dt))
@@ -1088,7 +1088,7 @@ pub mod kernel_benches {
         let (nqh, nkh, hd) = (32usize, 8usize, 96usize);
         let (n_kv, kv_stride) = (4096usize, 4096usize);
         let bytes = (2 * nqh * hd + 2 * nkh * n_kv * hd) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode_d96::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode_d96::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", nqh * hd, dt))
             .buffer(BenchBuffer::random("k", nkh * kv_stride * hd, dt))
@@ -1109,7 +1109,7 @@ pub mod kernel_benches {
         let (nqh, nkh, hd) = (32usize, 8usize, 128usize);
         let (n_kv, kv_stride) = (4096usize, 4096usize);
         let bytes = (nqh * hd + 2 * nkh * n_kv * hd + nqh * hd) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", nqh * hd, dt))
             .buffer(BenchBuffer::random("k", nkh * kv_stride * hd, dt))
@@ -1134,7 +1134,7 @@ pub mod kernel_benches {
         let (nqh, nkh, hd) = (32usize, 8usize, 256usize);
         let (n_kv, kv_stride) = (4096usize, 4096usize);
         let bytes = (2 * nqh * hd + 2 * nkh * n_kv * hd) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode_d256::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode_d256::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", nqh * hd, dt))
             .buffer(BenchBuffer::random("k", nkh * kv_stride * hd, dt))
@@ -1157,7 +1157,7 @@ pub mod kernel_benches {
         let (nqh, nkh, hd) = (32usize, 8usize, 512usize);
         let (n_kv, kv_stride) = (4096usize, 4096usize);
         let bytes = (2 * nqh * hd + 2 * nkh * n_kv * hd) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode_d512::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode_d512::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", nqh * hd, dt))
             .buffer(BenchBuffer::random("k", nkh * kv_stride * hd, dt))

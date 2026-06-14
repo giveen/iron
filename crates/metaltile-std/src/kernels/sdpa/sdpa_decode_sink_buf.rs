@@ -31,7 +31,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_sdpa_decode_sink_buf<T>(
+pub fn mt_sdpa_decode_sink_buf<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -207,7 +207,7 @@ pub fn ffai_sdpa_decode_sink_buf<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_sdpa_decode_sink_buf;
+    use super::mt_sdpa_decode_sink_buf;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Single-query decode oracle with a per-head sink (value 0) folded
@@ -287,7 +287,7 @@ pub mod kernel_tests {
         let expected =
             naive(&q, &k, &v, &sink, n_q_heads, n_kv_heads, head_dim, n_kv, kv_stride, scale);
 
-        TestSetup::new(ffai_sdpa_decode_sink_buf::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_decode_sink_buf::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -322,7 +322,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_sdpa_decode_sink_buf;
+    use super::mt_sdpa_decode_sink_buf;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_decode_sink_buf(dt: DType) -> BenchSetup {
@@ -333,7 +333,7 @@ pub mod kernel_benches {
         let heads_per_group = n_q_heads / n_kv_heads;
         let scale = 1.0f32 / (head_dim as f32).sqrt();
         let bytes = (n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim) * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_decode_sink_buf::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_decode_sink_buf::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

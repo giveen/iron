@@ -24,7 +24,7 @@ use std::{
 
 use common::{Dt, SdpaShape, max_abs_diff, naive_sdpa_f32, pack_bytes, ramp, unpack_bytes};
 use metaltile::{Context, DispatchSpec, ResidentBuffer, core::ir::KernelMode};
-use metaltile_std::ffai::sdpa_decode_2pass::{sdpa_decode_2pass_pass1, sdpa_decode_2pass_pass2};
+use metaltile_std::kernels::sdpa::sdpa_decode_2pass::{mt_sdpa_decode_2pass_pass1, mt_sdpa_decode_2pass_pass2};
 
 /// Serialise GPU dispatches across tests in this file. Cargo runs `#[test]`
 /// functions concurrently by default; under `cargo llvm-cov` the
@@ -75,7 +75,7 @@ fn run_2pass(
     let partial_o_len = a.n_q_heads * a.blocks * a.head_dim;
     let partial_ml_len = a.n_q_heads * a.blocks;
 
-    let mut p1 = sdpa_decode_2pass_pass1::kernel_ir_for(dtype);
+    let mut p1 = mt_sdpa_decode_2pass_pass1::kernel_ir_for(dtype);
     p1.mode = KernelMode::Reduction;
     let mut p1_bufs: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     p1_bufs.insert("q".into(), pack_bytes(a.q, dt));
@@ -94,7 +94,7 @@ fn run_2pass(
     p1_bufs.insert("blocks".into(), (a.blocks as u32).to_le_bytes().to_vec());
     p1_bufs.insert("scale".into(), a.scale.to_le_bytes().to_vec());
 
-    let mut p2 = sdpa_decode_2pass_pass2::kernel_ir_for(dtype);
+    let mut p2 = mt_sdpa_decode_2pass_pass2::kernel_ir_for(dtype);
     p2.mode = KernelMode::Reduction;
     let mut p2_bufs: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     p2_bufs.insert("out".into(), vec![0u8; a.n_q_heads * a.head_dim * dt.bytes()]);
@@ -487,13 +487,13 @@ fn sdpa_decode_2pass_capture() {
 
 // ── Additional head_dim correctness tests: d={64,96,256} ─────────────────────
 
-use metaltile_std::ffai::sdpa_decode_2pass::{
-    sdpa_decode_2pass_pass1_d64,
-    sdpa_decode_2pass_pass1_d96,
-    sdpa_decode_2pass_pass1_d256,
-    sdpa_decode_2pass_pass2_d64,
-    sdpa_decode_2pass_pass2_d96,
-    sdpa_decode_2pass_pass2_d256,
+use metaltile_std::kernels::sdpa::sdpa_decode_2pass::{
+    mt_sdpa_decode_2pass_pass1_d64,
+    mt_sdpa_decode_2pass_pass1_d96,
+    mt_sdpa_decode_2pass_pass1_d256,
+    mt_sdpa_decode_2pass_pass2_d64,
+    mt_sdpa_decode_2pass_pass2_d96,
+    mt_sdpa_decode_2pass_pass2_d256,
 };
 
 /// Dispatch the d-specific pass1+pass2 pair and compare to the naive
@@ -522,16 +522,16 @@ fn run_2pass_generic(
     // Pick the right pass1/pass2 kernel pair by head_dim.
     let (mut p1_kernel, mut p2_kernel) = match head_dim {
         64 => (
-            sdpa_decode_2pass_pass1_d64::kernel_ir_for(dtype),
-            sdpa_decode_2pass_pass2_d64::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass1_d64::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass2_d64::kernel_ir_for(dtype),
         ),
         96 => (
-            sdpa_decode_2pass_pass1_d96::kernel_ir_for(dtype),
-            sdpa_decode_2pass_pass2_d96::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass1_d96::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass2_d96::kernel_ir_for(dtype),
         ),
         256 => (
-            sdpa_decode_2pass_pass1_d256::kernel_ir_for(dtype),
-            sdpa_decode_2pass_pass2_d256::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass1_d256::kernel_ir_for(dtype),
+            mt_sdpa_decode_2pass_pass2_d256::kernel_ir_for(dtype),
         ),
         _ => panic!("unsupported head_dim {head_dim} in run_2pass_generic"),
     };

@@ -16,26 +16,14 @@
 //! counterpart lands in mainline at a future pin, the file moves to
 //! `mlx/`.
 
-pub mod attn_head_gate;
 pub mod aura_dequant_rotated;
 pub mod aura_encode;
-pub mod aura_flash_p1;
-pub mod aura_flash_pass2;
-pub mod aura_flash_sdpa;
-pub mod aura_score;
-pub mod aura_value;
 // batched_* projection GEMV/GEMM + dequant_gemv migrated to kernels/gemm/.
 pub mod dequant_gather;
 pub mod dequant_gather_block_scaled;
-pub mod dsv4_compressor_pool;
-pub mod dsv4_csa_sdpa_decode;
 pub mod dsv4_fp8_block_dequant;
-pub mod dsv4_indexer_score;
-pub mod dsv4_indexer_topk;
 pub mod dsv4_mxfp4_dequant;
 pub mod ffai_dequant_q4;
-pub mod flash_block_scaled_sdpa;
-pub mod flash_quantized_sdpa;
 // gemm_q4_mpp / gemm_q8 / gemm_q8_mpp + gemv_q8 (split by family) → kernels/.
 pub mod gguf_dequant_iq2_xxs;
 pub mod gguf_dequant_iq2_xxs_raw;
@@ -45,15 +33,3 @@ pub mod gguf_iq2_xxs_extract_qs;
 // moe family (moe* · dsv4_router_topk · dequant_gemv_expert_indexed*) →
 // kernels/moe/. patch_embed_block_scaled / patch_embed_mma_block_scaled →
 // kernels/gemm/.
-pub mod sdpa_bidirectional;
-pub mod sdpa_bidirectional_d128_relpos;
-pub mod sdpa_bidirectional_windowed;
-pub mod sdpa_decode; // unified: d64, d96, d128, d256, d512
-pub mod sdpa_decode_2pass;
-pub mod sdpa_decode_batched;
-pub mod sdpa_decode_d512_sink;
-pub mod sdpa_decode_sink_buf;
-pub mod sdpa_multi;
-pub mod sdpa_multi_d256;
-pub mod sdpa_prefill_d512_sink;
-pub mod sdpa_rel_pos_conformer;

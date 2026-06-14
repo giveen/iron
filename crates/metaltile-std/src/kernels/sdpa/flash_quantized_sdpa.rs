@@ -1,9 +1,9 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
 //! Flash quantized SDPA — single-pass online-softmax attention over an
-//! affine-quantized K/V cache. Port of `flash_quantized_sdpa.h`
+//! affine-quantized K/V cache. Port of `mt_flash_quantized_sdpa.h`
 //! (spec 041 phase 1.1/1.2). The affine-quant counterpart of
-//! `aura_flash_sdpa`: K and V are dequantized inline per thread from
+//! `mt_aura_flash_sdpa`: K and V are dequantized inline per thread from
 //! packed-index + per-group scale + bias triples (the layout
 //! `quantized` matmul consumes), instead of an AURA codebook.
 //!
@@ -23,7 +23,7 @@
 //!
 //! Lane `program_id::<0>()` ∈ [0,32) owns dim slots `lane + i*32`;
 //! `program_id::<1>()` = query index. Single-simdgroup shape, matching
-//! `aura_flash_sdpa` (token-parallelism is a perf follow-up).
+//! `mt_aura_flash_sdpa` (token-parallelism is a perf follow-up).
 //!
 //! ## Mask variants
 //!
@@ -31,14 +31,14 @@
 //! addition to the built-in causal / sliding-window guard. Two new
 //! constexpr-gated kernel variants cover the MLX-upstream mask shapes:
 //!
-//! - **Bool mask** (`flash_quantized_sdpa_bool_mask_b{4,8}_d{64,128,256}`):
+//! - **Bool mask** (`mt_flash_quantized_sdpa_bool_mask_b{4,8}_d{64,128,256}`):
 //!   takes a `mask_bool: Tensor<u32>` of shape `[B*nQ, tokens]` (packed
 //!   as u32, one bit per token) — or flat byte-per-token; see note below.
 //!   When `mask_bool[q_idx * tokens + t] == 0` the key at position `t`
 //!   is skipped (softmax weight set to zero). Useful for segment packing
 //!   and cross-sequence masking.
 //!
-//! - **Float mask** (`flash_quantized_sdpa_float_mask_b{4,8}_d{64,128,256}`):
+//! - **Float mask** (`mt_flash_quantized_sdpa_float_mask_b{4,8}_d{64,128,256}`):
 //!   takes a `mask_float: Tensor<T>` of shape `[B*nQ, tokens]`.
 //!   The value `mask_float[q_idx * tokens + t]` is added to the raw
 //!   attention logit before the online-softmax step, enabling relative-
@@ -52,7 +52,7 @@
 //! The mask buffers are per-element (one f32/T or one u32 per token per
 //! query), row-major `[B*nQ, tokens]`. For the bool mask, each slot is
 //! a full `u32` (0 = masked, non-zero = visible) — matching the MLX
-//! `mask_t` convention used in `aura_flash_sdpa`.
+//! `mask_t` convention used in `mt_aura_flash_sdpa`.
 //!
 //! ## DISPATCH INVARIANTS
 //!
@@ -73,7 +73,7 @@ use metaltile::kernel;
 
 /// Flash quantized SDPA (no mask), BITS ∈ {4, 8}, DIM ∈ {64,96,128,256,512}.
 ///
-/// Produces 10 kernels: `flash_quantized_sdpa_b4_d64`, `_b4_d96`, `_b4_d128`,
+/// Produces 10 kernels: `mt_flash_quantized_sdpa_b4_d64`, `_b4_d96`, `_b4_d128`,
 /// `_b4_d256`, `_b4_d512`, `_b8_d64`, `_b8_d96`, `_b8_d128`, `_b8_d256`,
 /// `_b8_d512`.
 #[kernel(variants(
@@ -82,7 +82,7 @@ use metaltile::kernel;
     DPL  = [2, 3, 4, 8, 16, 2, 3, 4, 8, 16],
     suffix = "b{BITS}_d{DIM}"
 ))]
-pub fn flash_quantized_sdpa<T>(
+pub fn mt_flash_quantized_sdpa<T>(
     queries: Tensor<T>,
     k_packed: Tensor<u32>,
     k_scales: Tensor<T>,
@@ -197,7 +197,7 @@ pub fn flash_quantized_sdpa<T>(
 
 /// Flash quantized SDPA with bool gate mask, BITS ∈ {4, 8}, DIM ∈ {64,128,256}.
 ///
-/// Produces 6 kernels: `flash_quantized_sdpa_bool_mask_b4_d64`,
+/// Produces 6 kernels: `mt_flash_quantized_sdpa_bool_mask_b4_d64`,
 /// `_b4_d128`, `_b4_d256`, `_b8_d64`, `_b8_d128`, `_b8_d256`.
 #[kernel(variants(
     BITS = [4, 4, 4, 8, 8, 8],
@@ -205,7 +205,7 @@ pub fn flash_quantized_sdpa<T>(
     DPL  = [2, 4, 8, 2, 4, 8],
     suffix = "b{BITS}_d{DIM}"
 ))]
-pub fn flash_quantized_sdpa_bool_mask<T>(
+pub fn mt_flash_quantized_sdpa_bool_mask<T>(
     queries: Tensor<T>,
     k_packed: Tensor<u32>,
     k_scales: Tensor<T>,
@@ -319,7 +319,7 @@ pub fn flash_quantized_sdpa_bool_mask<T>(
 
 /// Flash quantized SDPA with additive float bias mask, BITS ∈ {4, 8}, DIM ∈ {64,128,256}.
 ///
-/// Produces 6 kernels: `flash_quantized_sdpa_float_mask_b4_d64`,
+/// Produces 6 kernels: `mt_flash_quantized_sdpa_float_mask_b4_d64`,
 /// `_b4_d128`, `_b4_d256`, `_b8_d64`, `_b8_d128`, `_b8_d256`.
 #[kernel(variants(
     BITS = [4, 4, 4, 8, 8, 8],
@@ -327,7 +327,7 @@ pub fn flash_quantized_sdpa_bool_mask<T>(
     DPL  = [2, 4, 8, 2, 4, 8],
     suffix = "b{BITS}_d{DIM}"
 ))]
-pub fn flash_quantized_sdpa_float_mask<T>(
+pub fn mt_flash_quantized_sdpa_float_mask<T>(
     queries: Tensor<T>,
     k_packed: Tensor<u32>,
     k_scales: Tensor<T>,
@@ -439,14 +439,14 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::{
-        flash_quantized_sdpa_b4_d96,
-        flash_quantized_sdpa_b4_d128,
-        flash_quantized_sdpa_b4_d512,
-        flash_quantized_sdpa_b8_d128,
-        flash_quantized_sdpa_bool_mask_b4_d128,
-        flash_quantized_sdpa_bool_mask_b8_d128,
-        flash_quantized_sdpa_float_mask_b4_d128,
-        flash_quantized_sdpa_float_mask_b8_d128,
+        mt_flash_quantized_sdpa_b4_d96,
+        mt_flash_quantized_sdpa_b4_d128,
+        mt_flash_quantized_sdpa_b4_d512,
+        mt_flash_quantized_sdpa_b8_d128,
+        mt_flash_quantized_sdpa_bool_mask_b4_d128,
+        mt_flash_quantized_sdpa_bool_mask_b8_d128,
+        mt_flash_quantized_sdpa_float_mask_b4_d128,
+        mt_flash_quantized_sdpa_float_mask_b8_d128,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -749,50 +749,50 @@ pub mod kernel_tests {
     // Base b4_d128, full attention, no sinks.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b4_d128(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, 0, dt)
+        base_setup(mt_flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, 0, dt)
     }
     // Attention sinks.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b4_d128_sinks(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, true, 0, dt)
+        base_setup(mt_flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, true, 0, dt)
     }
     // Sliding window (4 of 8 tokens).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b4_d128_window(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, 4, dt)
+        base_setup(mt_flash_quantized_sdpa_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, 4, dt)
     }
     // 8-bit quant (pack_factor 4).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b8_d128(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b8_d128::kernel_ir_for(dt), 128, 8, 64, false, 0, dt)
+        base_setup(mt_flash_quantized_sdpa_b8_d128::kernel_ir_for(dt), 128, 8, 64, false, 0, dt)
     }
     // head_dim 96 (dims_per_lane 3) and 512 (dims_per_lane 16).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b4_d96(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b4_d96::kernel_ir_for(dt), 96, 4, 32, false, 0, dt)
+        base_setup(mt_flash_quantized_sdpa_b4_d96::kernel_ir_for(dt), 96, 4, 32, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_b4_d512(dt: DType) -> TestSetup {
-        base_setup(flash_quantized_sdpa_b4_d512::kernel_ir_for(dt), 512, 4, 64, false, 0, dt)
+        base_setup(mt_flash_quantized_sdpa_b4_d512::kernel_ir_for(dt), 512, 4, 64, false, 0, dt)
     }
 
     // Bool-mask gate (b4 / b8).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_bool_mask_b4_d128(dt: DType) -> TestSetup {
-        mask_setup(flash_quantized_sdpa_bool_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, dt)
+        mask_setup(mt_flash_quantized_sdpa_bool_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_bool_mask_b8_d128(dt: DType) -> TestSetup {
-        mask_setup(flash_quantized_sdpa_bool_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, false, dt)
+        mask_setup(mt_flash_quantized_sdpa_bool_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, false, dt)
     }
     // Float-mask additive bias (b4 / b8).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_float_mask_b4_d128(dt: DType) -> TestSetup {
-        mask_setup(flash_quantized_sdpa_float_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, true, dt)
+        mask_setup(mt_flash_quantized_sdpa_float_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, true, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_float_mask_b8_d128(dt: DType) -> TestSetup {
-        mask_setup(flash_quantized_sdpa_float_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, true, dt)
+        mask_setup(mt_flash_quantized_sdpa_float_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, true, dt)
     }
 }
 
@@ -902,7 +902,7 @@ pub mod kernel_benches {
                      DIM  = [64, 96, 128, 256, 512, 64, 96, 128, 256, 512],
                      suffix = "b{BITS}_d{DIM}"))]
     fn bench_base(dt: DType) -> BenchSetup {
-        base(flash_quantized_sdpa_bBITS_dDIM::kernel_ir_for(dt), DIM, BITS, dt)
+        base(mt_flash_quantized_sdpa_bBITS_dDIM::kernel_ir_for(dt), DIM, BITS, dt)
     }
 
     // Bool mask: BITS ∈ {4, 8}, DIM ∈ {64, 128, 256} — 6 combos.
@@ -911,7 +911,7 @@ pub mod kernel_benches {
                      suffix = "b{BITS}_d{DIM}"))]
     fn bench_bool_mask(dt: DType) -> BenchSetup {
         masked(
-            flash_quantized_sdpa_bool_mask_bBITS_dDIM::kernel_ir_for(dt),
+            mt_flash_quantized_sdpa_bool_mask_bBITS_dDIM::kernel_ir_for(dt),
             DIM,
             BITS,
             "mask_bool",
@@ -926,7 +926,7 @@ pub mod kernel_benches {
                      suffix = "b{BITS}_d{DIM}"))]
     fn bench_float_mask(dt: DType) -> BenchSetup {
         masked(
-            flash_quantized_sdpa_float_mask_bBITS_dDIM::kernel_ir_for(dt),
+            mt_flash_quantized_sdpa_float_mask_bBITS_dDIM::kernel_ir_for(dt),
             DIM,
             BITS,
             "mask_float",

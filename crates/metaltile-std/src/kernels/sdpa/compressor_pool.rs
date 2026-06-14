@@ -48,7 +48,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_dsv4_compressor_pool<T>(
+pub fn mt_compressor_pool<T>(
     raw_kv: Tensor<T>,
     gate: Tensor<f32>,
     ape: Tensor<T>,
@@ -87,7 +87,7 @@ pub fn ffai_dsv4_compressor_pool<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_compressor_pool;
+    use super::mt_compressor_pool;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn cpu_reference(
@@ -127,7 +127,7 @@ pub mod kernel_tests {
         let raw_dt = unpack_f32(&pack_f32(&raw_kv, dt), dt);
         let ape_dt = unpack_f32(&pack_f32(&ape, dt), dt);
         let expected = cpu_reference(&raw_dt, &gate, &ape_dt, pool_len, head_dim);
-        TestSetup::new(ffai_dsv4_compressor_pool::kernel_ir_for(dt))
+        TestSetup::new(mt_compressor_pool::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("raw_kv", pack_f32(&raw_kv, dt), dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("ape", pack_f32(&ape, dt), dt))
@@ -150,12 +150,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_compressor_pool;
+    use super::mt_compressor_pool;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_csa(dt: DType) -> BenchSetup {
         let (pool, head_dim) = (8usize, 512usize);
-        BenchSetup::new(ffai_dsv4_compressor_pool::kernel_ir_for(dt))
+        BenchSetup::new(mt_compressor_pool::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("raw_kv", pool * head_dim, dt))
             .buffer(BenchBuffer::random("gate", pool, DType::F32))
             .buffer(BenchBuffer::random("ape", pool * head_dim, dt))
@@ -172,7 +172,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_hca(dt: DType) -> BenchSetup {
         let (pool, head_dim) = (128usize, 512usize);
-        BenchSetup::new(ffai_dsv4_compressor_pool::kernel_ir_for(dt))
+        BenchSetup::new(mt_compressor_pool::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("raw_kv", pool * head_dim, dt))
             .buffer(BenchBuffer::random("gate", pool, DType::F32))
             .buffer(BenchBuffer::random("ape", pool * head_dim, dt))

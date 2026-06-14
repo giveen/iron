@@ -109,7 +109,7 @@ pub mod kernel_tests {
 
     use super::mt_sdpa;
     use crate::{
-        mlx::sdpa_vector::kernel_tests::cpu_sdpa,
+        kernels::sdpa::sdpa_vector::kernel_tests::cpu_sdpa,
         utils::{pack_f32, unpack_f32},
     };
 

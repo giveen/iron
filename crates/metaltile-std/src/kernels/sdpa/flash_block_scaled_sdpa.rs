@@ -3,7 +3,7 @@
 //! Flash **block-scaled** SDPA — single-pass online-softmax attention over a
 //! block-scaled-quantized K/V cache, for the spec-conformant formats
 //! (mxfp4 / nvfp4 / mxfp8 e4m3+e5m2 / nvfp8). The block-scaled counterpart of
-//! the affine `ffai/flash_quantized_sdpa.rs`: K and V are dequantized inline
+//! the affine `ffai/mt_flash_quantized_sdpa.rs`: K and V are dequantized inline
 //! per thread via `element_decode(code) · block_scale` (no bias) instead of the
 //! affine `q·scale + bias`.
 //!

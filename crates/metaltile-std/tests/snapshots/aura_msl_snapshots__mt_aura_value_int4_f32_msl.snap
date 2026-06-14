@@ -6,7 +6,7 @@ expression: msl
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void aura_value_int4(
+kernel void mt_aura_value_int4(
     const device float *weights [[buffer(0)]],
     const device uint *packed [[buffer(1)]],
     const device float *norms [[buffer(2)]],

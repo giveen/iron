@@ -34,8 +34,8 @@ use metaltile::kernel;
 #[rustfmt::skip]
 /// AURA quantized value-aggregation kernel — variable bit-widths (2, 3, 4, 6, 8).
 ///
-/// Produces kernels: `aura_value_int2`, `aura_value_int3`, `aura_value_int4`,
-/// `aura_value_int6`, `aura_value_int8`.
+/// Produces kernels: `mt_aura_value_int2`, `mt_aura_value_int3`, `mt_aura_value_int4`,
+/// `mt_aura_value_int6`, `mt_aura_value_int8`.
 ///
 /// For each (dim, head) thread: unpacks the `BITS`-wide code at position `d`
 /// from the LSB-first bit-stream, fetches the codebook centroid, and accumulates
@@ -43,7 +43,7 @@ use metaltile::kernel;
 ///
 /// Grid: Grid3D, `[dim, n_heads, 1]`.
 #[kernel(variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
-pub fn aura_value<T>(
+pub fn mt_aura_value<T>(
     weights: Tensor<T>,
     packed: Tensor<u32>,
     norms: Tensor<T>,
@@ -95,7 +95,7 @@ pub fn aura_value<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::aura_value_int4;
+    use super::mt_aura_value_int4;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -157,7 +157,7 @@ pub mod kernel_tests {
             }
         }
 
-        TestSetup::new(aura_value_int4::kernel_ir_for(dt))
+        TestSetup::new(mt_aura_value_int4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("weights", pack_f32(&weights_r, dt), dt))
             .input(TestBuffer::from_vec("packed", pack_u32(&packed), DType::U32))
@@ -230,6 +230,6 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
     fn bench_aura_value(dt: DType) -> BenchSetup {
-        setup(BenchSetup::new(aura_value_intBITS::kernel_ir_for(dt)), 128, BITS, 32, 8, 4096, dt)
+        setup(BenchSetup::new(mt_aura_value_intBITS::kernel_ir_for(dt)), 128, BITS, 32, 8, 4096, dt)
     }
 }

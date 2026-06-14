@@ -76,7 +76,7 @@ pub fn mt_sdpa_vector<T>(
     // Pre-computing the 4 KV indices and issuing the 4 loads as a single run
     // (no BinOp/Cast interleaved) is what lets the vectorize pass collapse
     // them into one bfloat4 / half4 / float4 load — same shape as
-    // `sdpa_decode_2pass_pass1`. Inline'd loads + casts broke the run before.
+    // `mt_sdpa_decode_2pass_pass1`. Inline'd loads + casts broke the run before.
     for t in range(sg, n_kv, ns) {
         let kv0 = kv_base + t * head_dim + d0;
         let kv1 = kv0 + 1u32;
@@ -363,7 +363,7 @@ pub fn mt_sdpa_vector_d96<T>(
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 ///
 /// 6 live K accumulators + 6 V accumulators per lane. Register pressure is
-/// higher than d=128 but below the d=256 bound that `ffai_sdpa_decode_d256`
+/// higher than d=128 but below the d=256 bound that `mt_sdpa_decode_d256`
 /// confirmed fits in 1024 threads/TG (8 accumulators).
 #[kernel]
 pub fn mt_sdpa_vector_d192<T>(
@@ -492,7 +492,7 @@ pub fn mt_sdpa_vector_d192<T>(
 /// GQA decode SDPA, head_dim=256. Each lane owns 8 elements (`256/32`).
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 ///
-/// 8 live K accumulators + 8 V accumulators per lane. `ffai_sdpa_decode_d256`
+/// 8 live K accumulators + 8 V accumulators per lane. `mt_sdpa_decode_d256`
 /// confirmed that 8-element/lane fits within the pipeline cap at 1024
 /// threads/TG. Output reduction uses 8 sequential phases over the same
 /// 1024-slot `tg_out` buffer (same ~4 KB TG footprint as d=128).

@@ -1,36 +1,41 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! Multi-query causal sliding-window SDPA for head_dim=512 with attention
-//! sink — the PREFILL counterpart of `ffai_sdpa_decode_d512_sink`. Each
-//! (q_head, q_pos) threadgroup runs the same flash online-softmax over the
-//! KV cache, but bounded causally: query at absolute position
-//! `p = kv_base + q_pos` attends KV `[max(0, p+1-window) .. p]`. For the
-//! DSv4 full-attn (compress_ratio=0) layers, `window=128`; pass a huge
-//! window for full causal. MQA (n_kv_heads via heads_per_group).
+//! Single-token SDPA decode for `head_dim == 512` with **GPT-OSS-style
+//! attention sink** — a per-head learnable scalar that participates in
+//! the softmax denominator but contributes no value.
 //!
-//! q/out are `[n_query, n_q_heads, head_dim]`; k/v are `[kv_stride,
-//! head_dim]` per kv-head (the resident/prefill KV cache, absolute pos).
+//! ```text
+//!   logits[t] = (Q · Kₜ) * scale
+//!   M         = max(max_t logits[t], sink_logit[q_head])
+//!   denom     = sum_t exp(logits[t] - M) + exp(sink_logit[q_head] - M)
+//!   out[d]    = sum_t (exp(logits[t] - M) / denom) · V[t, d]
+//! ```
+//!
+//! Used by DeepSeek V4 HCA (hierarchical-coarse-attention) dense
+//! layers — the model's `attn_sink` parameter is a `[n_heads]` fp32
+//! tensor learned alongside Q/K/V/O.
+//!
+//! Clone of [`crate::ffai::sdpa_decode_d512`] with the sink fold
+//! applied in the cross-simdgroup reduction (where `g_max` and `g_sum`
+//! are finalised). All other dispatch invariants — TPG=512, 16 dims
+//! per lane, 4-phase output reduction — are identical.
 
 use metaltile::kernel;
 
 #[kernel]
-#[allow(clippy::too_many_arguments)]
-pub fn ffai_sdpa_prefill_d512_sink<T>(
+pub fn mt_sdpa_decode_d512_sink<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
     sink_logit: Tensor<f32>,
     out: Tensor<T>,
     #[constexpr] head_dim: u32,
-    #[constexpr] n_q_heads: u32,
+    #[constexpr] n_kv: u32,
     #[constexpr] kv_stride: u32,
     #[constexpr] heads_per_group: u32,
-    #[constexpr] window: u32,
-    #[constexpr] kv_base: u32,
     #[constexpr] scale: f32,
 ) {
     let q_head = tgid_x;
-    let q_pos = tgid_y;
     let kv_head = q_head / heads_per_group;
     let sg = simd_id;
     let lane = simd_lane;
@@ -41,7 +46,7 @@ pub fn ffai_sdpa_prefill_d512_sink<T>(
     threadgroup_alloc("tg_out1", 1056);
     threadgroup_alloc("tg_out2", 1056);
     threadgroup_alloc("tg_out3", 1056);
-    let q_off = (q_pos * n_q_heads + q_head) * head_dim;
+    let q_off = q_head * head_dim;
     let kv_head_base = kv_head * kv_stride * head_dim;
     let d0 = lane * 16u32;
     let q0 = load(q[q_off + d0]).cast::<f32>() * scale;
@@ -78,10 +83,7 @@ pub fn ffai_sdpa_prefill_d512_sink<T>(
     let mut o13 = 0.0f32;
     let mut o14 = 0.0f32;
     let mut o15 = 0.0f32;
-    // Causal sliding-window KV range for this query's absolute position.
-    let p1 = kv_base + q_pos + 1u32;
-    let lo = select(p1 > window, p1 - window, 0u32);
-    for _t in range(lo + sg, p1, ns) {
+    for _t in range(sg, n_kv, ns) {
         let base = kv_head_base + _t * head_dim;
         let kv0 = base + d0;
         let k0 = load(k[kv0]).cast::<f32>();
@@ -174,6 +176,10 @@ pub fn ffai_sdpa_prefill_d512_sink<T>(
     threadgroup_barrier();
     let g_max0 = threadgroup_load("tg_max", 0);
     let g_sum0 = threadgroup_load("tg_sum", 0);
+    // Attention-sink fold: extend the softmax denominator by one
+    // "virtual" slot at score = `sink_logit[q_head]`. No value
+    // contribution, so the output accumulators rescale unchanged by
+    // the new max + sum.
     let sink = load(sink_logit[q_head]);
     let g_max = select(sink > g_max0, sink, g_max0);
     let g_sum = g_sum0 * exp(g_max0 - g_max) + exp(sink - g_max);
@@ -277,32 +283,156 @@ pub fn ffai_sdpa_prefill_d512_sink<T>(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use metaltile::{
+        codegen::msl::MslGenerator,
+        core::{DType, ir::KernelMode},
+    };
+
+    use super::mt_sdpa_decode_d512_sink;
+
+    fn msl_for(dt: DType) -> String {
+        let mut k = mt_sdpa_decode_d512_sink::kernel_ir_for(dt);
+        k.mode = KernelMode::Reduction;
+        MslGenerator::default().generate(&k).expect("mt_sdpa_decode_d512_sink codegen succeeds")
+    }
+
+    #[test]
+    fn codegen_produces_nonempty_msl_for_all_float_dtypes() {
+        for dt in [DType::F32, DType::F16, DType::BF16] {
+            let src = msl_for(dt);
+            assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
+            assert!(
+                src.contains("kernel void mt_sdpa_decode_d512_sink"),
+                "MSL for {dt:?} should declare mt_sdpa_decode_d512_sink:\n{src}",
+            );
+        }
+    }
+}
+
+#[allow(clippy::needless_range_loop)]
+pub mod kernel_tests {
+    use metaltile::{test::*, test_kernel};
+
+    use super::mt_sdpa_decode_d512_sink;
+    use crate::utils::{pack_f32, unpack_f32};
+
+    /// Dense softmax-attention oracle with a per-head `sink_logit`
+    /// scalar folded into the denominator (no value contribution).
+    #[allow(clippy::too_many_arguments)]
+    fn naive_sdpa_sink(
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        sink: &[f32],
+        n_q_heads: usize,
+        n_kv_heads: usize,
+        head_dim: usize,
+        n_kv: usize,
+        kv_stride: usize,
+        scale: f32,
+    ) -> Vec<f32> {
+        let gqa = n_q_heads / n_kv_heads;
+        let mut out = vec![0.0f32; n_q_heads * head_dim];
+        for qh in 0..n_q_heads {
+            let kvh = qh / gqa;
+            let q_off = qh * head_dim;
+            let kv_slab = kvh * kv_stride * head_dim;
+            let mut scores = vec![0.0f32; n_kv];
+            for (t, score) in scores.iter_mut().enumerate() {
+                let k_off = kv_slab + t * head_dim;
+                let mut dot = 0.0f32;
+                for d in 0..head_dim {
+                    dot += q[q_off + d] * k[k_off + d];
+                }
+                *score = dot * scale;
+            }
+            let mut m = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            m = m.max(sink[qh]);
+            let mut sum = 0.0f32;
+            for s in scores.iter_mut() {
+                *s = (*s - m).exp();
+                sum += *s;
+            }
+            sum += (sink[qh] - m).exp();
+            let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
+            for d in 0..head_dim {
+                let mut acc = 0.0f32;
+                for (t, s) in scores.iter().enumerate() {
+                    acc += *s * inv * v[kv_slab + t * head_dim + d];
+                }
+                out[q_off + d] = acc;
+            }
+        }
+        out
+    }
+
+    fn ramp(n: usize, step: f32, start: f32) -> Vec<f32> {
+        (0..n).map(|i| ((start + i as f32 * step) % 2.0) - 1.0).collect()
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 3e-3, 1.5e-2])]
+    fn test_ffai_sdpa_decode_d512_sink(dt: DType) -> TestSetup {
+        let (n_q_heads, n_kv_heads, head_dim) = (8usize, 4usize, 512usize);
+        let (n_kv, kv_stride) = (64usize, 64usize);
+        let heads_per_group = n_q_heads / n_kv_heads;
+        let scale = 1.0f32 / (head_dim as f32).sqrt();
+        let q = unpack_f32(&pack_f32(&ramp(n_q_heads * head_dim, 0.013, -0.4), dt), dt);
+        let k =
+            unpack_f32(&pack_f32(&ramp(n_kv_heads * kv_stride * head_dim, 0.011, -0.5), dt), dt);
+        let v =
+            unpack_f32(&pack_f32(&ramp(n_kv_heads * kv_stride * head_dim, 0.007, -0.3), dt), dt);
+        // Per-head sink — non-trivial scalars; some larger than expected
+        // max-score, some smaller, so the test exercises both branches
+        // of the sink-fold max selection.
+        let sink: Vec<f32> = (0..n_q_heads).map(|h| (h as f32 - 3.0) * 0.4).collect();
+        let expected = naive_sdpa_sink(
+            &q, &k, &v, &sink, n_q_heads, n_kv_heads, head_dim, n_kv, kv_stride, scale,
+        );
+        TestSetup::new(mt_sdpa_decode_d512_sink::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
+            .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
+            .input(TestBuffer::from_vec("v", pack_f32(&v, dt), dt))
+            .input(TestBuffer::from_vec("sink_logit", pack_f32(&sink, DType::F32), DType::F32))
+            .input(TestBuffer::zeros("out", n_q_heads * head_dim, dt))
+            .constexpr("head_dim", head_dim as u32)
+            .constexpr("n_kv", n_kv as u32)
+            .constexpr("kv_stride", kv_stride as u32)
+            .constexpr("heads_per_group", heads_per_group as u32)
+            .constexpr("scale", scale)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_3d(n_q_heads as u32, 1, 1, [512, 1, 1])
+    }
+}
+
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_sdpa_prefill_d512_sink;
+    use super::mt_sdpa_decode_d512_sink;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_sdpa_prefill_d512_sink(dt: DType) -> BenchSetup {
-        let hd = 512usize;
-        let n_q = 64usize;
-        let n_query = 256usize;
-        let kv = 256usize;
-        BenchSetup::new(ffai_sdpa_prefill_d512_sink::kernel_ir_for(dt))
+    fn bench_sdpa_decode_d512_sink(dt: DType) -> BenchSetup {
+        let (n_q_heads, n_kv_heads, head_dim) = (32usize, 8usize, 512usize);
+        let (n_kv, kv_stride) = (4096usize, 4096usize);
+        let heads_per_group = n_q_heads / n_kv_heads;
+        let scale = 1.0f32 / (head_dim as f32).sqrt();
+        let bytes = (2 * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim) * dt.size_bytes()
+            + n_q_heads * 4;
+        BenchSetup::new(mt_sdpa_decode_d512_sink::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
-            .buffer(BenchBuffer::random("q", n_query * n_q * hd, dt))
-            .buffer(BenchBuffer::random("k", kv * hd, dt))
-            .buffer(BenchBuffer::random("v", kv * hd, dt))
-            .buffer(BenchBuffer::random("sink_logit", n_q, DType::F32))
-            .buffer(BenchBuffer::zeros("out", n_query * n_q * hd, dt).output())
-            .constexpr("head_dim", hd as u32)
-            .constexpr("n_q_heads", n_q as u32)
-            .constexpr("kv_stride", kv as u32)
-            .constexpr("heads_per_group", n_q as u32)
-            .constexpr("window", 128u32)
-            .constexpr("kv_base", 0u32)
-            .constexpr("scale", 0.044194174f32)
-            .grid_3d(n_q as u32, n_query as u32, 1, [32, 1, 1])
-            .bytes_moved(((kv * hd * 2 + n_query * n_q * hd) * dt.size_bytes()) as u64)
+            .buffer(BenchBuffer::random("q", n_q_heads * head_dim, dt))
+            .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))
+            .buffer(BenchBuffer::random("v", n_kv_heads * kv_stride * head_dim, dt))
+            .buffer(BenchBuffer::random("sink_logit", n_q_heads, DType::F32))
+            .buffer(BenchBuffer::zeros("out", n_q_heads * head_dim, dt).output())
+            .constexpr("head_dim", head_dim as u32)
+            .constexpr("n_kv", n_kv as u32)
+            .constexpr("kv_stride", kv_stride as u32)
+            .constexpr("heads_per_group", heads_per_group as u32)
+            .constexpr("scale", scale)
+            .grid_3d(n_q_heads as u32, 1, 1, [512, 1, 1])
+            .bytes_moved(bytes as u64)
     }
 }

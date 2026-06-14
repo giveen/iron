@@ -3,7 +3,7 @@
 //! AURA Flash Pass 2 — cross-block online-softmax merge.
 //!
 //! Reduces the `(o_partials, m_partials, l_partials)` tuples emitted
-//! by `aura_flash_p1` (one tuple per (q_idx, block_idx) pair) into a
+//! by `mt_aura_flash_p1` (one tuple per (q_idx, block_idx) pair) into a
 //! single `(o, m, l)` per q_idx, then writes the final attention
 //! output `o / l` cast to bf16.
 //!
@@ -46,13 +46,13 @@ use metaltile::kernel;
 
 /// AURA flash pass-2 cross-block softmax merge.
 ///
-/// Produces kernels: `aura_flash_pass2_d64`, `_d80`, `_d96`, `_d128`,
+/// Produces kernels: `mt_aura_flash_pass2_d64`, `_d80`, `_d96`, `_d128`,
 /// `_d256`, `_d512`.
 ///
 /// Grid: `(q_heads, 1, 1)` with a 32-lane reduction threadgroup; only
 /// `dim` (and the buffer sizes it drives) varies.
 #[kernel(variants(DIM = [64, 80, 96, 128, 256, 512], DPL = [2, 3, 3, 4, 8, 16], suffix = "d{DIM}"))]
-pub fn aura_flash_pass2<T>(
+pub fn mt_aura_flash_pass2<T>(
     o_partials: Tensor<T>,
     m_partials: Tensor<T>,
     l_partials: Tensor<T>,
@@ -118,14 +118,14 @@ pub fn aura_flash_pass2<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::aura_flash_pass2_d128;
+    use super::mt_aura_flash_pass2_d128;
     use crate::utils::{pack_f32, unpack_f32};
 
     // ── COMBINED AURA flash decode, exercised through pass 2 ─────────────
     //
     // The test runner dispatches a single kernel per `TestSetup`, so we
     // cannot chain p1 → pass2 on the GPU. Instead we emulate the
-    // non-causal `aura_flash_p1` per-block online-softmax on the CPU
+    // non-causal `mt_aura_flash_p1` per-block online-softmax on the CPU
     // (decoding K/V from `codebook[index] * norm`), producing the
     // `(o_partials, m_partials, l_partials)` staging tuples, then
     // dispatch the real GPU pass-2 reducer. Its output must equal a dense
@@ -137,7 +137,7 @@ pub mod kernel_tests {
     const KEY_BITS: usize = 4;
     const VALUE_BITS: usize = 4;
 
-    /// Emulate `aura_flash_p1` (non-causal): per (q_head, block)
+    /// Emulate `mt_aura_flash_p1` (non-causal): per (q_head, block)
     /// online-softmax over the block's token range, K/V decoded from
     /// `codebook[index] * norm`. Emits per-block partials exactly as p1
     /// stores them (o is the un-normalised accumulator, m the block max,
@@ -278,7 +278,7 @@ pub mod kernel_tests {
             kv_heads, tokens, dim,
         );
 
-        TestSetup::new(aura_flash_pass2_d128::kernel_ir_for(dt))
+        TestSetup::new(mt_aura_flash_pass2_d128::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("o_partials", pack_f32(&o_part, dt), dt))
             .input(TestBuffer::from_vec("m_partials", pack_f32(&m_part, dt), dt))
@@ -316,6 +316,6 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(DIM = [64, 80, 96, 128, 256, 512], suffix = "d{DIM}"))]
     fn bench_flash_pass2(dt: DType) -> BenchSetup {
-        flash_pass2(BenchSetup::new(aura_flash_pass2_dDIM::kernel_ir_for(dt)), DIM, dt)
+        flash_pass2(BenchSetup::new(mt_aura_flash_pass2_dDIM::kernel_ir_for(dt)), DIM, dt)
     }
 }

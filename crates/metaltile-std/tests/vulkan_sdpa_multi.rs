@@ -3,7 +3,7 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
 //! Vulkan/RDNA4 correctness for the multi-position flash-attention kernel
-//! `ffai_sdpa_multi` (the prefill attention kernel). The existing
+//! `mt_sdpa_multi` (the prefill attention kernel). The existing
 //! `#[test_kernel]` corpus exercises a small (n_query=8, kv_stride=64,
 //! GQA 8/4) shape; this test pins the *prefill-realistic* shapes the
 //! FFAI consumer dispatches — large `kv_stride` (cache capacity), a real
@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 
 use metaltile::{VulkanDevice, core::dtype::DType};
-use metaltile_std::ffai::sdpa_multi::ffai_sdpa_multi;
+use metaltile_std::kernels::sdpa::sdpa_multi::mt_sdpa_multi;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -125,7 +125,7 @@ fn run_case(
     );
 
     let dt = DType::F32;
-    let mut kernel = ffai_sdpa_multi::kernel_ir_for(dt);
+    let mut kernel = mt_sdpa_multi::kernel_ir_for(dt);
     kernel.mode = metaltile::core::ir::KernelMode::Reduction;
 
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();

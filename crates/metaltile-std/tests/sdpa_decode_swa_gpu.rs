@@ -1,6 +1,6 @@
 //! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
 //! SPDX-License-Identifier: Apache-2.0
-//! Sliding-window + sink-token perf bench for `ffai::sdpa_decode`.
+//! Sliding-window + sink-token perf bench for `kernels::sdpa::sdpa_decode`.
 //!
 //! Companion to the in-source `#[test_kernel]` correctness coverage in
 //! `src/ffai/sdpa_decode.rs` (`test_ffai_sdpa_decode` /
@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, pack_bytes, ramp};
 use metaltile::{Context, DispatchSpec, ResidentBuffer, core::ir::KernelMode};
-use metaltile_std::ffai::sdpa_decode::ffai_sdpa_decode as sdpa_decode;
+use metaltile_std::kernels::sdpa::sdpa_decode::mt_sdpa_decode as sdpa_decode;
 
 // (n_q_heads, n_kv_heads, n_kv, window_size, sink_tokens). Qwen3-class
 // GQA shape (32 Q heads / 8 KV heads) at the long-context regimes where

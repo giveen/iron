@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! Isolated check: ffai_sdpa_decode_d512_sink with n_kv=1 (single visible
+//! Isolated check: mt_sdpa_decode_d512_sink with n_kv=1 (single visible
 //! KV — the first decode token), many q heads (MQA), per-head sink. The
 //! in-source test only covers n_kv=64; DSv4 token 0 hits n_kv=1.
 #![cfg(target_os = "macos")]
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::ffai::sdpa_decode_d512_sink::ffai_sdpa_decode_d512_sink;
+use metaltile_std::kernels::sdpa::sdpa_decode_d512_sink::mt_sdpa_decode_d512_sink;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -70,7 +70,7 @@ fn sdpa_decode_d512_sink_nkv1_64heads() {
     b.insert("scale".into(), scale.to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut kern = ffai_sdpa_decode_d512_sink::kernel_ir_for(dt.to_dtype());
+    let mut kern = mt_sdpa_decode_d512_sink::kernel_ir_for(dt.to_dtype());
     kern.mode = KernelMode::Reduction;
     let r = ctx.dispatch_with_grid(&kern, &b, &BTreeMap::new(), [n_q, 1, 1], [512, 1, 1]).unwrap();
     let got = unpack_bytes(r.outputs.get("out").unwrap(), dt);

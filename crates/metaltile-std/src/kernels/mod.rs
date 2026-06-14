@@ -18,5 +18,6 @@ pub mod ops;
 pub mod primitives;
 pub mod rope;
 pub mod sampling;
+pub mod sdpa;
 pub mod ssm;
 pub mod vision;

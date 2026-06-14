@@ -17,7 +17,7 @@
 //!
 //! `head_dim == 80` (Qwen2.5-VL: hidden 1280 / 16 heads). Ragged 3-element
 //! layout (lanes 0..26 own indices 0..79, lane 26's 3rd element and lanes
-//! 27..31 are bounds-masked) — identical to `ffai_sdpa_bidirectional_d80`.
+//! 27..31 are bounds-masked) — identical to `mt_sdpa_bidirectional_d80`.
 //!
 //! ## Window contract
 //!
@@ -38,7 +38,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_sdpa_bidirectional_windowed_d80<T>(
+pub fn mt_sdpa_bidirectional_windowed_d80<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -156,7 +156,7 @@ pub fn ffai_sdpa_bidirectional_windowed_d80<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_sdpa_bidirectional_windowed_d80;
+    use super::mt_sdpa_bidirectional_windowed_d80;
     use crate::utils::{pack_f32, unpack_f32};
 
     // Per (query, q_head): softmax(scale·Q·Kᵀ)·V over THIS query's window
@@ -249,7 +249,7 @@ pub mod kernel_tests {
             scale,
         );
 
-        TestSetup::new(ffai_sdpa_bidirectional_windowed_d80::kernel_ir_for(dt))
+        TestSetup::new(mt_sdpa_bidirectional_windowed_d80::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -289,7 +289,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_sdpa_bidirectional_windowed_d80;
+    use super::mt_sdpa_bidirectional_windowed_d80;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_windowed_d80(dt: DType) -> BenchSetup {
@@ -309,7 +309,7 @@ pub mod kernel_benches {
         }
         let bytes = (2 * n_query * n_q_heads * head_dim + 2 * n_kv_heads * n_query * head_dim)
             * dt.size_bytes();
-        BenchSetup::new(ffai_sdpa_bidirectional_windowed_d80::kernel_ir_for(dt))
+        BenchSetup::new(mt_sdpa_bidirectional_windowed_d80::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))
