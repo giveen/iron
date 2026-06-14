@@ -176,7 +176,6 @@ pub fn mt<T>(
     let n_blocks = total_k / block_size;
     let w_pack_row_base = global_oc * packs_per_row;
     let sb_base = global_oc * n_blocks;
-    let w_word_row_base = global_oc * (total_k * BITS / 32u32);
     let w_byte_row_base = global_oc * total_k;
     let half = 1u32 << (BITS - 1u32);
     let full = (1u32 << BITS).cast::<f32>();
@@ -214,15 +213,14 @@ pub fn mt<T>(
                 let pack = load(weight[w_pack_row_base + kt_safe / 8u32]);
                 mt_decode_e2m1((pack >> ((kt_safe & 7u32) * 4u32)) & 0xFu32)
             } else if WDEC == 1u32 {
-                let bit_off = kt_safe * BITS;
+                let bit_off = (w_byte_row_base + kt_safe) * BITS;
                 let word_idx = bit_off / 32u32;
                 let bit_in_w = bit_off & 31u32;
                 let bits_in_w0 = 32u32 - bit_in_w;
                 let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
                 let spill = BITS - lo_bits;
-                let w0 = load(weight[w_word_row_base + word_idx]);
-                let w1 =
-                    load(weight[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
+                let w0 = load(weight[word_idx]);
+                let w1 = load(weight[select(spill > 0u32, word_idx + 1u32, word_idx)]);
                 let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 let qf = q.cast::<f32>();
                 select(q >= half, qf - full, qf)
