@@ -31,7 +31,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_dsv4_mhc_sinkhorn_split<T>(
+pub fn mt_mhc_sinkhorn_split<T>(
     mixes: Tensor<T>,
     scale: Tensor<f32>,
     base: Tensor<f32>,
@@ -220,7 +220,7 @@ pub fn ffai_dsv4_mhc_sinkhorn_split<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_mhc_sinkhorn_split;
+    use super::mt_mhc_sinkhorn_split;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[allow(clippy::too_many_arguments)]
@@ -300,7 +300,7 @@ pub mod kernel_tests {
         let eps = 1e-6_f32;
         let (pre_exp, post_exp, comb_exp) =
             cpu_reference(&mixes_dt, &scale, &base, n_tokens, eps, iters);
-        TestSetup::new(ffai_dsv4_mhc_sinkhorn_split::kernel_ir_for(dt))
+        TestSetup::new(mt_mhc_sinkhorn_split::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("mixes", pack_f32(&mixes, dt), dt))
             .input(TestBuffer::from_vec("scale", pack_f32(&scale, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("base", pack_f32(&base, DType::F32), DType::F32))
@@ -328,7 +328,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_mhc_sinkhorn_split;
+    use super::mt_mhc_sinkhorn_split;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_split(dt: DType) -> BenchSetup {
@@ -337,7 +337,7 @@ pub mod kernel_benches {
         // shape covers a prefill chunk of 256 tokens.
         let n_tokens = 256usize;
         let iters = 1usize;
-        BenchSetup::new(ffai_dsv4_mhc_sinkhorn_split::kernel_ir_for(dt))
+        BenchSetup::new(mt_mhc_sinkhorn_split::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("mixes", n_tokens * 24, dt))
             .buffer(BenchBuffer::random("scale", 3, DType::F32))
             .buffer(BenchBuffer::random("base", 24, DType::F32))

@@ -35,3 +35,7 @@ pub mod strided;
 pub mod ternary;
 pub mod unary;
 pub mod vector_add;
+pub mod leaky_relu;
+pub mod gelu_erf;
+pub mod gate_up_swiglu_fused;
+pub mod swiglu_limit;

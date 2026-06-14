@@ -32,22 +32,16 @@ pub mod dsv4_csa_sdpa_decode;
 pub mod dsv4_fp8_block_dequant;
 pub mod dsv4_indexer_score;
 pub mod dsv4_indexer_topk;
-pub mod dsv4_mhc;
-pub mod dsv4_mhc_sinkhorn_split;
 pub mod dsv4_mxfp4_dequant;
-pub mod dsv4_swiglu_limit;
 pub mod ffai_dequant_q4;
 pub mod flash_block_scaled_sdpa;
 pub mod flash_quantized_sdpa;
-pub mod gate_up_swiglu_fused;
-pub mod gelu_erf;
 // gemm_q4_mpp / gemm_q8 / gemm_q8_mpp + gemv_q8 (split by family) → kernels/.
 pub mod gguf_dequant_iq2_xxs;
 pub mod gguf_dequant_iq2_xxs_raw;
 pub mod gguf_dequant_q2_k;
 pub mod gguf_dequant_q8_0;
 pub mod gguf_iq2_xxs_extract_qs;
-pub mod leaky_relu;
 // moe family (moe* · dsv4_router_topk · dequant_gemv_expert_indexed*) →
 // kernels/moe/. patch_embed_block_scaled / patch_embed_mma_block_scaled →
 // kernels/gemm/.

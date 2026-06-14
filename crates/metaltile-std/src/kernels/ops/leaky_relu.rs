@@ -23,7 +23,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_leaky_relu<T>(input: Tensor<T>, out: Tensor<T>, slope: Tensor<f32>) {
+pub fn mt_leaky_relu<T>(input: Tensor<T>, out: Tensor<T>, slope: Tensor<f32>) {
     let i = program_id::<0>();
     let s = load(slope[0]);
     let x = load(input[i]).cast::<f32>();
@@ -32,12 +32,12 @@ pub fn ffai_leaky_relu<T>(input: Tensor<T>, out: Tensor<T>, slope: Tensor<f32>) 
     store(out[i], y.cast::<T>());
 }
 
-/// New-syntax correctness for `ffai_leaky_relu`. Grid3D, grid `[n,1,1]`, tpg
+/// New-syntax correctness for `mt_leaky_relu`. Grid3D, grid `[n,1,1]`, tpg
 /// `[1,1,1]`. Oracle applies the leaky rectifier per element.
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_leaky_relu;
+    use super::mt_leaky_relu;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn f32_bytes(v: f32) -> Vec<u8> { v.to_le_bytes().to_vec() }
@@ -50,7 +50,7 @@ pub mod kernel_tests {
         let input_f: Vec<f32> = (0..n).map(|i| (i as f32 - 128.0) * 0.1).collect();
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let exp: Vec<f32> = input.iter().map(|&x| if x > 0.0 { x } else { slope * x }).collect();
-        TestSetup::new(ffai_leaky_relu::kernel_ir_for(dt))
+        TestSetup::new(mt_leaky_relu::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::from_vec("slope", f32_bytes(slope), DType::F32))
@@ -64,12 +64,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_leaky_relu;
+    use super::mt_leaky_relu;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_leaky_relu(dt: DType) -> BenchSetup {
         let n = 128usize * 7801usize;
-        BenchSetup::new(ffai_leaky_relu::kernel_ir_for(dt))
+        BenchSetup::new(mt_leaky_relu::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", n, dt))
             .buffer(BenchBuffer::from_vec("slope", 0.1f32.to_le_bytes().to_vec(), DType::F32))

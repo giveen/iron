@@ -10,6 +10,7 @@
 pub mod audio;
 pub mod convolution;
 pub mod gemm;
+pub mod hyper_connections;
 pub mod kv_cache;
 pub mod moe;
 pub mod norm;

@@ -12,7 +12,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_dsv4_swiglu_limit<T>(
+pub fn mt_swiglu_limit<T>(
     gate: Tensor<T>,
     up: Tensor<T>,
     out: Tensor<T>,
@@ -34,7 +34,7 @@ pub fn ffai_dsv4_swiglu_limit<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_swiglu_limit;
+    use super::mt_swiglu_limit;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, dt: DType) -> TestSetup {
@@ -54,7 +54,7 @@ pub mod kernel_tests {
                 s * ul
             })
             .collect();
-        TestSetup::new(ffai_dsv4_swiglu_limit::kernel_ir_for(dt))
+        TestSetup::new(mt_swiglu_limit::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
             .input(TestBuffer::from_vec("up", pack_f32(&up, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -76,12 +76,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_swiglu_limit;
+    use super::mt_swiglu_limit;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dsv4_swiglu_limit(dt: DType) -> BenchSetup {
         let n = 1024 * 1024usize;
-        BenchSetup::new(ffai_dsv4_swiglu_limit::kernel_ir_for(dt))
+        BenchSetup::new(mt_swiglu_limit::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", n, dt))
             .buffer(BenchBuffer::random("up", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

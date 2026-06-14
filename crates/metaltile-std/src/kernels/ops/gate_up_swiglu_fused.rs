@@ -16,7 +16,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn ffai_gate_up_swiglu_fused<T>(
+pub fn mt_gate_up_swiglu_fused<T>(
     gate_w: Tensor<T>,
     up_w: Tensor<T>,
     x: Tensor<T>,
@@ -45,7 +45,7 @@ pub fn ffai_gate_up_swiglu_fused<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_gate_up_swiglu_fused;
+    use super::mt_gate_up_swiglu_fused;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(m: usize, k: usize, dt: DType) -> TestSetup {
@@ -63,7 +63,7 @@ pub mod kernel_tests {
                 sig * u_val
             })
             .collect();
-        TestSetup::new(ffai_gate_up_swiglu_fused::kernel_ir_for(dt))
+        TestSetup::new(mt_gate_up_swiglu_fused::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("gate_w", pack_f32(&gate, dt), dt))
             .input(TestBuffer::from_vec("up_w", pack_f32(&up, dt), dt))
@@ -81,12 +81,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_gate_up_swiglu_fused;
+    use super::mt_gate_up_swiglu_fused;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gus(dt: DType) -> BenchSetup {
         let (m, k) = (2048usize, 4096usize);
-        BenchSetup::new(ffai_gate_up_swiglu_fused::kernel_ir_for(dt))
+        BenchSetup::new(mt_gate_up_swiglu_fused::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("gate_w", m * k, dt))
             .buffer(BenchBuffer::random("up_w", m * k, dt))
