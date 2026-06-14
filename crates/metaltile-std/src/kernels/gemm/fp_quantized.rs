@@ -13,9 +13,10 @@
 //! `grid = [n/32, 1, 1]`, `tpg = [32, 1, 1]`, `n` a multiple of 32.
 //!
 //! The fp8 bodies differ only in four format constants (mant, emin, emax,
-//! fp8max), all of which are float literals. Because `#[kernel(variants(...))]`
-//! only supports integer parameters, the two fp8 formats are written as
-//! separate `#[kernel]` functions rather than a single variants call.
+//! fp8max); they fold onto a single integer `FMT` discriminant whose
+//! compile-time `if` branches select those float constants (variant params
+//! themselves are integer-only, but the selected values need not be). `fp4`
+//! stays standalone — its codebook snap is a different body.
 
 use metaltile::kernel;
 
@@ -74,45 +75,32 @@ pub fn mt_fp4_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: 
 //   4. q = round(norm / quantum) * quantum — snap to fp8 grid point.
 //   5. Rescale by group_max / fp8_max and reapply sign.
 
-/// E4M3 fp8: 3 mantissa bits, exponent range [-6, 8], max magnitude ±448.
-#[kernel]
-pub fn mt_fp8_e4m3_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
+/// fp8 quant+dequant round-trip, folded over the two formats: E4M3 (3 mantissa
+/// bits, exp [-6, 8], max ±448) and E5M2 (2 mantissa bits, exp [-14, 15], max
+/// ±57344). `FMT` is the integer discriminant; the four format constants are
+/// selected by its compile-time `if`. Produces `mt_fp8_e4m3_quant_dequant` and
+/// `mt_fp8_e5m2_quant_dequant`.
+#[kernel(variants((FMT, NAME) = [(0u32, e4m3), (1u32, e5m2)], suffix = "{NAME}_quant_dequant"))]
+pub fn mt_fp8(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
+    let fp8max = if FMT == 0u32 { 448.0f32 } else { 57344.0f32 };
+    let emin = if FMT == 0u32 { 0.0f32 - 6.0f32 } else { 0.0f32 - 14.0f32 };
+    let emax = if FMT == 0u32 { 8.0f32 } else { 15.0f32 };
+    let mant = if FMT == 0u32 { 3.0f32 } else { 2.0f32 };
     let gid = program_id::<0>();
     let x = load(inp[gid]);
     let ax = abs(x);
     let group_max = simd_max(ax);
-    let inv_scale = select(group_max > 0.0f32, 448.0f32 / group_max, 0.0f32);
+    let inv_scale = select(group_max > 0.0f32, fp8max / group_max, 0.0f32);
     let norm = ax * inv_scale;
     let raw_e = floor(log2(norm));
-    let e_lo = select(raw_e < -6.0f32, -6.0f32, raw_e);
-    let e = select(e_lo > 8.0f32, 8.0f32, e_lo);
-    let quantum = exp2(e - 3.0f32);
+    let e_lo = select(raw_e < emin, emin, raw_e);
+    let e = select(e_lo > emax, emax, e_lo);
+    let quantum = exp2(e - mant);
     let snapped = round(norm / quantum) * quantum;
     let q = select(norm > 0.0f32, snapped, 0.0f32);
-    let q_clamped = select(q > 448.0f32, 448.0f32, q);
+    let q_clamped = select(q > fp8max, fp8max, q);
     let sign = select(x < 0.0f32, -1.0f32, 1.0f32);
-    let result = sign * q_clamped * (group_max / 448.0f32);
-    store(out[gid], result);
-}
-
-/// E5M2 fp8: 2 mantissa bits, exponent range [-14, 15], max magnitude ±57344.
-#[kernel]
-pub fn mt_fp8_e5m2_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
-    let gid = program_id::<0>();
-    let x = load(inp[gid]);
-    let ax = abs(x);
-    let group_max = simd_max(ax);
-    let inv_scale = select(group_max > 0.0f32, 57344.0f32 / group_max, 0.0f32);
-    let norm = ax * inv_scale;
-    let raw_e = floor(log2(norm));
-    let e_lo = select(raw_e < -14.0f32, -14.0f32, raw_e);
-    let e = select(e_lo > 15.0f32, 15.0f32, e_lo);
-    let quantum = exp2(e - 2.0f32);
-    let snapped = round(norm / quantum) * quantum;
-    let q = select(norm > 0.0f32, snapped, 0.0f32);
-    let q_clamped = select(q > 57344.0f32, 57344.0f32, q);
-    let sign = select(x < 0.0f32, -1.0f32, 1.0f32);
-    let result = sign * q_clamped * (group_max / 57344.0f32);
+    let result = sign * q_clamped * (group_max / fp8max);
     store(out[gid], result);
 }
 
