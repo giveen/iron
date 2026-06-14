@@ -20,22 +20,22 @@ pub mod copy;
 // `fence.rs` is intentionally NOT declared: device/system memory fences and
 // atomics have no `#[kernel]` DSL representation (the "1 out of scope" op in the
 // audit). The file is kept for the implementation notes in its header.
+pub mod gate_up_swiglu_fused;
 pub mod gated_activation;
 pub mod gather;
 pub mod gather_axis;
+pub mod gelu_erf;
 pub mod hadamard;
 pub mod hadamard_m;
 pub mod indexing;
+pub mod leaky_relu;
 pub mod logsumexp;
 pub mod random;
 pub mod reduce;
 pub mod scan;
 pub mod scatter_axis;
 pub mod strided;
+pub mod swiglu_limit;
 pub mod ternary;
 pub mod unary;
 pub mod vector_add;
-pub mod leaky_relu;
-pub mod gelu_erf;
-pub mod gate_up_swiglu_fused;
-pub mod swiglu_limit;

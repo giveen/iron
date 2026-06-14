@@ -1621,11 +1621,17 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_q2(dt: DType) -> BenchSetup { setup(mt_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, dt) }
+    fn bench_q2(dt: DType) -> BenchSetup {
+        setup(mt_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, dt)
+    }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_q4(dt: DType) -> BenchSetup { setup(mt_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, dt) }
+    fn bench_q4(dt: DType) -> BenchSetup {
+        setup(mt_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, dt)
+    }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_q8(dt: DType) -> BenchSetup { setup(mt_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, dt) }
+    fn bench_q8(dt: DType) -> BenchSetup {
+        setup(mt_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, dt)
+    }
 }

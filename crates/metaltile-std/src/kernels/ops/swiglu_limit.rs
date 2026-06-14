@@ -12,12 +12,7 @@
 use metaltile::kernel;
 
 #[kernel]
-pub fn mt_swiglu_limit<T>(
-    gate: Tensor<T>,
-    up: Tensor<T>,
-    out: Tensor<T>,
-    #[constexpr] limit: f32,
-) {
+pub fn mt_swiglu_limit<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>, #[constexpr] limit: f32) {
     let idx = tid;
     let g = load(gate[idx]).cast::<f32>();
     let u = load(up[idx]).cast::<f32>();

@@ -1032,7 +1032,10 @@ pub mod kernel_benches {
         let (codes_dt, codes_len) = if fmt.element_bits() == 8 {
             (DType::U8, out_ch * c_dim)
         } else {
-            (DType::U32, crate::kernels::quant::format::bitstream_words(out_ch * c_dim, fmt.element_bits()))
+            (
+                DType::U32,
+                crate::kernels::quant::format::bitstream_words(out_ch * c_dim, fmt.element_bits()),
+            )
         };
         let scales_dt = match fmt.scale_kind() {
             crate::kernels::quant::format::ScaleKind::F32 => DType::F32,

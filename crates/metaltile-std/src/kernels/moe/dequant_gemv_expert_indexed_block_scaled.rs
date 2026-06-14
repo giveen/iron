@@ -695,7 +695,10 @@ pub mod kernel_benches {
         let total_codes = if fmt.element_bits() == 8 {
             n_experts * out_dim * in_dim
         } else {
-            crate::kernels::quant::format::bitstream_words(n_experts * out_dim * in_dim, fmt.element_bits())
+            crate::kernels::quant::format::bitstream_words(
+                n_experts * out_dim * in_dim,
+                fmt.element_bits(),
+            )
         };
         let codes_per_expert = if fmt.element_bits() == 8 {
             out_dim * in_dim

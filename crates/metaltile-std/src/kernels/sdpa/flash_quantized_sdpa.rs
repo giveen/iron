@@ -779,20 +779,48 @@ pub mod kernel_tests {
     // Bool-mask gate (b4 / b8).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_bool_mask_b4_d128(dt: DType) -> TestSetup {
-        mask_setup(mt_flash_quantized_sdpa_bool_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, false, dt)
+        mask_setup(
+            mt_flash_quantized_sdpa_bool_mask_b4_d128::kernel_ir_for(dt),
+            128,
+            4,
+            64,
+            false,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_bool_mask_b8_d128(dt: DType) -> TestSetup {
-        mask_setup(mt_flash_quantized_sdpa_bool_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, false, dt)
+        mask_setup(
+            mt_flash_quantized_sdpa_bool_mask_b8_d128::kernel_ir_for(dt),
+            128,
+            8,
+            64,
+            false,
+            dt,
+        )
     }
     // Float-mask additive bias (b4 / b8).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_float_mask_b4_d128(dt: DType) -> TestSetup {
-        mask_setup(mt_flash_quantized_sdpa_float_mask_b4_d128::kernel_ir_for(dt), 128, 4, 64, true, dt)
+        mask_setup(
+            mt_flash_quantized_sdpa_float_mask_b4_d128::kernel_ir_for(dt),
+            128,
+            4,
+            64,
+            true,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
     fn test_ffai_flash_quantized_sdpa_float_mask_b8_d128(dt: DType) -> TestSetup {
-        mask_setup(mt_flash_quantized_sdpa_float_mask_b8_d128::kernel_ir_for(dt), 128, 8, 64, true, dt)
+        mask_setup(
+            mt_flash_quantized_sdpa_float_mask_b8_d128::kernel_ir_for(dt),
+            128,
+            8,
+            64,
+            true,
+            dt,
+        )
     }
 }
 

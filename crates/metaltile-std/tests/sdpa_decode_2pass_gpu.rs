@@ -24,7 +24,10 @@ use std::{
 
 use common::{Dt, SdpaShape, max_abs_diff, naive_sdpa_f32, pack_bytes, ramp, unpack_bytes};
 use metaltile::{Context, DispatchSpec, ResidentBuffer, core::ir::KernelMode};
-use metaltile_std::kernels::sdpa::sdpa_decode_2pass::{mt_sdpa_decode_2pass_pass1, mt_sdpa_decode_2pass_pass2};
+use metaltile_std::kernels::sdpa::sdpa_decode_2pass::{
+    mt_sdpa_decode_2pass_pass1,
+    mt_sdpa_decode_2pass_pass2,
+};
 
 /// Serialise GPU dispatches across tests in this file. Cargo runs `#[test]`
 /// functions concurrently by default; under `cargo llvm-cov` the

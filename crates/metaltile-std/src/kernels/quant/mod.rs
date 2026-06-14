@@ -28,14 +28,14 @@ pub mod gguf;
 // host-side source of truth these GPU kernels mirror).
 pub mod aura_dequant_rotated;
 pub mod aura_encode;
+pub mod block_scaled_dequant;
 pub mod dequant_gather;
 pub mod dequant_gather_block_scaled;
-pub mod fp8_block_dequant;
-pub mod mxfp4_dequant;
 pub mod dequant_q4;
+pub mod fp8_block_dequant;
 pub mod gguf_dequant_iq2_xxs;
 pub mod gguf_dequant_iq2_xxs_raw;
 pub mod gguf_dequant_q2_k;
 pub mod gguf_dequant_q8_0;
 pub mod gguf_iq2_xxs_extract_qs;
-pub mod block_scaled_dequant;
+pub mod mxfp4_dequant;
