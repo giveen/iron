@@ -1059,8 +1059,12 @@ pub mod kernel_tests {
     fn test_batched_qkv_qgemv(dt: DType) -> TestSetup {
         let (in_dim, gs, out_q, out_k, out_v) = (256usize, 64usize, 16usize, 4usize, 4usize);
         let max_rows = out_q.max(out_k).max(out_v);
-        setup(mt_batched_qkv_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v)
-            .grid_3d(max_rows as u32, 1, 3, [128, 1, 1])
+        setup(mt_batched_qkv_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_q, out_k, out_v).grid_3d(
+            max_rows as u32,
+            1,
+            3,
+            [128, 1, 1],
+        )
     }
 
     // Fast variant: grid [ceil(max(out_*)/8), 1, 3], tpg 64 (8 rows per TG).
