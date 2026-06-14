@@ -52,7 +52,7 @@ crates/metaltile-std/src/kernels/
               · dequant_gemv · gemm_q8(_mpp)/q4_mpp · batched_{qkv,4}(_block_scaled)_{qgemv,qmm}
               · patch_embed(_mma)_block_scaled · gemv_quantized (Q8/Q4 inline-dequant gemv,
               ex-gemv_q8 grab-bag) (same folder; format-axis fold deferred, §7)
-  sdpa/       ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
+  sdpa/       ✅ DONE — ALL attention: bidirectional(+relpos/windowed/conformer) · decode(+d64..d512/
               2pass/batched/sink) · multi(+d256/tree-mask) · prefill_mma · flash_quantized ·
               aura_flash · steel/attn
   moe/        ✅ DONE — router_topk · permute (+unpermute) · gather_qmm (per-expert BGEMM) ·
@@ -67,7 +67,7 @@ crates/metaltile-std/src/kernels/
   convolution/ ✅ DONE — conv1d/2d/3d · depthwise · winograd · steel_conv · conv1d_causal(_roll) (see §4)
   ssm/        ✅ DONE — ssm(_replay) · gated_delta(+wy/prep/chunk) · mamba pregate-rmsnorm
               (gated_group_rmsnorm(_batched)) · softplus_add(_rows)
-  quant/      INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
+  quant/      ✅ DONE (kernels/quant/) — INFRA + the op×format matrix (§7): codec · format · gguf · block_scaled_* ·
               quantized_* · fp_quantized_* · affine · aura codec stack · dequant_*
   audio/      ✅ DONE — mel_spectrogram(+magnitude/stft/filterbank) · lstm · vocoder · snake1d · upsample
   vision/     ✅ DONE — resize_normalize(+bicubic) · im2col · patch_unfold · pos_emb_2d · avg_pool2d ·
@@ -170,7 +170,7 @@ payoff last:
 |---|---|---|---|
 | ✅ done | `convolution/`, `rope/`, `norm/`, `sampling/`, `ops/` | exemplar + all of wave 1 | 24k → ~1.6k |
 | 2 | ✅ `audio/` `vision/` `kv_cache/` `gemm/` (dense + quantized) `ssm/` all done | moderate size, few cross-deps | medium |
-| 3 | ✅ `moe/` done; remaining `sdpa/`, **`quant/`** | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
+| 3 | ✅ `moe/` `sdpa/` `quant/` all done; `kernels/quant/` unifies the host codec/format/gguf SSOT + the dequant kernels. `ffai/` is fully migrated and removed; only `mlx/steel/` (steel attn/conv templates) remains. | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
 ## 7. The `quant/` umbrella — collapsing the op × format matrix
 
