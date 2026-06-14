@@ -247,7 +247,6 @@ pub fn mt_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: 
     }
 }
 
-
 /// Elementwise dtype cast f32 → f16. Compacts the attention KV cache to half
 /// precision: at 32K context the sdpa read is bandwidth-bound, so halving the
 /// cache bytes roughly halves the per-layer attention cost. One thread / elem.
@@ -259,7 +258,6 @@ pub fn mt_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u
     }
 }
 
-
 /// Elementwise dtype cast f16 → f32 (reverse): the sdpa f16 output is widened
 /// back to f32 for the downstream o_proj Q4 GEMV, which consumes f32 activations.
 #[kernel]
@@ -269,7 +267,6 @@ pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u
         store(dst[i], load(src[i]).cast::<f32>());
     }
 }
-
 
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};

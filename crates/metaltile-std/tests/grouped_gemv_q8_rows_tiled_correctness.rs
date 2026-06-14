@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
-use metaltile_std::kernels::gemm::gemv_quantized::{mt_grouped_gemv_q8_rows, mt_grouped_gemv_q8_rows_tiled};
+use metaltile_std::kernels::gemm::gemv_quantized::{
+    mt_grouped_gemv_q8_rows,
+    mt_grouped_gemv_q8_rows_tiled,
+};
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;

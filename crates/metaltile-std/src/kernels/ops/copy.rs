@@ -28,7 +28,6 @@ pub fn mt_slice<T>(
     }
 }
 
-
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

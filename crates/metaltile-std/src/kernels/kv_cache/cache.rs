@@ -416,7 +416,6 @@ pub fn mt_kv_append<T>(
     store(dst[h * cap * hd + pos * hd + dd], load(src[idx]));
 }
 
-
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

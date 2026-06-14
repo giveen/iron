@@ -62,7 +62,6 @@ pub fn mt_moe_gather_q4_relu2<T>(
     }
 }
 
-
 /// Batched MoE expert DOWN-projection + router-weighted accumulate: for each
 /// output row `h`, sums the `top_k` experts' `down[e,h]·x_slot` weighted by
 /// `wts[slot]`, into `acc[h]`. One dispatch for all experts. `x` is the
@@ -112,7 +111,6 @@ pub fn mt_moe_gather_q4_down_accum<T>(
         store(acc[h], (load(acc[h]).cast::<f32>() + total).cast::<T>());
     }
 }
-
 
 /// Batched MoE DOWN gather (no accumulate): `out[slot*hid + h] = down[e_slot, h]·
 /// x_slot`, one big `[top_k*hid]` GEMV (grid top_k*hid ⇒ high occupancy, vs the
@@ -164,7 +162,6 @@ pub fn mt_moe_gather_q4_down<T>(
         }
     }
 }
-
 
 /// Router-weighted sum of the per-expert down outputs into `acc`:
 /// `acc[h] += Σ_slot wts[slot]·downs[slot*hid + h]`. Cheap (grid hid).

@@ -233,12 +233,7 @@ pub fn mt_ssm_step_grouped<T>(
 /// Device dt for Mamba2: `dt[i] = softplus(dt_raw[i] + dt_bias[i])` (stable form).
 /// Keeps the Mamba dt computation ON-DEVICE (no host round-trip).
 #[kernel]
-pub fn mt_softplus_add(
-    a: Tensor<f32>,
-    b: Tensor<f32>,
-    mut out: Tensor<f32>,
-    #[constexpr] n: u32,
-) {
+pub fn mt_softplus_add(a: Tensor<f32>, b: Tensor<f32>, mut out: Tensor<f32>, #[constexpr] n: u32) {
     let i = program_id::<0>();
     if i < n {
         let x = load(a[i]) + load(b[i]);
@@ -247,7 +242,6 @@ pub fn mt_softplus_add(
         store(out[i], pos + log(1.0f32 + exp(0.0f32 - ax)));
     }
 }
-
 
 /// NemotronH/Zamba2 gated GROUPED RMSNorm (ON-DEVICE; removes the per-Mamba-layer
 /// dl→host-norm→up sync). Gate-BEFORE-norm, per group of `gs`: g = y·silu(z);
@@ -293,7 +287,6 @@ pub fn mt_gated_group_rmsnorm<T>(
         store(out[base + 3u32], (g3 * rms * load(w[base + 3u32]).cast::<f32>()).cast::<T>());
     }
 }
-
 
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};

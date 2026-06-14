@@ -27,7 +27,6 @@
 
 use metaltile::kernel;
 
-
 #[kernel]
 pub fn mt_gemv_q8<T>(
     qs: Tensor<u32>,
@@ -63,7 +62,6 @@ pub fn mt_gemv_q8<T>(
         store(out[row], total.cast::<T>());
     }
 }
-
 
 /// Grouped Q8_0 gemv — `out[r] = Σ_k dequant(W[r,k]) · x[(r/rows_per_group)*k_in + k]`.
 /// Each contiguous block of `rows_per_group` output rows reads its own
@@ -104,7 +102,6 @@ pub fn mt_grouped_gemv_q8<T>(
         store(out[row], total.cast::<T>());
     }
 }
-
 
 /// COALESCED per-token grouped Q8 gemv — same math as `mt_grouped_gemv_q8`
 /// but the warp walks the row's `u32` words contiguously (lane j, j+32, …) so
@@ -147,7 +144,6 @@ pub fn mt_gemv_q8_coalesced<T>(
     }
 }
 
-
 /// Coalesced Q8 gemv with a fused ReLU² on the output: `out[r] = max(0, Wq·x)²`.
 /// Fuses a MoE expert's `up` projection and its activation into one dispatch
 /// (was gemv + a separate relu² kernel), keeping per-row occupancy.
@@ -187,7 +183,6 @@ pub fn mt_gemv_q8_coalesced_relu2<T>(
         store(out[row], (r * r).cast::<T>());
     }
 }
-
 
 /// Coalesced Q8 gemv that SCALES + ACCUMULATES in place: `acc[r] += scale[0] ·
 /// Σ_k dequant(W[r,k])·x[k]`. Lets a MoE expert's `down` projection fold its
@@ -233,7 +228,6 @@ pub fn mt_gemv_q8_coalesced_accum<T>(
         store(acc[row], (prev + s * total).cast::<T>());
     }
 }
-
 
 // ── Q4 (4-bit) coalesced gemv family — half the weight DRAM of Q8, the decode
 // bandwidth lever (decode reads cold weights: 35GB resident ≫ L2). Block 32,
@@ -287,7 +281,6 @@ pub fn mt_gemv_q4_coalesced<T>(
         }
     }
 }
-
 
 /// Q4 GEMV, VECTORIZED weight load: each lane owns whole Q4 blocks and reads the
 /// block's 4 packed words as 4 CONSECUTIVE loads → the codegen Vectorize pass
@@ -358,7 +351,6 @@ pub fn mt_gemv_q4_vec<T>(
         store(out[row], total.cast::<T>());
     }
 }
-
 
 /// Q4 GEMV, 2 output rows per warp: load the shared activation `x` ONCE and run
 /// TWO independent weight streams (rows 2r, 2r+1) → 2× memory-level-parallelism on
@@ -431,7 +423,6 @@ pub fn mt_gemv_q4_coalesced_2row<T>(
     }
 }
 
-
 /// Q4 coalesced matvec with fused ReLU² (MoE expert up).
 /// Multi-warp: `rows_per_tg` warps per threadgroup, each warp owns one output
 /// row. The single-warp form (`rows_per_tg=1`) is memory-LATENCY-bound (small
@@ -483,7 +474,6 @@ pub fn mt_gemv_q4_coalesced_relu2<T>(
         }
     }
 }
-
 
 /// Q4 coalesced matvec, scale + accumulate in place (MoE expert down).
 /// Multi-warp (`rows_per_tg` warps/TG, one output row each) — same latency-
@@ -537,7 +527,6 @@ pub fn mt_gemv_q4_coalesced_accum<T>(
     }
 }
 
-
 /// BATCHED grouped Q8_0 gemv — mt_grouped_gemv_q8 over `n_tokens` rows in
 /// ONE dispatch (grid z/y = token). Prefill O-LoRA looped the per-token
 /// grouped gemv N times; this folds it. x is [n_tokens, n_groups*k_in],
@@ -580,7 +569,6 @@ pub fn mt_grouped_gemv_q8_rows<T>(
         store(out[token * m_out + row], total.cast::<T>());
     }
 }
-
 
 /// TOKEN-TILED grouped Q8 gemv — the amortized fix for the prefill O-LoRA-A
 /// hotspot. `mt_grouped_gemv_q8_rows` re-reads each weight row from DRAM
@@ -739,4 +727,3 @@ pub mod kernel_benches {
             .bytes_moved((m_out * bpr * 36 + n_tokens * n_groups * k_in * dt.size_bytes()) as u64)
     }
 }
-
