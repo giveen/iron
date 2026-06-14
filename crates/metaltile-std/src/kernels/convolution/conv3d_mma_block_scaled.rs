@@ -42,7 +42,7 @@
 //!
 //! fp8_e4m3 reuses the nvfp8 kernel (same 8-bit-E4M3 + f32-scale shape).
 //! Codegen-only; correctness pinned by the in-source `#[test_kernel]`s vs a
-//! `quant::format::dequant` oracle running the dense conv3d_mma math.
+//! `kernels::quant::format::dequant` oracle running the dense conv3d_mma math.
 
 use metaltile::kernel;
 
@@ -356,7 +356,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -461,8 +461,8 @@ pub mod kernel_tests {
         let input_f = ramp(batch * in_ch * in_d * in_h * in_w, 13, 2.0);
         // Quantize the [out_ch, C] filter via the shared codec.
         let w_f = ramp(out_ch * contraction, 11, 2.0);
-        let p = crate::quant::format::pack(fmt, &w_f, out_ch, contraction);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_ch, contraction);
+        let p = crate::kernels::quant::format::pack(fmt, &w_f, out_ch, contraction);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_ch, contraction);
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         // Oracle: dense conv3d_mma over the dequantized filter row [out_ch, C].
         let expected =
@@ -473,8 +473,8 @@ pub mod kernel_tests {
         // int/mxint width routes correctly.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -636,7 +636,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn mma_bench(
@@ -666,11 +666,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (total_elems, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(total_elems, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(total_elems, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = out_ch * (contraction / fmt.block_size());

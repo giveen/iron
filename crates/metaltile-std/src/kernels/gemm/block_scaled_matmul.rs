@@ -34,7 +34,7 @@ use metaltile::kernel;
 ///        2 = E4M3 byte, 3 = E5M2 byte, 4 = int8 byte.
 ///   SKIND 0 = E8M0 pow-2 (u8), 1 = E4M3 micro × global (u8, nvfp4),
 ///         2 = direct per-block scale (f32 / f16).
-/// Decodes through the shared `kernels/primitives.rs` (mirroring `quant::codec`)
+/// Decodes through the shared `kernels/primitives.rs` (mirroring `kernels::quant::codec`)
 /// so the kernel and the oracle cannot drift. Produces `mt_<FMT>_qgemv`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
@@ -170,7 +170,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{block_scaled_qgemv_oracle, block_scaled_weights, pack_f32, unpack_f32},
     };
 
@@ -185,8 +185,8 @@ pub mod kernel_tests {
         dt: DType,
     ) -> TestSetup {
         let w = block_scaled_weights(out_dim, in_dim);
-        let p = crate::quant::format::pack(fmt, &w, out_dim, in_dim);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_dim, in_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &w, out_dim, in_dim);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_dim, in_dim);
         let input_f: Vec<f32> = (0..in_dim).map(|i| ((i % 11) as f32 - 5.0) * 0.01).collect();
         // Round-trip the input through `dt` so the oracle sees what the GPU sees.
         let x = unpack_f32(&pack_f32(&input_f, dt), dt);
@@ -198,8 +198,8 @@ pub mod kernel_tests {
         // buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -369,7 +369,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn qgemv_bench(
         kernel: Kernel,
@@ -385,11 +385,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let sz = dt.size_bytes();

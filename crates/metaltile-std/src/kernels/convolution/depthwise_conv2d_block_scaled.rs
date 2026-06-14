@@ -28,7 +28,7 @@
 //! this matrix-coverage kernel we use **`k = 8 → C = 64`** in the tests so all
 //! nine formats fit the generic codec; the kernel body itself is general over
 //! `k`. Codegen-only; correctness pinned by the in-source `#[test_kernel]`s vs a
-//! `quant::format::dequant` oracle.
+//! `kernels::quant::format::dequant` oracle.
 //!
 //! ## DISPATCH INVARIANTS
 //!
@@ -174,7 +174,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -208,8 +208,8 @@ pub mod kernel_tests {
         let input_f = ramp(batch * ch * in_h * in_w, 13, 6.0);
         let bias_f = ramp(ch, 5, 2.0);
         let w_f = ramp(ch * cols, 11, 4.0);
-        let p = crate::quant::format::pack(fmt, &w_f, ch, cols);
-        let wdq = crate::quant::format::dequant(fmt, &p, ch, cols);
+        let p = crate::kernels::quant::format::pack(fmt, &w_f, ch, cols);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, ch, cols);
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let bias = unpack_f32(&pack_f32(&bias_f, dt), dt);
         // Oracle: dense depthwise math over the dequantized [ch, C] filter,
@@ -248,8 +248,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -442,7 +442,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn dw_bench(
@@ -469,11 +469,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (ch * cols, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(ch * cols, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(ch * cols, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = ch * (cols / fmt.block_size());

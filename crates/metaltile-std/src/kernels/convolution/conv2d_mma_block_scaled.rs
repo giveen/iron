@@ -350,7 +350,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::{QFormat, ScaleKind},
+        kernels::quant::format::{QFormat, ScaleKind},
         utils::{pack_f32, unpack_f32},
     };
 
@@ -440,8 +440,8 @@ pub mod kernel_tests {
         let input_f = ramp(batch * in_ch * in_h * in_w, 13, 2.0);
         // Quantize the [out_ch, BK] filter via the shared codec.
         let filter_f = ramp(out_ch * bk, 11, 2.0);
-        let p = crate::quant::format::pack(fmt, &filter_f, out_ch, bk);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_ch, bk);
+        let p = crate::kernels::quant::format::pack(fmt, &filter_f, out_ch, bk);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_ch, bk);
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let expected = naive_conv2d_mma(&input, &wdq, batch, in_ch, in_h, in_w, out_ch, kh, kw);
         // Axis-driven binding (robust across all element widths/scale kinds):
@@ -872,7 +872,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::{QFormat, ScaleKind};
+    use crate::kernels::quant::format::{QFormat, ScaleKind};
 
     #[allow(clippy::too_many_arguments)]
     fn mma_bench(
@@ -900,7 +900,7 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (out_ch * bk, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(out_ch * bk, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(out_ch * bk, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
             ScaleKind::F32 => DType::F32,

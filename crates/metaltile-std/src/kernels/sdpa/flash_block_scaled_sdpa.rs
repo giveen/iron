@@ -1827,7 +1827,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -1915,10 +1915,10 @@ pub mod kernel_tests {
         let q = unpack_f32(&pack_f32(&source(q_heads * dim, 0x51, 2.0), dt), dt);
         let k_raw = source(rows * dim, 0x62, 3.0);
         let v_raw = source(rows * dim, 0x73, 3.0);
-        let kp = crate::quant::format::pack(fmt, &k_raw, rows, dim);
-        let vp = crate::quant::format::pack(fmt, &v_raw, rows, dim);
-        let k_deq = crate::quant::format::dequant(fmt, &kp, rows, dim);
-        let v_deq = crate::quant::format::dequant(fmt, &vp, rows, dim);
+        let kp = crate::kernels::quant::format::pack(fmt, &k_raw, rows, dim);
+        let vp = crate::kernels::quant::format::pack(fmt, &v_raw, rows, dim);
+        let k_deq = crate::kernels::quant::format::dequant(fmt, &kp, rows, dim);
+        let v_deq = crate::kernels::quant::format::dequant(fmt, &vp, rows, dim);
         let sinks: Vec<f32> = if has_sinks {
             (0..q_heads).map(|h| 0.5 + 0.25 * h as f32).collect()
         } else {
@@ -1943,8 +1943,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -2671,7 +2671,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn flash_bench(kernel: Kernel, fmt: QFormat, dim: usize, dt: DType) -> BenchSetup {
         let (q_heads, kv_heads, tokens) = (8usize, 1usize, 2048usize);
@@ -2683,11 +2683,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (rows * dim, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(rows * dim, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(rows * dim, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let sz = dt.size_bytes();

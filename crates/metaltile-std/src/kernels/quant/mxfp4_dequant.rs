@@ -71,7 +71,7 @@ use metaltile::kernel;
 
 // Bare `#[kernel]` — mixed-dtype param set (concrete u32/f32 + generic T).
 #[kernel]
-pub fn ffai_dsv4_mxfp4_dequant<T>(
+pub fn mt_mxfp4_dequant<T>(
     qs_packed: Tensor<u32>,
     scales: Tensor<f32>,
     lut: Tensor<f32>,
@@ -98,13 +98,13 @@ pub fn ffai_dsv4_mxfp4_dequant<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_mxfp4_dequant;
-    use crate::{quant::codec, utils::pack_f32};
+    use super::mt_mxfp4_dequant;
+    use crate::{kernels::quant::codec, utils::pack_f32};
 
     /// The canonical OCP-spec MXFP4 value table — `code → magnitude` for the 16
     /// E2M1 codes. DSv4 ships these MoE expert weights as native MXFP4 in the
     /// safetensors checkpoint, but the element decode is the *same* OCP E2M1
-    /// codebook as `quant::format`'s `Mxfp4` and the GGUF MXFP4 path: all route
+    /// codebook as `kernels::quant::format`'s `Mxfp4` and the GGUF MXFP4 path: all route
     /// through `codec::e2m1_decode` — the single source of truth — so the
     /// uploaded LUT, the host quantizer, and this oracle can't drift apart.
     fn mxfp4_lut() -> [f32; 16] { std::array::from_fn(|c| codec::e2m1_decode(c as u8)) }
@@ -182,7 +182,7 @@ pub mod kernel_tests {
         let dequantized = cpu_dequant(&qs_packed, &scales);
         // Pack u32 vec as little-endian bytes for the test framework.
         let qs_bytes: Vec<u8> = qs_packed.iter().flat_map(|w| w.to_le_bytes()).collect();
-        TestSetup::new(ffai_dsv4_mxfp4_dequant::kernel_ir_for(dt))
+        TestSetup::new(mt_mxfp4_dequant::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("qs_packed", qs_bytes, DType::U32))
             .input(TestBuffer::from_vec("scales", pack_f32(&scales, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("lut", pack_f32(&mxfp4_lut(), DType::F32), DType::F32))
@@ -202,7 +202,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_mxfp4_dequant;
+    use super::mt_mxfp4_dequant;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4(dt: DType) -> BenchSetup {
@@ -210,7 +210,7 @@ pub mod kernel_benches {
         // expert intermediate=2048, hidden=4096).
         let n = 4096 * 2048usize;
         let n_blocks = n / 32;
-        BenchSetup::new(ffai_dsv4_mxfp4_dequant::kernel_ir_for(dt))
+        BenchSetup::new(mt_mxfp4_dequant::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("qs_packed", n_blocks * 4, DType::U32))
             .buffer(BenchBuffer::random("scales", n_blocks, DType::F32))
             .buffer(BenchBuffer::random("lut", 16, DType::F32))

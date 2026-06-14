@@ -3,7 +3,7 @@
 //! DSv4 CSA sparse-gather SDPA decode for `head_dim == 512`.
 //!
 //! Single-token attention over a **selected subset** of KV cache
-//! positions. Clone of [`crate::ffai::sdpa_decode_d512`] with the
+//! positions. Clone of [`crate::kernels::sdpa::sdpa_decode`] with the
 //! dense `for _t in 0..n_kv` inner loop replaced by an index-gather
 //! over a caller-supplied `selected_indices[n_selected]` buffer.
 //!

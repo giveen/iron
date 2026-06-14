@@ -383,7 +383,7 @@ pub fn mt_conv1d_quant<T>(
 #[allow(clippy::too_many_arguments)]
 fn blockscaled_setup(
     kernel: metaltile::core::ir::Kernel,
-    fmt: crate::quant::format::QFormat,
+    fmt: crate::kernels::quant::format::QFormat,
     batch: usize,
     in_ch: usize,
     in_len: usize,
@@ -406,8 +406,8 @@ fn blockscaled_setup(
     let bias_f: Vec<f32> = (0..out_ch).map(|i| ((i % 5) as f32 / 5.0 - 0.5) * 2.0).collect();
     let weight_f: Vec<f32> =
         (0..(out_ch * c_dim)).map(|i| ((i % 11) as f32 / 11.0 - 0.5) * 4.0).collect();
-    let p = crate::quant::format::pack(fmt, &weight_f, out_ch, c_dim);
-    let wdq = crate::quant::format::dequant(fmt, &p, out_ch, c_dim);
+    let p = crate::kernels::quant::format::pack(fmt, &weight_f, out_ch, c_dim);
+    let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_ch, c_dim);
     let input = crate::utils::unpack_f32(&crate::utils::pack_f32(&input_f, dt), dt);
     let bias = crate::utils::unpack_f32(&crate::utils::pack_f32(&bias_f, dt), dt);
     let expected = {
@@ -438,8 +438,8 @@ fn blockscaled_setup(
     };
     let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
     let scales_dt = match fmt.scale_kind() {
-        crate::quant::format::ScaleKind::F32 => DType::F32,
-        crate::quant::format::ScaleKind::F16 => DType::F16,
+        crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+        crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
         _ => DType::U8,
     };
     let mut s = TestSetup::new(kernel)
@@ -467,7 +467,7 @@ fn blockscaled_setup(
     if dilation > 1 {
         s = s.constexpr("dilation", dilation as u32);
     }
-    if matches!(fmt, crate::quant::format::QFormat::Nvfp4) {
+    if matches!(fmt, crate::kernels::quant::format::QFormat::Nvfp4) {
         s = s.constexpr("global", p.global);
     }
     s.expect(TestBuffer::from_vec("out", crate::utils::pack_f32(&expected, dt), dt))
@@ -911,13 +911,13 @@ pub mod kernel_tests {
         // Named FMT values in this mini-list: mxfp4=0, nvfp4=1, fp8_e5m2=2, int8=3.
         // Named DIL values: audio=0, fishspeech=1.
         let fmt = if FMT == 0u32 {
-            crate::quant::format::QFormat::Mxfp4
+            crate::kernels::quant::format::QFormat::Mxfp4
         } else if FMT == 1u32 {
-            crate::quant::format::QFormat::Nvfp4
+            crate::kernels::quant::format::QFormat::Nvfp4
         } else if FMT == 2u32 {
-            crate::quant::format::QFormat::Fp8E5m2
+            crate::kernels::quant::format::QFormat::Fp8E5m2
         } else {
-            crate::quant::format::QFormat::Int8
+            crate::kernels::quant::format::QFormat::Int8
         };
         let kernel = if DIL == 0u32 {
             if FMT == 0u32 {
@@ -1021,22 +1021,22 @@ pub mod kernel_benches {
         // Named FMT values in this mini-list: mxfp4=0, nvfp4=1, fp8_e5m2=2, int8=3.
         // Named DIL values: audio=0, fishspeech=1.
         let fmt = if FMT == 0u32 {
-            crate::quant::format::QFormat::Mxfp4
+            crate::kernels::quant::format::QFormat::Mxfp4
         } else if FMT == 1u32 {
-            crate::quant::format::QFormat::Nvfp4
+            crate::kernels::quant::format::QFormat::Nvfp4
         } else if FMT == 2u32 {
-            crate::quant::format::QFormat::Fp8E5m2
+            crate::kernels::quant::format::QFormat::Fp8E5m2
         } else {
-            crate::quant::format::QFormat::Int8
+            crate::kernels::quant::format::QFormat::Int8
         };
         let (codes_dt, codes_len) = if fmt.element_bits() == 8 {
             (DType::U8, out_ch * c_dim)
         } else {
-            (DType::U32, crate::quant::format::bitstream_words(out_ch * c_dim, fmt.element_bits()))
+            (DType::U32, crate::kernels::quant::format::bitstream_words(out_ch * c_dim, fmt.element_bits()))
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = out_ch * (c_dim / fmt.block_size());
@@ -1091,7 +1091,7 @@ pub mod kernel_benches {
         if DIL == 1u32 {
             s = s.constexpr("dilation", 1u32);
         }
-        if matches!(fmt, crate::quant::format::QFormat::Nvfp4) {
+        if matches!(fmt, crate::kernels::quant::format::QFormat::Nvfp4) {
             s = s.constexpr("global", 1.0f32);
         }
         s.grid_1d(n_out, 256)

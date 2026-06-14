@@ -33,7 +33,7 @@
 //!   - `B` is the quantized projection weight laid out as the 2-D matrix
 //!     `[hidden, patch_dim]` (row `h` = hidden unit, column `kt = ic*patch_h*patch_w
 //!     + py*patch_w + px`). This is the same row-major `[N, K]` weight the
-//!     `quant::format` packer produces.
+//!     `kernels::quant::format` packer produces.
 //!
 //! ## Quantized B-load (the only change vs dense patch_embed_mma)
 //!
@@ -49,7 +49,7 @@
 //!     (1 byte/tap). The byte for tap `kt` is `h*patch_dim + kt`.
 //!
 //!   - sub-byte symmetric int (int2/3/4/5/6 + MXINT2..6): weight is a FLAT
-//!     row-major u32 bit-stream, tight-packed LSB-first by `quant::format::pack`.
+//!     row-major u32 bit-stream, tight-packed LSB-first by `kernels::quant::format::pack`.
 //!     The N-bit two's-complement code for tap `kt` of row `h` lives at GLOBAL
 //!     bit offset `(h*patch_dim + kt)*N`, read straddle-aware across two words
 //!     and float-sign-extended (`code - 2^N` when the top bit is set). `patch_dim`
@@ -359,7 +359,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -444,8 +444,8 @@ pub mod kernel_tests {
         let image_f = ramp(in_ch * in_h * in_w, 13, 2.0);
         // Quantize the [hidden, patch_dim] projection weight via the shared codec.
         let weight_f = ramp(hidden * patch_dim, 11, 2.0);
-        let p = crate::quant::format::pack(fmt, &weight_f, hidden, patch_dim);
-        let wdq = crate::quant::format::dequant(fmt, &p, hidden, patch_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &weight_f, hidden, patch_dim);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, hidden, patch_dim);
         let bias_f = ramp(hidden, 5, 1.0);
         let image = unpack_f32(&pack_f32(&image_f, dt), dt);
         let bias = unpack_f32(&pack_f32(&bias_f, dt), dt);
@@ -461,8 +461,8 @@ pub mod kernel_tests {
         // FP32 scales bind as f32; FP16 scales as f16; E8M0/E4M3 scales as one
         // byte. Driven off the format so each new precision picks the right type.
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -937,7 +937,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn mma_bench(
@@ -962,11 +962,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n_weight, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n_weight, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n_weight, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = BenchSetup::new(kernel)

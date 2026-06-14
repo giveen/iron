@@ -76,7 +76,7 @@
 //!
 //! ## Macro structure
 //!
-//! `aura_encode_kernel!` wraps a single `#[kernel] pub fn …`
+//! `mt_aura_encode_kernel!` wraps a single `#[kernel] pub fn …`
 //! at module scope.  Bit-widths get separate invocations so the compiler
 //! expands the outer macro before the `#[kernel]` proc-macro sees it —
 //! required because the proc-macro does not expand inner declarative macros.
@@ -85,8 +85,8 @@ use metaltile::kernel;
 
 /// AURA fused rotation-encode kernel — variable bit-widths (2, 3, 4, 6, 8).
 ///
-/// Produces kernels: `aura_encode_int2`, `aura_encode_int3`, `aura_encode_int4`,
-/// `aura_encode_int6`, `aura_encode_int8`.
+/// Produces kernels: `mt_aura_encode_int2`, `mt_aura_encode_int3`, `mt_aura_encode_int4`,
+/// `mt_aura_encode_int6`, `mt_aura_encode_int8`.
 ///
 /// Each variant bakes in `BITS` (the code width) and `LEVELS = 2^BITS` (the
 /// number of codebook entries). Five fused stages per row:
@@ -124,7 +124,7 @@ use metaltile::kernel;
 // → 1.40 (mirror baseline 1.41). The 0.3-nat gap maps cleanly
 // to the bf16 boundary rounding flipping borderline bins.
 #[kernel(variants(BITS = [2, 3, 4, 6, 8], LEVELS = [4, 8, 16, 64, 256], suffix = "int{BITS}"))]
-pub fn aura_encode<T>(
+pub fn mt_aura_encode<T>(
     input: Tensor<T>,
     rotation: Tensor<T>,
     boundaries: Tensor<f32>,
@@ -211,7 +211,7 @@ pub fn aura_encode<T>(
     // with garbage shifted by `masked >> 32` (which Apple
     // Silicon evaluates as `masked >> 0 = masked`).  Symptom:
     // low nibbles of subsequent words OR'd with unrelated dim
-    // indices.  Caught by the aura_encode GPU correctness
+    // indices.  Caught by the mt_aura_encode GPU correctness
     // test.  See FFAI post-mortem 2026-05-19 — a metaltile
     // codegen follow-up should emit i32 comparisons
     // faithfully when the DSL requests them.
@@ -254,7 +254,7 @@ pub fn aura_encode<T>(
 /// affine-quantize tests' strategy: the **packed codes** go through a
 /// branchless boundary-count whose last bit and bit-packing are sensitive to
 /// Metal fast-math FMA fusion, so they stayed covered by the legacy bit-exact
-/// `tests/aura_encode_gpu_correctness.rs` (removed in #240) A/B test. Here we
+/// `tests/mt_aura_encode_gpu_correctness.rs` (removed in #240) A/B test. Here we
 /// pin the part that is robustly checkable — the per-vector
 /// **norm-correction factor** (`norms_out`), which the decoder multiplies
 /// back through.
@@ -276,7 +276,7 @@ pub fn aura_encode<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::aura_encode_int4;
+    use super::mt_aura_encode_int4;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -398,7 +398,7 @@ pub mod kernel_tests {
             norms_oracle(&input_r, &rotation_r, &boundaries, &codebook_r, rows, dim);
         let expected_norms = unpack_f32(&pack_f32(&expected_norms_f32, dt), dt);
 
-        TestSetup::new(aura_encode_int4::kernel_ir_for(dt))
+        TestSetup::new(mt_aura_encode_int4::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("input", pack_f32(input, dt), dt))
             .input(TestBuffer::from_vec("rotation", pack_f32(rotation, dt), dt))
@@ -451,7 +451,7 @@ pub mod kernel_tests {
     // exercised against the oracle (which applies the same Π). f32-only and a
     // ramp input that keeps rotated values off the Lloyd-Max boundaries, so
     // the matmul-reorder noise can't flip a quant index (mirrors the legacy
-    // `aura_encode_int4_srht_rotation_f32` A/B test).
+    // `mt_aura_encode_int4_srht_rotation_f32` A/B test).
     #[test_kernel(dtypes = [f32], tol = 1e-4)]
     fn test_aura_encode_int4_srht_rotation(dt: DType) -> TestSetup {
         let dim = 128usize;
@@ -488,6 +488,6 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
     fn bench_aura_encode(dt: DType) -> BenchSetup {
-        setup(BenchSetup::new(aura_encode_intBITS::kernel_ir_for(dt)), 128, BITS, 256, dt)
+        setup(BenchSetup::new(mt_aura_encode_intBITS::kernel_ir_for(dt)), 128, BITS, 256, dt)
     }
 }

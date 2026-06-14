@@ -15,7 +15,7 @@
 //! layers — the model's `attn_sink` parameter is a `[n_heads]` fp32
 //! tensor learned alongside Q/K/V/O.
 //!
-//! Clone of [`crate::ffai::sdpa_decode_d512`] with the sink fold
+//! Clone of [`crate::kernels::sdpa::sdpa_decode`] with the sink fold
 //! applied in the cross-simdgroup reduction (where `g_max` and `g_sum`
 //! are finalised). All other dispatch invariants — TPG=512, 16 dims
 //! per lane, 4-phase output reduction — are identical.

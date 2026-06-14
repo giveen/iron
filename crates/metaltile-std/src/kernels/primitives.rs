@@ -7,7 +7,7 @@
 //! use the cross-kernel call syntax (`let v = mt_decode_e2m1(nib)`);
 //! `KernelInlinePass` splices the body inline at codegen, so there is no memory
 //! round-trip — exactly as fast as pasting the body, written once. They are the
-//! kernel-side mirror of `quant::codec` (the Rust host-side source of truth);
+//! kernel-side mirror of `kernels::quant::codec` (the Rust host-side source of truth);
 //! kernel and oracle decode through the same math so they cannot drift.
 //!
 //! Used by the `variants(FMT = […])` format-axis folds across the weight-bearing
@@ -50,7 +50,7 @@ pub fn mt_decode_e2m1(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Decode an 8-bit E4M3 (fp8) code → f32.
 ///
 /// Format: 1 sign · 4 exp (bias 7) · 3 mantissa. Max ±448, no infinity.
-/// Mirrors `quant::codec::e4m3_decode`.
+/// Mirrors `kernels::quant::codec::e4m3_decode`.
 #[kernel]
 pub fn mt_decode_e4m3(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);
@@ -65,7 +65,7 @@ pub fn mt_decode_e4m3(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Decode an 8-bit E5M2 (fp8) code → f32.
 ///
 /// Format: 1 sign · 5 exp (bias 15) · 2 mantissa — the high byte of an IEEE
-/// half. Mirrors `quant::codec::e5m2_decode`.
+/// half. Mirrors `kernels::quant::codec::e5m2_decode`.
 #[kernel]
 pub fn mt_decode_e5m2(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);
@@ -80,7 +80,7 @@ pub fn mt_decode_e5m2(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Decode a symmetric-int8 code → f32.
 ///
 /// Reinterprets the low 8 bits of `inp` as a signed byte (two's complement
-/// sign-extension via `<< 24 / >> 24`). Mirrors `quant::codec::int8_decode`.
+/// sign-extension via `<< 24 / >> 24`). Mirrors `kernels::quant::codec::int8_decode`.
 #[kernel]
 pub fn mt_decode_int8(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);

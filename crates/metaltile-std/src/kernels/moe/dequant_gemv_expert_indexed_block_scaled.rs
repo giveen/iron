@@ -184,7 +184,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -235,11 +235,11 @@ pub mod kernel_tests {
         for e in 0..n_experts {
             stacked_w.extend_from_slice(&weights(e, out_dim, in_dim));
         }
-        let p = crate::quant::format::pack(fmt, &stacked_w, stacked_rows, in_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &stacked_w, stacked_rows, in_dim);
         let sel_global = p.global;
         // Dequant the full stack, then slice the selected expert's row band for
         // the oracle (rows `[expert·out_dim, (expert+1)·out_dim)`).
-        let wdq_all = crate::quant::format::dequant(fmt, &p, stacked_rows, in_dim);
+        let wdq_all = crate::kernels::quant::format::dequant(fmt, &p, stacked_rows, in_dim);
         let wdq = &wdq_all[expert * out_dim * in_dim..(expert + 1) * out_dim * in_dim];
 
         let input_f: Vec<f32> = (0..in_dim).map(|i| ((i % 11) as f32 - 5.0) * 0.01).collect();
@@ -253,8 +253,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -673,7 +673,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn expert_bench(
@@ -695,16 +695,16 @@ pub mod kernel_benches {
         let total_codes = if fmt.element_bits() == 8 {
             n_experts * out_dim * in_dim
         } else {
-            crate::quant::format::bitstream_words(n_experts * out_dim * in_dim, fmt.element_bits())
+            crate::kernels::quant::format::bitstream_words(n_experts * out_dim * in_dim, fmt.element_bits())
         };
         let codes_per_expert = if fmt.element_bits() == 8 {
             out_dim * in_dim
         } else {
-            crate::quant::format::bitstream_words(out_dim * in_dim, fmt.element_bits())
+            crate::kernels::quant::format::bitstream_words(out_dim * in_dim, fmt.element_bits())
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let sz = dt.size_bytes();

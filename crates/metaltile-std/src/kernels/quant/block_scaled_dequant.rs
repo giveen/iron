@@ -5,8 +5,8 @@
 //!
 //! Each kernel reads packed element codes + per-block scales and writes the
 //! reconstructed `[rows, cols]` matrix. The decode math mirrors
-//! [`crate::quant::codec`] exactly, so the GPU output is checked against the
-//! host [`crate::quant::format::dequant`] oracle — same reference, no drift.
+//! [`crate::kernels::quant::codec`] exactly, so the GPU output is checked against the
+//! host [`crate::kernels::quant::format::dequant`] oracle — same reference, no drift.
 //!
 //! ## DISPATCH INVARIANTS (all kernels here)
 //!
@@ -399,7 +399,7 @@ pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
     use super::*;
-    use crate::{quant::format::QFormat, utils::pack_f32};
+    use crate::{kernels::quant::format::QFormat, utils::pack_f32};
 
     /// Deterministic f32 weights with magnitude varying along K (so per-block
     /// scales differ) and mixed signs.
@@ -416,7 +416,7 @@ pub mod kernel_tests {
 
     /// Shared setup: pack `[rows, cols]` weights in `fmt`, dispatch the dequant
     /// kernel, and expect the host oracle's reconstruction. Kernel and oracle
-    /// share `quant::codec`, so the match is near-exact.
+    /// share `kernels::quant::codec`, so the match is near-exact.
     fn dequant_setup(
         kernel: Kernel,
         fmt: QFormat,
@@ -425,8 +425,8 @@ pub mod kernel_tests {
         dt: DType,
     ) -> TestSetup {
         let w = weights(rows, cols);
-        let p = crate::quant::format::pack(fmt, &w, rows, cols);
-        let oracle = crate::quant::format::dequant(fmt, &p, rows, cols);
+        let p = crate::kernels::quant::format::pack(fmt, &w, rows, cols);
+        let oracle = crate::kernels::quant::format::dequant(fmt, &p, rows, cols);
         let n = rows * cols;
         const TPG: u32 = 256;
         // Sub-byte codes (int2-6, E2M1) bind as bit-stream u32 words; 8-bit codes
@@ -434,8 +434,8 @@ pub mod kernel_tests {
         // scales as one byte.
         let codes_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -606,7 +606,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn dequant_bench(
         kernel: Kernel,
@@ -622,11 +622,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let bytes = codes_len * codes_dt.size_bytes()

@@ -43,7 +43,7 @@ use metaltile::kernel;
 
 /// AURA codebook dequant + norm-scale, Grid3D dispatch.
 ///
-/// Produces kernels: `aura_dequant_rotated_int2`, `_int3`, `_int4`,
+/// Produces kernels: `mt_aura_dequant_rotated_int2`, `_int3`, `_int4`,
 /// `_int6`, `_int8`.
 ///
 /// Even BITS (2, 4, 8): pack-strided — one u32 load amortises across all
@@ -53,7 +53,7 @@ use metaltile::kernel;
 ///
 /// Grid: (packed_width, tokens, B*H), tpg=[1,1,1].
 #[kernel(variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
-pub fn aura_dequant_rotated<T>(
+pub fn mt_aura_dequant_rotated<T>(
     packed: Tensor<u32>,
     norms: Tensor<T>,
     codebook: Tensor<T>,
@@ -112,7 +112,7 @@ pub fn aura_dequant_rotated<T>(
     }
 }
 
-/// Correctness tests for the `aura_dequant_rotated_int{2,3,4,6,8}` family.
+/// Correctness tests for the `mt_aura_dequant_rotated_int{2,3,4,6,8}` family.
 /// Grid3D, one thread per (packed_word, token, bh) tile. Oracle: decode each
 /// codebook index from the packed bit-stream and multiply by the token norm.
 /// dim=128 is u32-aligned for every supported bit-width (128×2/32=8,
@@ -195,7 +195,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1,
                   variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
     fn test_aura_dequant_rotated(dt: DType) -> TestSetup {
-        dequant_setup(aura_dequant_rotated_intBITS::kernel_ir_for(dt), BITS, 128, 2, 3, dt)
+        dequant_setup(mt_aura_dequant_rotated_intBITS::kernel_ir_for(dt), BITS, 128, 2, 3, dt)
     }
 }
 
@@ -232,7 +232,7 @@ pub mod kernel_benches {
             variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
     fn bench_aura_dequant_rotated(dt: DType) -> BenchSetup {
         setup(
-            BenchSetup::new(aura_dequant_rotated_intBITS::kernel_ir_for(dt)),
+            BenchSetup::new(mt_aura_dequant_rotated_intBITS::kernel_ir_for(dt)),
             128,
             BITS,
             8,

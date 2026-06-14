@@ -191,7 +191,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -212,8 +212,8 @@ pub mod kernel_tests {
                 if i % 3 == 0 { -mag } else { mag }
             })
             .collect();
-        let p = crate::quant::format::pack(fmt, &w, n, k);
-        let wdq = crate::quant::format::dequant(fmt, &p, n, k);
+        let p = crate::kernels::quant::format::pack(fmt, &w, n, k);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, n, k);
         let x_f: Vec<f32> = (0..m * k).map(|i| ((i % 11) as f32 - 5.0) * 0.02).collect();
         let x = unpack_f32(&pack_f32(&x_f, dt), dt);
         let mut expected = vec![0.0f32; m * n];
@@ -233,8 +233,8 @@ pub mod kernel_tests {
         // the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -401,7 +401,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn mpp_bench(
         kernel: Kernel,
@@ -417,11 +417,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n * k, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n * k, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n * k, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = n * (k / fmt.block_size());

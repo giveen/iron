@@ -33,7 +33,9 @@ use metaltile::{
     core::{dtype::DType, ir::KernelMode},
 };
 use metaltile_std::{
-    ffai::{aura_dequant_rotated::aura_dequant_rotated_int4, aura_encode::aura_encode_int4},
+    kernels::quant::{
+        aura_dequant_rotated::mt_aura_dequant_rotated_int4, aura_encode::mt_aura_encode_int4,
+    },
     kernels::sdpa::{
         aura_flash_p1::mt_aura_flash_p1_kb4_vb2_d128,
         aura_flash_pass2::mt_aura_flash_pass2_d128, aura_score::mt_aura_score_int4,
@@ -53,19 +55,19 @@ fn aura_msl(kernel_ir: metaltile::core::ir::Kernel, mode: KernelMode) -> String 
         .expect("AURA kernel must codegen cleanly")
 }
 
-/// `aura_encode` — fused L2-norm + rotation + Lloyd-Max quantize +
+/// `mt_aura_encode` — fused L2-norm + rotation + Lloyd-Max quantize +
 /// bit-pack. Reduction mode (`simd_sum` over the rotated coordinates).
 #[test]
-fn aura_encode_int4_f32_msl() {
-    let msl = aura_msl(aura_encode_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
+fn mt_aura_encode_int4_f32_msl() {
+    let msl = aura_msl(mt_aura_encode_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
     assert_snapshot!(msl);
 }
 
-/// `aura_dequant_rotated` — bulk unpack + de-rotate of a packed AURA
+/// `mt_aura_dequant_rotated` — bulk unpack + de-rotate of a packed AURA
 /// K/V slab. Grid3D mode (one thread per packed word).
 #[test]
-fn aura_dequant_rotated_int4_f32_msl() {
-    let msl = aura_msl(aura_dequant_rotated_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+fn mt_aura_dequant_rotated_int4_f32_msl() {
+    let msl = aura_msl(mt_aura_dequant_rotated_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 

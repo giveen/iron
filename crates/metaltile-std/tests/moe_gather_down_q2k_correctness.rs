@@ -17,9 +17,9 @@ use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use metaltile::{Context, core::ir::KernelMode};
 use metaltile_std::kernels::moe::moe_gather_down_q2k::mt_moe_gather_down_q2k;
 // The Q2_K output-index → (qs byte, 2-bit shift) map is the single shared
-// definition in `quant::gguf`: the kernel, the quantizer, and this oracle all
+// definition in `kernels::quant::gguf`: the kernel, the quantizer, and this oracle all
 // read it, so the layout can't drift apart (getting it wrong was PR #264).
-use metaltile_std::quant::gguf::q2_k_qpos;
+use metaltile_std::kernels::quant::gguf::q2_k_qpos;
 
 const N_SLOTS: usize = 6;
 

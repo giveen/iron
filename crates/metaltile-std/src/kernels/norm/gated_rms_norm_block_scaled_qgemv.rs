@@ -204,7 +204,7 @@ pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
     use super::*;
-    use crate::{quant::format::QFormat, utils::pack_f32};
+    use crate::{kernels::quant::format::QFormat, utils::pack_f32};
 
     const TPG: u32 = 64;
     const EPS: f32 = 1e-5;
@@ -258,8 +258,8 @@ pub mod kernel_tests {
                 if (i % 3) == 0 { -mag } else { mag }
             })
             .collect();
-        let p = crate::quant::format::pack(fmt, &w, out_dim, in_dim);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_dim, in_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &w, out_dim, in_dim);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_dim, in_dim);
         // y fp32; z / norm_weight rounded through dt (kernel loads them as T).
         let y = source(in_dim, 0xA1, 2.0, 0.1);
         let z = round(&source(in_dim, 0xD4, 1.5, 0.0), dt);
@@ -274,8 +274,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -590,7 +590,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn gated_bench(
         kernel: Kernel,
@@ -608,11 +608,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let sz = dt.size_bytes();

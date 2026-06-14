@@ -39,7 +39,7 @@ fn frand(state: &mut u32) -> f32 {
 
 /// CPU reference: dequant the IQ2_XXS split buffers and dot each
 /// expert/row against `x`. Mirrors
-/// `ffai_gguf_dequant_iq2_xxs` exactly.
+/// `mt_gguf_dequant_iq2_xxs` exactly.
 fn reference(
     x: &[f32],
     qs_all: &[u32],

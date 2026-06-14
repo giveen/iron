@@ -6,7 +6,7 @@
 //! For each output element `(token, d)`: gather row `indices[token]` of a
 //! `[vocab, hidden]` block-scaled table, decode the element at column `d`
 //! (E2M1 nibble / E4M3 / E5M2 byte) × its block scale, store to
-//! `out[token, d]`. The block-scaled counterpart of `ffai/dequant_gather.rs`
+//! `out[token, d]`. The block-scaled counterpart of `ffai/mt_dequant_gather.rs`
 //! (which handles int2–int8 affine). Pure dequant — no reduction.
 //!
 //! ## DISPATCH INVARIANTS
@@ -470,7 +470,7 @@ pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
     use super::*;
-    use crate::{quant::format::QFormat, utils::pack_f32};
+    use crate::{kernels::quant::format::QFormat, utils::pack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
@@ -489,8 +489,8 @@ pub mod kernel_tests {
     fn gather_setup(kernel: Kernel, fmt: QFormat, hidden: usize, dt: DType) -> TestSetup {
         let vocab = 8usize;
         let w = table(vocab, hidden);
-        let p = crate::quant::format::pack(fmt, &w, vocab, hidden);
-        let wdq = crate::quant::format::dequant(fmt, &p, vocab, hidden);
+        let p = crate::kernels::quant::format::pack(fmt, &w, vocab, hidden);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, vocab, hidden);
         // Non-monotonic gather that repeats row 4 — surfaces token→row bugs.
         let indices: Vec<u32> = vec![3, 0, 7, 1, 4, 4];
         let n_tokens = indices.len();
@@ -505,8 +505,8 @@ pub mod kernel_tests {
         // scales as half; E8M0 / E4M3 scales as one byte.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -671,7 +671,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn gb(kernel: Kernel, fmt: QFormat, hidden: usize, dt: DType) -> BenchSetup {
         let vocab = 4096usize;
@@ -684,11 +684,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = BenchSetup::new(kernel)

@@ -188,7 +188,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{block_scaled_weights, pack_f32, unpack_f32},
     };
 
@@ -220,8 +220,8 @@ pub mod kernel_tests {
         dt: DType,
     ) -> TestSetup {
         let w = block_scaled_weights(out_dim, in_dim);
-        let p = crate::quant::format::pack(fmt, &w, out_dim, in_dim);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_dim, in_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &w, out_dim, in_dim);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_dim, in_dim);
         // Round x / norm_weight through `dt` so the oracle sees what the GPU sees.
         let x_f: Vec<f32> = (0..in_dim).map(|i| ((i % 11) as f32 - 5.0) * 0.05 + 0.1).collect();
         let nw_f: Vec<f32> = (0..in_dim).map(|i| 0.5 + (i % 7) as f32 * 0.1).collect();
@@ -235,8 +235,8 @@ pub mod kernel_tests {
         // pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -439,7 +439,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     fn rms_qgemv_bench(
         kernel: Kernel,
@@ -455,11 +455,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let sz = dt.size_bytes();

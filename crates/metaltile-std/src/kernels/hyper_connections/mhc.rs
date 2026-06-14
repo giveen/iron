@@ -16,7 +16,7 @@
 //! ```
 //!
 //! `pre`, `post`, and `comb` are DYNAMIC per-token tensors produced
-//! by [`crate::ffai::dsv4_mhc_sinkhorn_split`] from the `hc_*_fn @
+//! by [`crate::kernels::hyper_connections::mhc_sinkhorn_split`] from the `hc_*_fn @
 //! flatten(H)` 24-mix output. They are NOT stored model weights.
 //!
 //! ## Dispatch

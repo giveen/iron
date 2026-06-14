@@ -9,7 +9,7 @@
 //! the right move is to dequant the weight ONCE to f16 and feed the
 //! tensor-core `mt_gemm`. This kernel is that one-time expansion.
 //!
-//! ## Q4 block layout (matches `ffai_ops::quantize_q4`)
+//! ## Q4 block layout (matches `mt_ops::quantize_q4`)
 //!
 //! Per row `r`, the `k` columns are grouped into `bpr = k/32` blocks of
 //! 32 values. Each block is 4 packed u32 words (`word` 0..3), each word
@@ -52,7 +52,7 @@ use metaltile::kernel;
 // Scales are f16 (the resident projection/expert weights store amax/7 as f16
 // via the loader's `tb_f16`). The kernel widens to f32 for the multiply.
 #[kernel]
-pub fn ffai_dequant_q4<T>(
+pub fn mt_dequant_q4<T>(
     qs: Tensor<u32>,
     scales: Tensor<f16>,
     out: Tensor<T>,
@@ -94,10 +94,10 @@ pub fn ffai_dequant_q4<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dequant_q4;
+    use super::mt_dequant_q4;
     use crate::utils::pack_f32;
 
-    /// Reference Q4 quantizer — mirrors `ffai_ops::quantize_q4` exactly:
+    /// Reference Q4 quantizer — mirrors `mt_ops::quantize_q4` exactly:
     /// signed 4-bit, per-32-block scale = amax/7, 4 u32 words/block.
     fn quantize_q4(w: &[f32], m: usize, k: usize) -> (Vec<u32>, Vec<f32>) {
         let bpr = k / 32;
@@ -152,7 +152,7 @@ pub mod kernel_tests {
             scales.iter().map(|&s| half::f16::from_f32(s).to_f32()).collect();
         let dequantized = cpu_dequant(&qs, &scales_f16, m, k);
         let qs_bytes: Vec<u8> = qs.iter().flat_map(|x| x.to_le_bytes()).collect();
-        TestSetup::new(ffai_dequant_q4::kernel_ir_for(dt))
+        TestSetup::new(mt_dequant_q4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("qs", qs_bytes, DType::U32))
             .input(TestBuffer::from_vec("scales", pack_f32(&scales, DType::F16), DType::F16))

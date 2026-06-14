@@ -29,7 +29,7 @@
 //! taps clamped to contribute zero. `C` is a multiple of `block_size` (4-bit
 //! `block_size` a multiple of 8). fp8_e4m3 reuses the nvfp8 kernel. Codegen-only;
 //! correctness pinned by the in-source `#[test_kernel]`s vs a
-//! `quant::format::dequant` oracle running the dense conv2d math.
+//! `kernels::quant::format::dequant` oracle running the dense conv2d math.
 
 use metaltile::kernel;
 /// Quantized-weight conv2d, folded over the 28-format axis (§7). Geometry is the
@@ -176,7 +176,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -277,8 +277,8 @@ pub mod kernel_tests {
         let bias_f = ramp(out_ch, 5, 2.0);
         // Quantize the [out_ch, C] filter via the shared codec.
         let w_f = ramp(out_ch * contraction, 11, 4.0);
-        let p = crate::quant::format::pack(fmt, &w_f, out_ch, contraction);
-        let wdq = crate::quant::format::dequant(fmt, &p, out_ch, contraction);
+        let p = crate::kernels::quant::format::pack(fmt, &w_f, out_ch, contraction);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, out_ch, contraction);
         let input = unpack_f32(&pack_f32(&input_f, dt), dt);
         let bias = unpack_f32(&pack_f32(&bias_f, dt), dt);
         // Oracle: dense conv2d over the dequantized filter row [out_ch, C].
@@ -292,8 +292,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -382,7 +382,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn conv2d_bench(
@@ -409,11 +409,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n_codes, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n_codes, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n_codes, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = out_ch * (contraction / fmt.block_size());

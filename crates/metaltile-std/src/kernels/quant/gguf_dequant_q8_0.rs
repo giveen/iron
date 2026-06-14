@@ -54,7 +54,7 @@ use metaltile::kernel;
 // fn below registers this kernel for `tile bench` without the legacy
 // path.
 #[kernel]
-pub fn ffai_gguf_dequant_q8_0<T>(
+pub fn mt_gguf_dequant_q8_0<T>(
     qs_signed: Tensor<u8>,
     scales: Tensor<f32>,
     out: Tensor<T>,
@@ -83,17 +83,17 @@ pub fn ffai_gguf_dequant_q8_0<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_gguf_dequant_q8_0;
-    use crate::{quant::gguf, utils::pack_f32};
+    use super::mt_gguf_dequant_q8_0;
+    use crate::{kernels::quant::gguf, utils::pack_f32};
 
     fn setup(n_blocks: usize, dt: DType) -> TestSetup {
         let n = n_blocks * 32;
         let values: Vec<f32> = (0..n).map(|i| (i as f32 * 0.013 - 0.4).sin() * 3.5).collect();
         // Pack + dequant via the shared GgufFormat oracle — the single source of
-        // truth every q8_0 path decodes through (see quant::gguf).
+        // truth every q8_0 path decodes through (see kernels::quant::gguf).
         let p = gguf::pack_q8_0(&values);
         let dequantized = gguf::dequant_q8_0(&p);
-        TestSetup::new(ffai_gguf_dequant_q8_0::kernel_ir_for(dt))
+        TestSetup::new(mt_gguf_dequant_q8_0::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("qs_signed", p.qs, DType::U8))
             .input(TestBuffer::from_vec("scales", pack_f32(&p.scales, DType::F32), DType::F32))
             .input(TestBuffer::zeros("out", n, dt))
@@ -112,14 +112,14 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_gguf_dequant_q8_0;
+    use super::mt_gguf_dequant_q8_0;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_q8_0(dt: DType) -> BenchSetup {
         // 4096 × 4096 attn projection slab.
         let n = 4096 * 4096usize;
         let n_blocks = n / 32;
-        BenchSetup::new(ffai_gguf_dequant_q8_0::kernel_ir_for(dt))
+        BenchSetup::new(mt_gguf_dequant_q8_0::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("qs_signed", n, DType::U8))
             .buffer(BenchBuffer::random("scales", n_blocks, DType::F32))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

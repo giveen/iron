@@ -13,7 +13,7 @@
 //! `patch·hidden + h`). The per-`col` weight decode reuses the DSL decode
 //! intrinsics; `patch_dim` is a multiple of `block_size` (4-bit `block_size` a
 //! multiple of 8). fp8_e4m3 reuses the nvfp8 kernel. Codegen-only; correctness
-//! pinned by the in-source `#[test_kernel]`s vs a `quant::format::dequant` oracle.
+//! pinned by the in-source `#[test_kernel]`s vs a `kernels::quant::format::dequant` oracle.
 
 use metaltile::kernel;
 
@@ -146,7 +146,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -173,8 +173,8 @@ pub mod kernel_tests {
         let bias_f = ramp(hidden, 5, 2.0);
         // Quantize the [hidden, patch_dim] projection weight via the shared codec.
         let w_f = ramp(hidden * patch_dim, 11, 4.0);
-        let p = crate::quant::format::pack(fmt, &w_f, hidden, patch_dim);
-        let wdq = crate::quant::format::dequant(fmt, &p, hidden, patch_dim);
+        let p = crate::kernels::quant::format::pack(fmt, &w_f, hidden, patch_dim);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, hidden, patch_dim);
         let image = unpack_f32(&pack_f32(&image_f, dt), dt);
         let bias = unpack_f32(&pack_f32(&bias_f, dt), dt);
         // Oracle: explicit unfold + projection over the dequantized weight.
@@ -205,8 +205,8 @@ pub mod kernel_tests {
         // buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let mut s = TestSetup::new(kernel)
@@ -601,7 +601,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     #[allow(clippy::too_many_arguments)]
     fn patch_bench(
@@ -624,11 +624,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (n_codes, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(n_codes, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(n_codes, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = hidden * (patch_dim / fmt.block_size());

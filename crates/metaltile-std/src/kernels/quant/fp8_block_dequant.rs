@@ -41,7 +41,7 @@
 //! Bench-stage matters: for matrix-vector decode (FFAI hot path),
 //! the dequant-then-matmul fallback (which this kernel is the
 //! dequant half of) ships fp16 weights to a downstream gemv. The
-//! fused `ffai_dsv4_fp8_block_gemv` lands as a follow-up — Apple
+//! fused `mt_fp8_block_gemv` lands as a follow-up — Apple
 //! has no native FP8 multiply, but a dequant-on-the-fly variant
 //! that interleaves the LUT lookup with the gemv accumulator can
 //! avoid materialising the full fp16 matrix.
@@ -50,7 +50,7 @@ use metaltile::kernel;
 
 // Bare `#[kernel]` — mixed-dtype param set (concrete u8/f32 + generic T).
 #[kernel]
-pub fn ffai_dsv4_fp8_block_dequant<T>(
+pub fn mt_fp8_block_dequant<T>(
     weight_bytes: Tensor<u8>,
     scales: Tensor<f32>,
     fp8_lut: Tensor<f32>,
@@ -84,12 +84,12 @@ pub fn ffai_dsv4_fp8_block_dequant<T>(
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
-    use super::ffai_dsv4_fp8_block_dequant;
-    use crate::{quant::codec, utils::pack_f32};
+    use super::mt_fp8_block_dequant;
+    use crate::{kernels::quant::codec, utils::pack_f32};
 
     /// FP8 e4m3 byte → fp32 LUT. The finite-value decode is the shared
     /// `codec::e4m3_decode` — the single source of truth every E4M3 path
-    /// (`quant::format`'s E4M3 element, the GGUF/MLX micro-float scales) routes
+    /// (`kernels::quant::format`'s E4M3 element, the GGUF/MLX micro-float scales) routes
     /// through — so this DSv4 model LUT can't drift from the kernel's decode.
     /// DSv4's FP8 storage additionally reserves the all-ones magnitude code
     /// (`0x7F` / `0xFF`) as a NaN sentinel; production weights never emit it
@@ -176,7 +176,7 @@ pub mod kernel_tests {
         let (bytes, scales) = quantize_block_fp8(&values, m, n);
         let lut = build_fp8_lut();
         let dequantized = cpu_dequant(&bytes, &scales, m, n);
-        TestSetup::new(ffai_dsv4_fp8_block_dequant::kernel_ir_for(dt))
+        TestSetup::new(mt_fp8_block_dequant::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("weight_bytes", bytes, DType::U8))
             .input(TestBuffer::from_vec("scales", pack_f32(&scales, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("fp8_lut", pack_f32(&lut, DType::F32), DType::F32))
@@ -200,7 +200,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use metaltile::{bench, test::*};
 
-    use super::ffai_dsv4_fp8_block_dequant;
+    use super::mt_fp8_block_dequant;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8(dt: DType) -> BenchSetup {
@@ -210,7 +210,7 @@ pub mod kernel_benches {
         let (m, n) = (4096usize, 4096usize);
         let block_rows = m / 128;
         let block_cols = n / 128;
-        BenchSetup::new(ffai_dsv4_fp8_block_dequant::kernel_ir_for(dt))
+        BenchSetup::new(mt_fp8_block_dequant::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("weight_bytes", m * n, DType::U8))
             .buffer(BenchBuffer::random("scales", block_rows * block_cols, DType::F32))
             .buffer(BenchBuffer::random("fp8_lut", 256, DType::F32))

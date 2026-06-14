@@ -295,7 +295,7 @@ pub mod kernel_tests {
 
     use super::*;
     use crate::{
-        quant::format::QFormat,
+        kernels::quant::format::QFormat,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -351,9 +351,9 @@ pub mod kernel_tests {
                 if i % 3 == 0 { -mag } else { mag }
             })
             .collect();
-        let p = crate::quant::format::pack(fmt, &stacked, stack_rows, k_in);
+        let p = crate::kernels::quant::format::pack(fmt, &stacked, stack_rows, k_in);
         let global = p.global;
-        let wdq = crate::quant::format::dequant(fmt, &p, stack_rows, k_in);
+        let wdq = crate::kernels::quant::format::dequant(fmt, &p, stack_rows, k_in);
 
         // Activations: dtype-rounded so the GPU sees exactly the oracle's x.
         let x_f: Vec<f32> = (0..m_total * k_in).map(|i| ((i % 11) as f32 - 5.0) * 0.02).collect();
@@ -378,8 +378,8 @@ pub mod kernel_tests {
         // off the format so new integer formats pick up the right buffer types.
         let weight_dt = if fmt.element_bits() == 8 { DType::U8 } else { DType::U32 };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
 
@@ -704,7 +704,7 @@ pub mod kernel_benches {
     use metaltile::{bench, core::ir::Kernel, test::*};
 
     use super::*;
-    use crate::quant::format::QFormat;
+    use crate::kernels::quant::format::QFormat;
 
     struct BlockBenchShape {
         n_experts: usize,
@@ -728,11 +728,11 @@ pub mod kernel_benches {
         let (codes_len, codes_dt) = if fmt.element_bits() == 8 {
             (stack_n, DType::U8)
         } else {
-            (crate::quant::format::bitstream_words(stack_n, fmt.element_bits()), DType::U32)
+            (crate::kernels::quant::format::bitstream_words(stack_n, fmt.element_bits()), DType::U32)
         };
         let scales_dt = match fmt.scale_kind() {
-            crate::quant::format::ScaleKind::F32 => DType::F32,
-            crate::quant::format::ScaleKind::F16 => DType::F16,
+            crate::kernels::quant::format::ScaleKind::F32 => DType::F32,
+            crate::kernels::quant::format::ScaleKind::F16 => DType::F16,
             _ => DType::U8,
         };
         let n_blocks = n_experts * n_out * groups_per_row;
