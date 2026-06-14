@@ -32,16 +32,54 @@
 
 use metaltile::kernel;
 
-/// mxfp4 batched Q/K/V GEMM (M>1) — E2M1 weights (block 32), E8M0 pow-2 scale.
-#[kernel]
-pub fn mt_mxfp4_batched_qkv_qmm<T>(
+/// Batched QKV 3-output block-scaled dequantizing GEMV, folded over
+/// the 28-format axis (§7). `matrix = program_id::<2>()` selects one of the
+/// 3 (q/k/v) weight matrices; each runs the shared per-element decode tree
+/// over its own `w_*`/`scales_*` row into a single output. `(BITS, WDEC, SKIND)`
+/// + `(WT, ST)` as in `block_scaled_matmul`. Decodes through
+/// `kernels/primitives.rs`. Produces `mt_<FMT>_batched_qkv_%s`." % op
+#[kernel(variants(
+    (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
+        (mxfp4,        4u32, u32, u8,  0u32, 0u32),
+        (nvfp4,        4u32, u32, u8,  0u32, 1u32),
+        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
+        (int2,         2u32, u32, f32, 1u32, 2u32),
+        (int3,         3u32, u32, f32, 1u32, 2u32),
+        (int4,         4u32, u32, f32, 1u32, 2u32),
+        (int5,         5u32, u32, f32, 1u32, 2u32),
+        (int6,         6u32, u32, f32, 1u32, 2u32),
+        (mxint2,       2u32, u32, u8,  1u32, 0u32),
+        (mxint3,       3u32, u32, u8,  1u32, 0u32),
+        (mxint4,       4u32, u32, u8,  1u32, 0u32),
+        (mxint5,       5u32, u32, u8,  1u32, 0u32),
+        (mxint6,       6u32, u32, u8,  1u32, 0u32),
+        (int2_f16,     2u32, u32, f16, 1u32, 2u32),
+        (int3_f16,     3u32, u32, f16, 1u32, 2u32),
+        (int4_f16,     4u32, u32, f16, 1u32, 2u32),
+        (int5_f16,     5u32, u32, f16, 1u32, 2u32),
+        (int6_f16,     6u32, u32, f16, 1u32, 2u32),
+        (mxfp8_e4m3,   8u32, u8,  u8,  2u32, 0u32),
+        (mxfp8_e5m2,   8u32, u8,  u8,  3u32, 0u32),
+        (mxint8,       8u32, u8,  u8,  4u32, 0u32),
+        (nvfp8,        8u32, u8,  f32, 2u32, 2u32),
+        (fp8_e5m2,     8u32, u8,  f32, 3u32, 2u32),
+        (int8,         8u32, u8,  f32, 4u32, 2u32),
+        (nvfp8_f16,    8u32, u8,  f16, 2u32, 2u32),
+        (fp8_e5m2_f16, 8u32, u8,  f16, 3u32, 2u32),
+        (int8_f16,     8u32, u8,  f16, 4u32, 2u32),
+    ],
+    suffix = "{FMT}_batched_qkv_qmm",
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn mt<T>(
     x: Tensor<T>,
-    w_q: Tensor<u32>,
-    scales_q: Tensor<u8>,
-    w_k: Tensor<u32>,
-    scales_k: Tensor<u8>,
-    w_v: Tensor<u32>,
-    scales_v: Tensor<u8>,
+    w_q: Tensor<WT>,
+    scales_q: Tensor<ST>,
+    w_k: Tensor<WT>,
+    scales_k: Tensor<ST>,
+    w_v: Tensor<WT>,
+    scales_v: Tensor<ST>,
     mut q_buf: Tensor<T>,
     mut k_buf: Tensor<T>,
     mut v_buf: Tensor<T>,
@@ -50,1614 +88,210 @@ pub fn mt_mxfp4_batched_qkv_qmm<T>(
     #[constexpr] out_v: u32,
     #[constexpr] in_dim: u32,
     #[constexpr] block_size: u32,
+    #[constexpr(only_when = "SKIND == 1u32")] global: f32,
 ) {
     let matrix = program_id::<2>();
     let mr = program_id::<1>();
     let row = program_id::<0>();
+    let x_row_off = mr * in_dim;
     let n_packs = in_dim / 8u32;
     let n_blocks = in_dim / block_size;
     let packs_per_block = block_size / 8u32;
     let p_iters = (n_packs + lsize - 1u32) / lsize;
+    let e_iters = (in_dim + lsize - 1u32) / lsize;
     let row_pack_off = row * n_packs;
     let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = exp2(load(scales_q[row_block_off + blk]).cast::<f32>() - 127.0f32);
-                    let packed = load(w_q[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = exp2(load(scales_k[row_block_off + blk]).cast::<f32>() - 127.0f32);
-                    let packed = load(w_k[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = exp2(load(scales_v[row_block_off + blk]).cast::<f32>() - 127.0f32);
-                    let packed = load(w_v[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// nvfp4 batched Q/K/V GEMM (M>1) — E2M1 (block 16), E4M3 micro-scale × global.
-#[kernel]
-pub fn mt_nvfp4_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u32>,
-    scales_q: Tensor<u8>,
-    w_k: Tensor<u32>,
-    scales_k: Tensor<u8>,
-    w_v: Tensor<u32>,
-    scales_v: Tensor<u8>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-    #[constexpr] global: f32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_packs = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let p_iters = (n_packs + lsize - 1u32) / lsize;
-    let row_pack_off = row * n_packs;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale =
-                        mt_decode_e4m3(load(scales_q[row_block_off + blk]).cast::<u32>()) * global;
-                    let packed = load(w_q[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale =
-                        mt_decode_e4m3(load(scales_k[row_block_off + blk]).cast::<u32>()) * global;
-                    let packed = load(w_k[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale =
-                        mt_decode_e4m3(load(scales_v[row_block_off + blk]).cast::<u32>()) * global;
-                    let packed = load(w_v[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// mxfp8 (E4M3) batched Q/K/V GEMM (M>1) — 8-bit weights (block 32), E8M0 scale.
-#[kernel]
-pub fn mt_mxfp8_e4m3_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<u8>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<u8>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<u8>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
+    let words_per_row = in_dim * BITS / 32u32;
+    let row_word_off = row * words_per_row;
     let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
+    let half = 1u32 << (BITS - 1u32);
+    let full = (1u32 << BITS).cast::<f32>();
     let mut acc = 0.0f32;
     if matrix == 0u32 {
         if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_q[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_k[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_v[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// mxfp8 (E5M2) batched Q/K/V GEMM (M>1) — 8-bit weights (block 32), E8M0 scale.
-#[kernel]
-pub fn mt_mxfp8_e5m2_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<u8>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<u8>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<u8>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_q[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_k[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_v[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// nvfp8 batched Q/K/V GEMM (M>1) — E4M3 weights (block 16), per-block FP32 scale.
-#[kernel]
-pub fn mt_nvfp8_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f32>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f32>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f32>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-// ── Legacy float-scale (fp4 / fp8) + symmetric int8 batched Q/K/V GEMMs ─────
-// These reuse the block-scaled framework but store a raw per-group FP32 scale
-// (no E8M0/E4M3/global). fp8_e4m3 has the same shape as nvfp8 (8-bit E4M3 +
-// f32 scale), so it reuses `mt_nvfp8_batched_qkv_qmm` — only fp4 (4-bit E2M1),
-// fp8_e5m2 (8-bit E5M2), and int8 (8-bit symmetric) need their own decode here.
-
-/// Legacy fp4 batched Q/K/V GEMM (M>1) — E2M1 weights (group 32), FP32 scale.
-#[kernel]
-pub fn mt_fp4_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u32>,
-    scales_q: Tensor<f32>,
-    w_k: Tensor<u32>,
-    scales_k: Tensor<f32>,
-    w_v: Tensor<u32>,
-    scales_v: Tensor<f32>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_packs = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let p_iters = (n_packs + lsize - 1u32) / lsize;
-    let row_pack_off = row * n_packs;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_q[row_block_off + blk]);
-                    let packed = load(w_q[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+            if WDEC == 0u32 {
+                for _p in range(0u32, p_iters, 1u32) {
+                    let pack_idx = _p * lsize + tid;
+                    if pack_idx < n_packs {
+                        let blk = pack_idx / packs_per_block;
+                        let sraw = load(scales_q[row_block_off + blk]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else if SKIND == 1u32 {
+                            mt_decode_e4m3(sraw.cast::<u32>()) * global
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let packed = load(w_q[row_pack_off + pack_idx]);
+                        let p_off = pack_idx * 8u32;
+                        for i in range(0u32, 8u32, 1u32) {
+                            let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                        }
                     }
                 }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_k[row_block_off + blk]);
-                    let packed = load(w_k[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_v[row_block_off + blk]);
-                    let packed = load(w_v[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// Legacy fp8 (E5M2) batched Q/K/V GEMM (M>1) — 8-bit weights (group 32), FP32 scale.
-#[kernel]
-pub fn mt_fp8_e5m2_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f32>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f32>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f32>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// Symmetric int8 batched Q/K/V GEMM (M>1) — 8-bit codes (group 64), per-group
-/// FP32 scale (affine, scale-only). Decode is sign-extend → `code · scale`.
-#[kernel]
-pub fn mt_int8_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f32>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f32>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f32>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]);
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-// ── FP16-scale twins (nvfp8 / fp4 / fp8_e5m2 + int8) ───────────────────────
-// Near-clones of the FP32-scaled kernels above: identical element decode,
-// weight indexing, and (matrix, token, row) reduction geometry — only the
-// scale tensor changes from `Tensor<f32>` to `Tensor<f16>`, read as
-// `load(scales[...]).cast::<f32>()` (native half load → f32, matching
-// `mlx/block_scaled_dequant.rs`'s `mt_*_f16_dequant`). `fp8_e4m3_f16` reuses
-// `mt_nvfp8_f16_batched_qkv_qmm` (same 8-bit-E4M3 + f16-scale shape), exactly
-// as `fp8_e4m3` reuses `mt_nvfp8_batched_qkv_qmm`.
-
-/// nvfp8 (FP16-scale) batched Q/K/V GEMM (M>1) — E4M3 weights (block 16),
-/// per-block FP16 scale. Twin of `mt_nvfp8_batched_qkv_qmm`; also serves
-/// `Fp8E4m3F16` (E4M3 element, group 32, FP16 scale).
-#[kernel]
-pub fn mt_nvfp8_f16_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f16>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f16>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f16>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e4m3(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// fp4 (FP16-scale) batched Q/K/V GEMM (M>1) — E2M1 weights (group 32), FP16
-/// scale. Twin of `mt_fp4_batched_qkv_qmm`; scale tensor is half.
-#[kernel]
-pub fn mt_fp4_f16_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u32>,
-    scales_q: Tensor<f16>,
-    w_k: Tensor<u32>,
-    scales_k: Tensor<f16>,
-    w_v: Tensor<u32>,
-    scales_v: Tensor<f16>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_packs = in_dim / 8u32;
-    let n_blocks = in_dim / block_size;
-    let packs_per_block = block_size / 8u32;
-    let p_iters = (n_packs + lsize - 1u32) / lsize;
-    let row_pack_off = row * n_packs;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_q[row_block_off + blk]).cast::<f32>();
-                    let packed = load(w_q[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_k[row_block_off + blk]).cast::<f32>();
-                    let packed = load(w_k[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for _p in range(0u32, p_iters, 1u32) {
-                let pack_idx = _p * lsize + tid;
-                if pack_idx < n_packs {
-                    let blk = pack_idx / packs_per_block;
-                    let scale = load(scales_v[row_block_off + blk]).cast::<f32>();
-                    let packed = load(w_v[row_pack_off + pack_idx]);
-                    let p_off = pack_idx * 8u32;
-                    for i in range(0u32, 8u32, 1u32) {
-                        let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
-                        acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
-                    }
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// fp8 (E5M2, FP16-scale) batched Q/K/V GEMM (M>1) — 8-bit weights (group 32),
-/// FP16 scale. Twin of `mt_fp8_e5m2_batched_qkv_qmm`; scale tensor is half.
-#[kernel]
-pub fn mt_fp8_e5m2_f16_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f16>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f16>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f16>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_e5m2(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-/// Symmetric int8 (FP16-scale) batched Q/K/V GEMM (M>1) — 8-bit codes (group
-/// 64), per-group FP16 scale. Twin of `mt_int8_batched_qkv_qmm`; decode is
-/// sign-extend → `code · scale` with the scale read as half → f32.
-#[kernel]
-pub fn mt_int8_f16_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<f16>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<f16>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<f16>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = load(scales_q[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 1u32 {
-        if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = load(scales_k[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    if matrix == 2u32 {
-        if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = load(scales_v[row_block_off + c / block_size]).cast::<f32>();
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
-                }
-            }
-        }
-    }
-    let total = reduce_sum(acc);
-    if tid == 0u32 {
-        if matrix == 0u32 {
-            if row < out_q {
-                store(q_buf[mr * out_q + row], total.cast::<T>());
-            }
-        }
-        if matrix == 1u32 {
-            if row < out_k {
-                store(k_buf[mr * out_k + row], total.cast::<T>());
-            }
-        }
-        if matrix == 2u32 {
-            if row < out_v {
-                store(v_buf[mr * out_v + row], total.cast::<T>());
-            }
-        }
-    }
-}
-
-// ── Symmetric sub-byte integer batched Q/K/V GEMMs (int2/3/4/5/6 + MXINT2..6) ─
-// Each element is a signed N-bit two's-complement code, tight-bit-packed
-// LSB-first into u32 words. The three weight matrices are laid out exactly like
-// the 8-bit `mt_int8_batched_qkv_qmm` formats — one buffer + one scale buffer
-// per projection, selected by `program_id::<2>()` — only the per-element decode
-// switches from a byte read to the straddle-aware bit-stream read of
-// `mlx/block_scaled_matmul.rs`. Each weight row is a tight bit-stream of
-// `in_dim · bits / 32` u32 words (per-row word-aligned because `in_dim` is a
-// multiple of 32 for every width), so element `c` of row `row` sits at bit
-// `c·bits` within `row_word_off = row * words_per_row`. Decode = extract the low
-// N bits with a two-word read, sign-extend in float (subtract 2^N when the top
-// bit is set; `$half`/`$full` are 2^(N-1) / 2^N), then multiply by the block
-// scale and the matching `x` element. `$half`/`$full` are passed as literals to
-// keep the constexpr math out of the DSL shift operands. The (matrix, token,
-// row) dispatch geometry is unchanged from the rest of the family (Reduction,
-// `grid = [max(out_q,out_k,out_v), M, 3]`, `tpg = [TPG, 1, 1]`).
-
-/// FP32-scaled symmetric int batched Q/K/V GEMM (int2/3/4/5/6): per-element
-/// bit-stream code × per-group FP32 scale, dotted with `x`. `row_word_off`
-/// indexes each weight row's tight bit-stream (`in_dim · bits / 32` u32 words
-/// per row); the three projections share the layout, differing only in buffer.
-macro_rules! int_batched_qkv_qmm_f32 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            w_q: Tensor<u32>,
-            scales_q: Tensor<f32>,
-            w_k: Tensor<u32>,
-            scales_k: Tensor<f32>,
-            w_v: Tensor<u32>,
-            scales_v: Tensor<f32>,
-            mut q_buf: Tensor<T>,
-            mut k_buf: Tensor<T>,
-            mut v_buf: Tensor<T>,
-            #[constexpr] out_q: u32,
-            #[constexpr] out_k: u32,
-            #[constexpr] out_v: u32,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let matrix = program_id::<2>();
-            let mr = program_id::<1>();
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-            let x_row_off = mr * in_dim;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            let mut acc = 0.0f32;
-            if matrix == 0u32 {
-                if row < out_q {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
+            } else {
+                for it in range(0u32, e_iters, 1u32) {
+                    let c = it * lsize + tid;
+                    if c < in_dim {
+                        let sraw = load(scales_q[row_block_off + c / block_size]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let val = if WDEC == 1u32 {
+                            let bit_off = c * BITS;
                             let word_idx = bit_off / 32u32;
                             let bit_in_w = bit_off & 31u32;
                             let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
+                            let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                            let spill = BITS - lo_bits;
                             let w0 = load(w_q[row_word_off + word_idx]);
                             let w1 = load(
                                 w_q[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                             );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
+                            let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                             let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale = load(scales_q[row_block_off + c / block_size]);
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
+                            select(q >= half, qf - full, qf)
+                        } else {
+                            let raw = load(w_q[row_off + c]).cast::<u32>();
+                            if WDEC == 2u32 {
+                                mt_decode_e4m3(raw)
+                            } else if WDEC == 3u32 {
+                                mt_decode_e5m2(raw)
+                            } else {
+                                mt_decode_int8(raw)
+                            }
+                        };
+                        acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
                     }
-                }
-            }
-            if matrix == 1u32 {
-                if row < out_k {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_k[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_k[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale = load(scales_k[row_block_off + c / block_size]);
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            if matrix == 2u32 {
-                if row < out_v {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_v[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_v[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale = load(scales_v[row_block_off + c / block_size]);
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                if matrix == 0u32 {
-                    if row < out_q {
-                        store(q_buf[mr * out_q + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 1u32 {
-                    if row < out_k {
-                        store(k_buf[mr * out_k + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 2u32 {
-                    if row < out_v {
-                        store(v_buf[mr * out_v + row], total.cast::<T>());
-                    }
-                }
-            }
-        }
-    };
-}
-int_batched_qkv_qmm_f32!(mt_int2_batched_qkv_qmm, 2u32, 2u32, 4.0f32);
-int_batched_qkv_qmm_f32!(mt_int3_batched_qkv_qmm, 3u32, 4u32, 8.0f32);
-int_batched_qkv_qmm_f32!(mt_int4_batched_qkv_qmm, 4u32, 8u32, 16.0f32);
-int_batched_qkv_qmm_f32!(mt_int5_batched_qkv_qmm, 5u32, 16u32, 32.0f32);
-int_batched_qkv_qmm_f32!(mt_int6_batched_qkv_qmm, 6u32, 32u32, 64.0f32);
-
-/// FP16-scaled symmetric int batched Q/K/V GEMM (int2/3/4/5/6): the FP16-scale
-/// twin of `int_batched_qkv_qmm_f32`. Identical straddle-aware bit-stream decode
-/// and (matrix, token, row) reduction; only the per-group scale axis switches
-/// from a raw f32 to a half read as `load(scales[...]).cast::<f32>()`.
-macro_rules! int_batched_qkv_qmm_f16 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            w_q: Tensor<u32>,
-            scales_q: Tensor<f16>,
-            w_k: Tensor<u32>,
-            scales_k: Tensor<f16>,
-            w_v: Tensor<u32>,
-            scales_v: Tensor<f16>,
-            mut q_buf: Tensor<T>,
-            mut k_buf: Tensor<T>,
-            mut v_buf: Tensor<T>,
-            #[constexpr] out_q: u32,
-            #[constexpr] out_k: u32,
-            #[constexpr] out_v: u32,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let matrix = program_id::<2>();
-            let mr = program_id::<1>();
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-            let x_row_off = mr * in_dim;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            let mut acc = 0.0f32;
-            if matrix == 0u32 {
-                if row < out_q {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_q[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_q[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale =
-                                load(scales_q[row_block_off + c / block_size]).cast::<f32>();
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            if matrix == 1u32 {
-                if row < out_k {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_k[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_k[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale =
-                                load(scales_k[row_block_off + c / block_size]).cast::<f32>();
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            if matrix == 2u32 {
-                if row < out_v {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_v[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_v[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let scale =
-                                load(scales_v[row_block_off + c / block_size]).cast::<f32>();
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                if matrix == 0u32 {
-                    if row < out_q {
-                        store(q_buf[mr * out_q + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 1u32 {
-                    if row < out_k {
-                        store(k_buf[mr * out_k + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 2u32 {
-                    if row < out_v {
-                        store(v_buf[mr * out_v + row], total.cast::<T>());
-                    }
-                }
-            }
-        }
-    };
-}
-int_batched_qkv_qmm_f16!(mt_int2_f16_batched_qkv_qmm, 2u32, 2u32, 4.0f32);
-int_batched_qkv_qmm_f16!(mt_int3_f16_batched_qkv_qmm, 3u32, 4u32, 8.0f32);
-int_batched_qkv_qmm_f16!(mt_int4_f16_batched_qkv_qmm, 4u32, 8u32, 16.0f32);
-int_batched_qkv_qmm_f16!(mt_int5_f16_batched_qkv_qmm, 5u32, 16u32, 32.0f32);
-int_batched_qkv_qmm_f16!(mt_int6_f16_batched_qkv_qmm, 6u32, 32u32, 64.0f32);
-
-/// E8M0-scaled symmetric int batched Q/K/V GEMM (MXINT2/3/4/5/6): per-element
-/// bit-stream code × pow-2 (E8M0) block scale `2^(bits-127)`, dotted with `x`.
-/// Same straddle-aware decode and (matrix, token, row) reduction as
-/// `int_batched_qkv_qmm_f32`; only the scale axis differs (one u8 exponent per
-/// block instead of a raw f32).
-macro_rules! int_batched_qkv_qmm_e8m0 {
-    ($name:ident, $bits:literal, $half:literal, $full:literal) => {
-        #[kernel]
-        pub fn $name<T>(
-            x: Tensor<T>,
-            w_q: Tensor<u32>,
-            scales_q: Tensor<u8>,
-            w_k: Tensor<u32>,
-            scales_k: Tensor<u8>,
-            w_v: Tensor<u32>,
-            scales_v: Tensor<u8>,
-            mut q_buf: Tensor<T>,
-            mut k_buf: Tensor<T>,
-            mut v_buf: Tensor<T>,
-            #[constexpr] out_q: u32,
-            #[constexpr] out_k: u32,
-            #[constexpr] out_v: u32,
-            #[constexpr] in_dim: u32,
-            #[constexpr] block_size: u32,
-        ) {
-            let matrix = program_id::<2>();
-            let mr = program_id::<1>();
-            let row = program_id::<0>();
-            let words_per_row = in_dim * $bits / 32u32;
-            let n_blocks = in_dim / block_size;
-            let row_word_off = row * words_per_row;
-            let row_block_off = row * n_blocks;
-            let x_row_off = mr * in_dim;
-            let iters = (in_dim + lsize - 1u32) / lsize;
-            let mut acc = 0.0f32;
-            if matrix == 0u32 {
-                if row < out_q {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_q[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_q[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let sbits =
-                                load(scales_q[row_block_off + c / block_size]).cast::<f32>();
-                            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            if matrix == 1u32 {
-                if row < out_k {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_k[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_k[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let sbits =
-                                load(scales_k[row_block_off + c / block_size]).cast::<f32>();
-                            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            if matrix == 2u32 {
-                if row < out_v {
-                    for it in range(0u32, iters, 1u32) {
-                        let c = it * lsize + tid;
-                        if c < in_dim {
-                            let bit_off = c * $bits;
-                            let word_idx = bit_off / 32u32;
-                            let bit_in_w = bit_off & 31u32;
-                            let bits_in_w0 = 32u32 - bit_in_w;
-                            let lo_bits = select(bits_in_w0 >= $bits, $bits, bits_in_w0);
-                            let spill = $bits - lo_bits;
-                            let w0 = load(w_v[row_word_off + word_idx]);
-                            let w1 = load(
-                                w_v[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
-                            );
-                            let lo = (w0 >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
-                            let hi = (w1 & ((1u32 << spill) - 1u32)) << lo_bits;
-                            let q = lo | hi;
-                            let qf = q.cast::<f32>();
-                            let val = select(q >= $half, qf - $full, qf); // sign-extend
-                            let sbits =
-                                load(scales_v[row_block_off + c / block_size]).cast::<f32>();
-                            let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127)
-                            acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
-                        }
-                    }
-                }
-            }
-            let total = reduce_sum(acc);
-            if tid == 0u32 {
-                if matrix == 0u32 {
-                    if row < out_q {
-                        store(q_buf[mr * out_q + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 1u32 {
-                    if row < out_k {
-                        store(k_buf[mr * out_k + row], total.cast::<T>());
-                    }
-                }
-                if matrix == 2u32 {
-                    if row < out_v {
-                        store(v_buf[mr * out_v + row], total.cast::<T>());
-                    }
-                }
-            }
-        }
-    };
-}
-int_batched_qkv_qmm_e8m0!(mt_mxint2_batched_qkv_qmm, 2u32, 2u32, 4.0f32);
-int_batched_qkv_qmm_e8m0!(mt_mxint3_batched_qkv_qmm, 3u32, 4u32, 8.0f32);
-int_batched_qkv_qmm_e8m0!(mt_mxint4_batched_qkv_qmm, 4u32, 8u32, 16.0f32);
-int_batched_qkv_qmm_e8m0!(mt_mxint5_batched_qkv_qmm, 5u32, 16u32, 32.0f32);
-int_batched_qkv_qmm_e8m0!(mt_mxint6_batched_qkv_qmm, 6u32, 32u32, 64.0f32);
-
-/// MXINT8 batched Q/K/V GEMM (M>1) — 8-bit symmetric codes (byte layout, block
-/// 32), E8M0 pow-2 block scale `2^(bits-127)`. Element-strided like the other
-/// 8-bit formats (one byte per code); decode is `mt_decode_int8 → val · scale`.
-#[kernel]
-pub fn mt_mxint8_batched_qkv_qmm<T>(
-    x: Tensor<T>,
-    w_q: Tensor<u8>,
-    scales_q: Tensor<u8>,
-    w_k: Tensor<u8>,
-    scales_k: Tensor<u8>,
-    w_v: Tensor<u8>,
-    scales_v: Tensor<u8>,
-    mut q_buf: Tensor<T>,
-    mut k_buf: Tensor<T>,
-    mut v_buf: Tensor<T>,
-    #[constexpr] out_q: u32,
-    #[constexpr] out_k: u32,
-    #[constexpr] out_v: u32,
-    #[constexpr] in_dim: u32,
-    #[constexpr] block_size: u32,
-) {
-    let matrix = program_id::<2>();
-    let mr = program_id::<1>();
-    let row = program_id::<0>();
-    let n_blocks = in_dim / block_size;
-    let iters = (in_dim + lsize - 1u32) / lsize;
-    let row_off = row * in_dim;
-    let row_block_off = row * n_blocks;
-    let x_row_off = mr * in_dim;
-    let mut acc = 0.0f32;
-    if matrix == 0u32 {
-        if row < out_q {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_q[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_q[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
                 }
             }
         }
     }
     if matrix == 1u32 {
         if row < out_k {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_k[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_k[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
+            if WDEC == 0u32 {
+                for _p in range(0u32, p_iters, 1u32) {
+                    let pack_idx = _p * lsize + tid;
+                    if pack_idx < n_packs {
+                        let blk = pack_idx / packs_per_block;
+                        let sraw = load(scales_k[row_block_off + blk]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else if SKIND == 1u32 {
+                            mt_decode_e4m3(sraw.cast::<u32>()) * global
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let packed = load(w_k[row_pack_off + pack_idx]);
+                        let p_off = pack_idx * 8u32;
+                        for i in range(0u32, 8u32, 1u32) {
+                            let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                        }
+                    }
+                }
+            } else {
+                for it in range(0u32, e_iters, 1u32) {
+                    let c = it * lsize + tid;
+                    if c < in_dim {
+                        let sraw = load(scales_k[row_block_off + c / block_size]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let val = if WDEC == 1u32 {
+                            let bit_off = c * BITS;
+                            let word_idx = bit_off / 32u32;
+                            let bit_in_w = bit_off & 31u32;
+                            let bits_in_w0 = 32u32 - bit_in_w;
+                            let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                            let spill = BITS - lo_bits;
+                            let w0 = load(w_k[row_word_off + word_idx]);
+                            let w1 = load(
+                                w_k[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
+                            );
+                            let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                            let qf = q.cast::<f32>();
+                            select(q >= half, qf - full, qf)
+                        } else {
+                            let raw = load(w_k[row_off + c]).cast::<u32>();
+                            if WDEC == 2u32 {
+                                mt_decode_e4m3(raw)
+                            } else if WDEC == 3u32 {
+                                mt_decode_e5m2(raw)
+                            } else {
+                                mt_decode_int8(raw)
+                            }
+                        };
+                        acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
+                    }
                 }
             }
         }
     }
     if matrix == 2u32 {
         if row < out_v {
-            for it in range(0u32, iters, 1u32) {
-                let c = it * lsize + tid;
-                if c < in_dim {
-                    let elem = mt_decode_int8(load(w_v[row_off + c]).cast::<u32>());
-                    let scale = exp2(
-                        load(scales_v[row_block_off + c / block_size]).cast::<f32>() - 127.0f32,
-                    );
-                    acc = acc + (elem * scale) * load(x[x_row_off + c]).cast::<f32>();
+            if WDEC == 0u32 {
+                for _p in range(0u32, p_iters, 1u32) {
+                    let pack_idx = _p * lsize + tid;
+                    if pack_idx < n_packs {
+                        let blk = pack_idx / packs_per_block;
+                        let sraw = load(scales_v[row_block_off + blk]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else if SKIND == 1u32 {
+                            mt_decode_e4m3(sraw.cast::<u32>()) * global
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let packed = load(w_v[row_pack_off + pack_idx]);
+                        let p_off = pack_idx * 8u32;
+                        for i in range(0u32, 8u32, 1u32) {
+                            let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                            acc = acc + (val * scale) * load(x[x_row_off + p_off + i]).cast::<f32>();
+                        }
+                    }
+                }
+            } else {
+                for it in range(0u32, e_iters, 1u32) {
+                    let c = it * lsize + tid;
+                    if c < in_dim {
+                        let sraw = load(scales_v[row_block_off + c / block_size]);
+                        let scale = if SKIND == 0u32 {
+                            exp2(sraw.cast::<f32>() - 127.0f32)
+                        } else {
+                            sraw.cast::<f32>()
+                        };
+                        let val = if WDEC == 1u32 {
+                            let bit_off = c * BITS;
+                            let word_idx = bit_off / 32u32;
+                            let bit_in_w = bit_off & 31u32;
+                            let bits_in_w0 = 32u32 - bit_in_w;
+                            let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                            let spill = BITS - lo_bits;
+                            let w0 = load(w_v[row_word_off + word_idx]);
+                            let w1 = load(
+                                w_v[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
+                            );
+                            let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                            let qf = q.cast::<f32>();
+                            select(q >= half, qf - full, qf)
+                        } else {
+                            let raw = load(w_v[row_off + c]).cast::<u32>();
+                            if WDEC == 2u32 {
+                                mt_decode_e4m3(raw)
+                            } else if WDEC == 3u32 {
+                                mt_decode_e5m2(raw)
+                            } else {
+                                mt_decode_int8(raw)
+                            }
+                        };
+                        acc = acc + (val * scale) * load(x[x_row_off + c]).cast::<f32>();
+                    }
                 }
             }
         }
