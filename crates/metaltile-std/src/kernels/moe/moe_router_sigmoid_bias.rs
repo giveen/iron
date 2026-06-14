@@ -44,11 +44,7 @@ use metaltile::kernel;
 // a no-`<T>` signature. The new declarative `#[bench]` on
 // `kernel_benches::bench_router` below handles registration directly.
 #[kernel]
-pub fn mt_moe_router_sigmoid_bias(
-    logits: Tensor<f32>,
-    bias: Tensor<f32>,
-    mut scores: Tensor<f32>,
-) {
+pub fn mt_moe_router_sigmoid_bias(logits: Tensor<f32>, bias: Tensor<f32>, mut scores: Tensor<f32>) {
     let idx = tid;
     let l = load(logits[idx]);
     let b = load(bias[idx]);

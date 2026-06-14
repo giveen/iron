@@ -117,7 +117,6 @@ pub fn mt_moe_permute<T>(
     }
 }
 
-
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 

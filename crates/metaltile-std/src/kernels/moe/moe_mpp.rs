@@ -260,7 +260,11 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::{mt_moe_gather_qmm_mma_int4_bm16_mpp, mt_moe_gather_qmm_mma_int8_bm16_mpp};
-    use crate::kernels::moe::moe_mpp_shared::{MmaTestShape, int4_indexed_setup, int8_indexed_setup};
+    use crate::kernels::moe::moe_mpp_shared::{
+        MmaTestShape,
+        int4_indexed_setup,
+        int8_indexed_setup,
+    };
 
     // Clean tile: BM=16 → ceil(64/16)=4 m-tiles, BN=32 → 64/32=2 n-tiles.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]

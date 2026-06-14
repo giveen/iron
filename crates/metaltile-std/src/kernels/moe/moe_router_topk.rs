@@ -163,7 +163,6 @@ pub fn mt_moe_router_topk<T>(
     }
 }
 
-
 pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
@@ -237,7 +236,6 @@ pub mod kernel_tests {
     // norm_topk_prob = 0: raw global-softmax probs (Qwen3-Next).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
     fn test_moe_router_topk_global(dt: DType) -> TestSetup { router_setup(dt, false) }
-
 }
 
 pub mod kernel_benches {
@@ -270,5 +268,4 @@ pub mod kernel_benches {
             .grid_3d(n_rows as u32, 1, 1, [32, 1, 1])
             .bytes_moved(bytes as u64)
     }
-
 }

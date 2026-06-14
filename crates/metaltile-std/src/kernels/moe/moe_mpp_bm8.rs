@@ -220,7 +220,11 @@ pub mod kernel_tests {
     use metaltile::{test::*, test_kernel};
 
     use super::{mt_moe_gather_qmm_mma_int4_bm8_mpp, mt_moe_gather_qmm_mma_int8_bm8_mpp};
-    use crate::kernels::moe::moe_mpp_shared::{MmaTestShape, int4_indexed_setup, int8_indexed_setup};
+    use crate::kernels::moe::moe_mpp_shared::{
+        MmaTestShape,
+        int4_indexed_setup,
+        int8_indexed_setup,
+    };
 
     // BM=8 → ceil(64/8)=8 m-tiles, BN=32 → 64/32=2 n-tiles.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
@@ -228,7 +232,10 @@ pub mod kernel_tests {
         int4_indexed_setup(
             mt_moe_gather_qmm_mma_int4_bm8_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
-            32, 8, 32, dt,
+            32,
+            8,
+            32,
+            dt,
         )
     }
 
@@ -237,7 +244,10 @@ pub mod kernel_tests {
         int8_indexed_setup(
             mt_moe_gather_qmm_mma_int8_bm8_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
-            32, 8, 32, dt,
+            32,
+            8,
+            32,
+            dt,
         )
     }
 }
@@ -254,8 +264,15 @@ pub mod kernel_benches {
         int4_mma_bench(
             mt_moe_gather_qmm_mma_int4_bm8_mpp::kernel_ir_for(dt),
             MmaBenchShape {
-                bits: 4, bn: 32, bm: 8, tpg: 32,
-                m_total: 1024, n_out: 256, k_in: 2048, n_experts: 128, group_size: 64,
+                bits: 4,
+                bn: 32,
+                bm: 8,
+                tpg: 32,
+                m_total: 1024,
+                n_out: 256,
+                k_in: 2048,
+                n_experts: 128,
+                group_size: 64,
             },
             dt,
         )
@@ -266,8 +283,15 @@ pub mod kernel_benches {
         int4_mma_bench(
             mt_moe_gather_qmm_mma_int8_bm8_mpp::kernel_ir_for(dt),
             MmaBenchShape {
-                bits: 8, bn: 32, bm: 8, tpg: 32,
-                m_total: 1024, n_out: 256, k_in: 2048, n_experts: 128, group_size: 64,
+                bits: 8,
+                bn: 32,
+                bm: 8,
+                tpg: 32,
+                m_total: 1024,
+                n_out: 256,
+                k_in: 2048,
+                n_experts: 128,
+                group_size: 64,
             },
             dt,
         )
