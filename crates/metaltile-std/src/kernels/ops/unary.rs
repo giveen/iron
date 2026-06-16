@@ -268,6 +268,18 @@ pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u
     }
 }
 
+/// Elementwise dtype cast f32 → bf16. Same compaction as the f16 variant, for
+/// models whose residual stream / cache dtype is bf16 (wider exponent range
+/// than f16, so large-magnitude residuals survive the narrowing). The reverse
+/// bf16 → f32 widening is covered by the generic `mt_cast_to_f32`.
+#[kernel]
+pub fn mt_cast_f32_bf16(src: Tensor<f32>, mut dst: Tensor<bf16>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<bf16>());
+    }
+}
+
 pub mod kernel_tests {
     use metaltile::{core::ir::Kernel, test::*, test_kernel};
 
@@ -873,5 +885,61 @@ pub fn mt_add_rms_norm<T>(
         store(normed_out[base + 1u32], n1.cast::<T>());
         store(normed_out[base + 2u32], n2.cast::<T>());
         store(normed_out[base + 3u32], n3.cast::<T>());
+    }
+}
+
+/// Fused add + RMSNorm with an f16 NORMED output (residual stays f32).
+/// Folds the standalone `cast_f32_f16(normed)` into the producer epilogue:
+/// mirrors `mt_add_rms_norm` exactly, only `normed_out` narrows to f16. The
+/// residual stream stays f32 (no narrowing drift over long decodes). Saves one
+/// cast dispatch per residual-add+norm pair on bf16/f16-activation paths.
+/// Bit-identical to `add_rms_norm(f32) -> cast_f32_f16`.
+#[kernel]
+pub fn mt_add_rms_norm_f16norm<T>(
+    a: Tensor<T>,
+    b: Tensor<T>,
+    w: Tensor<T>,
+    eps_buf: Tensor<f32>,
+    mut residual_out: Tensor<f32>,
+    mut normed_out: Tensor<f16>,
+    #[constexpr] n: u32,
+) {
+    let row = program_id::<0>();
+    let rs = row * n;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < n;
+    let safe_col = select(in_bounds, col, 0u32);
+    let safe_base = rs + safe_col;
+    let base = rs + col;
+    let a0 = load(a[safe_base]).cast::<f32>();
+    let a1 = load(a[safe_base + 1u32]).cast::<f32>();
+    let a2 = load(a[safe_base + 2u32]).cast::<f32>();
+    let a3 = load(a[safe_base + 3u32]).cast::<f32>();
+    let b0 = load(b[safe_base]).cast::<f32>();
+    let b1 = load(b[safe_base + 1u32]).cast::<f32>();
+    let b2 = load(b[safe_base + 2u32]).cast::<f32>();
+    let b3 = load(b[safe_base + 3u32]).cast::<f32>();
+    let s0 = a0 + b0;
+    let s1 = a1 + b1;
+    let s2 = a2 + b2;
+    let s3 = a3 + b3;
+    let raw_ssq = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
+    let partial_ssq = select(in_bounds, raw_ssq, 0.0f32);
+    let tg_ssq = reduce_sum(partial_ssq);
+    let eps = load(eps_buf[0u32]);
+    let rms = rsqrt(tg_ssq / n + eps);
+    if in_bounds {
+        store(residual_out[base], s0.cast::<f32>());
+        store(residual_out[base + 1u32], s1.cast::<f32>());
+        store(residual_out[base + 2u32], s2.cast::<f32>());
+        store(residual_out[base + 3u32], s3.cast::<f32>());
+        let g0 = s0 * rms * load(w[col]).cast::<f32>();
+        let g1 = s1 * rms * load(w[col + 1u32]).cast::<f32>();
+        let g2 = s2 * rms * load(w[col + 2u32]).cast::<f32>();
+        let g3 = s3 * rms * load(w[col + 3u32]).cast::<f32>();
+        store(normed_out[base], g0.cast::<f16>());
+        store(normed_out[base + 1u32], g1.cast::<f16>());
+        store(normed_out[base + 2u32], g2.cast::<f16>());
+        store(normed_out[base + 3u32], g3.cast::<f16>());
     }
 }
