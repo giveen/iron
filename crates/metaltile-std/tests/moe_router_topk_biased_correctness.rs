@@ -1,6 +1,6 @@
 //! Copyright 2026 TheTom
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_router_topk_biased` — top-K by biased
+//! GPU correctness for `kernels::moe::mt_moe_router_topk_biased` — top-K by biased
 //! score, weights = unbiased[chosen] renormalised to sum 1.
 #![cfg(target_os = "macos")]
 
@@ -16,7 +16,7 @@ use metaltile_std::kernels::moe::moe_router_topk_biased::{
 };
 
 #[test]
-fn dsv4_router_topk_f32() {
+fn moe_router_topk_biased_f32() {
     let _g = gpu_lock();
     let n = 256usize;
     let k = 6usize;
