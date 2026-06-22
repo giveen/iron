@@ -3,7 +3,7 @@
 //! GPU correctness for `mt_quantize_kv_int4/int8` + `mt_bulk_dequant_kv_int4/int8`
 //! via raw → quantize → dequant round-trip.
 //!
-//! These four kernels ship in `ffai::kv_cache` but had no end-to-end
+//! These four kernels ship in `kernels::kv_cache` but had no end-to-end
 //! coverage before this file. They're how `AffineQuantizedKVCache`
 //! shrinks per-token K/V slots 4× (int4) or 2× (int8) at decode time —
 //! a wrong index formula in either direction would silently corrupt
