@@ -10,14 +10,17 @@ concurrency:
 #   changes
 #   compile ──┬── build
 #             ├── test
-#             ├── bench-ffai  ──┐
-#             └── bench-mlx   ──┴── bench-merge
+#             ├── bench-heavy  ──┐
+#             └── bench-light   ──┴── bench-merge
 #
 # `changes` (ubuntu, fast) classifies which paths changed so each bench
-# shard only runs when its kernel family was the sole thing modified:
-#   - ffai bench: only runs when crates/metaltile-std/src/ffai/** changed
-#     AND no other crates or Rust-related files changed.
-#   - mlx bench: same rule for crates/metaltile-std/src/mlx/**.
+# shard only runs when its kernel family group was the sole thing modified.
+# The two shards split the 14 kernel families under kernels/<family>/ into
+# two roughly balanced groups:
+#   - heavy bench: gemm, moe, ssm, quant, kv_cache, hyper_connections, sdpa
+#     (the compute-heavy matmul / MoE / attention path). Runs only when one
+#     of those family dirs changed AND no other crates or Rust files did.
+#   - light bench: norm, ops, sampling, convolution, rope, vision, audio.
 #   If other crates changed (core IR, codegen, …) neither shard runs — the
 #   `build` job covers correctness for those changes.  Both shards run when
 #   both families were touched (and nothing else).
@@ -74,8 +77,8 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      ffai: ${{ steps.filter.outputs.ffai }}
-      mlx: ${{ steps.filter.outputs.mlx }}
+      heavy: ${{ steps.filter.outputs.heavy }}
+      light: ${{ steps.filter.outputs.light }}
       other: ${{ steps.filter.outputs.other }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
@@ -83,14 +86,14 @@ jobs:
         id: filter
         with:
           filters: |
-            ffai:
-              - 'crates/metaltile-std/src/ffai/**'
-            mlx:
-              - 'crates/metaltile-std/src/mlx/**'
+            heavy:
+              - 'crates/metaltile-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
+            light:
+              - 'crates/metaltile-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
             other:
               - 'crates/**/*.rs'
-              - '!crates/metaltile-std/src/ffai/**'
-              - '!crates/metaltile-std/src/mlx/**'
+              - '!crates/metaltile-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
+              - '!crates/metaltile-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
               - 'crates/**/Cargo.toml'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -198,10 +201,12 @@ jobs:
         run: tile test
 
   # ── Job 4 + 5: GPU benchmark suite (sharded by kernel family) ────────────────
-  # Two bench jobs run in parallel — one for the `ffai` family (attention/MLP
-  # inference kernels) and one for the `mlx` family (MLX reference comparisons).
-  # `--match-group` narrows each shard to only its family so both finish faster
-  # than a single sequential run.
+  # Two bench jobs run in parallel — one for the `heavy` family group
+  # (gemm/moe/ssm/quant/kv_cache/hyper_connections/sdpa) and one for the
+  # `light` group (norm/ops/sampling/convolution/rope/vision/audio).
+  # `--match-group` is a regex on the kernel family (the directory below
+  # kernels/), narrowing each shard to its group so both finish faster than
+  # a single sequential run.
   #
   # Each shard only runs when its kernel family was the sole thing modified
   # (no other crates or Rust files touched). On workflow_dispatch both shards
@@ -209,8 +214,8 @@ jobs:
   #
   # Note: matrix context is not available in job-level `if:`, so the two
   # shards are spelled out as separate jobs.
-  bench-ffai:
-    name: Bench (ffai)
+  bench-heavy:
+    name: Bench (heavy)
     runs-on: macos-26
     timeout-minutes: 60
     needs: [compile, changes]
@@ -218,7 +223,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (
         needs.changes.outputs.other == 'false' &&
-        needs.changes.outputs.ffai == 'true'
+        needs.changes.outputs.heavy == 'true'
       )
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
@@ -235,27 +240,27 @@ jobs:
       - name: Add tile to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
 
-      - name: Bench (ffai)
-        run: tile bench -vv --allow-dirty --match-group 'ffai' --json /tmp/bench-ffai.json
+      - name: Bench (heavy)
+        run: tile bench -vv --allow-dirty --match-group '^(gemm|moe|ssm|quant|kv_cache|hyper_connections|sdpa)$' --json /tmp/bench-heavy.json
 
-      - name: Snapshot bench result (ffai)
+      - name: Snapshot bench result (heavy)
         run: |
           tile snap \
-            --from /tmp/bench-ffai.json \
-            -o /tmp/bench-snapshot-ffai.json \
-            --note "CI shard=ffai @ ${{ github.sha }} (${{ github.ref_name }})"
+            --from /tmp/bench-heavy.json \
+            -o /tmp/bench-snapshot-heavy.json \
+            --note "CI shard=heavy @ ${{ github.sha }} (${{ github.ref_name }})"
 
       - name: Upload bench shard
         uses: actions/upload-artifact@v4
         with:
-          name: bench-shard-ffai
+          name: bench-shard-heavy
           path: |
-            /tmp/bench-ffai.json
-            /tmp/bench-snapshot-ffai.json
+            /tmp/bench-heavy.json
+            /tmp/bench-snapshot-heavy.json
           if-no-files-found: error
 
-  bench-mlx:
-    name: Bench (mlx)
+  bench-light:
+    name: Bench (light)
     runs-on: macos-26
     timeout-minutes: 60
     needs: [compile, changes]
@@ -263,7 +268,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (
         needs.changes.outputs.other == 'false' &&
-        needs.changes.outputs.mlx == 'true'
+        needs.changes.outputs.light == 'true'
       )
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
@@ -280,23 +285,23 @@ jobs:
       - name: Add tile to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
 
-      - name: Bench (mlx)
-        run: tile bench -vv --allow-dirty --match-group 'mlx' --json /tmp/bench-mlx.json
+      - name: Bench (light)
+        run: tile bench -vv --allow-dirty --match-group '^(norm|ops|sampling|convolution|rope|vision|audio)$' --json /tmp/bench-light.json
 
-      - name: Snapshot bench result (mlx)
+      - name: Snapshot bench result (light)
         run: |
           tile snap \
-            --from /tmp/bench-mlx.json \
-            -o /tmp/bench-snapshot-mlx.json \
-            --note "CI shard=mlx @ ${{ github.sha }} (${{ github.ref_name }})"
+            --from /tmp/bench-light.json \
+            -o /tmp/bench-snapshot-light.json \
+            --note "CI shard=light @ ${{ github.sha }} (${{ github.ref_name }})"
 
       - name: Upload bench shard
         uses: actions/upload-artifact@v4
         with:
-          name: bench-shard-mlx
+          name: bench-shard-light
           path: |
-            /tmp/bench-mlx.json
-            /tmp/bench-snapshot-mlx.json
+            /tmp/bench-light.json
+            /tmp/bench-snapshot-light.json
           if-no-files-found: error
 
   # ── Job 5: merge shards + diff comment ───────────────────────────────────────
@@ -308,15 +313,15 @@ jobs:
     name: Bench (merge + diff)
     runs-on: macos-26
     timeout-minutes: 15
-    needs: [bench-ffai, bench-mlx, changes]
+    needs: [bench-heavy, bench-light, changes]
     if: >-
-      needs.bench-ffai.result == 'success' && needs.bench-mlx.result == 'success' &&
+      needs.bench-heavy.result == 'success' && needs.bench-light.result == 'success' &&
       (
         github.event_name == 'workflow_dispatch' ||
         (
           needs.changes.outputs.other == 'false' &&
-          needs.changes.outputs.ffai  == 'true'  &&
-          needs.changes.outputs.mlx   == 'true'
+          needs.changes.outputs.heavy  == 'true'  &&
+          needs.changes.outputs.light   == 'true'
         )
       )
     steps:
@@ -334,27 +339,27 @@ jobs:
       - name: Add tile to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
 
-      - name: Download bench shard (ffai)
+      - name: Download bench shard (heavy)
         uses: actions/download-artifact@v4
         with:
-          name: bench-shard-ffai
-          path: /tmp/shards/ffai
+          name: bench-shard-heavy
+          path: /tmp/shards/heavy
 
-      - name: Download bench shard (mlx)
+      - name: Download bench shard (light)
         uses: actions/download-artifact@v4
         with:
-          name: bench-shard-mlx
-          path: /tmp/shards/mlx
+          name: bench-shard-light
+          path: /tmp/shards/light
 
       # Merge the two shard JSON files by concatenating their `results` arrays.
       # Both files share the same `device` field (same runner pool).
       - name: Merge bench shards
         run: |
           set -euo pipefail
-          FFAI=/tmp/shards/ffai/bench-ffai.json
-          MLX=/tmp/shards/mlx/bench-mlx.json
+          HEAVY=/tmp/shards/heavy/bench-heavy.json
+          LIGHT=/tmp/shards/light/bench-light.json
 
-          DEVICE=$(jq -r '.device' "$FFAI")
+          DEVICE=$(jq -r '.device' "$HEAVY")
           jq -s '
             {
               device: .[0].device,
@@ -366,7 +371,7 @@ jobs:
               },
               results: ([.[].results] | add)
             }
-          ' "$FFAI" "$MLX" > /tmp/bench.json
+          ' "$HEAVY" "$LIGHT" > /tmp/bench.json
           echo "Merged: $(jq '.results | length' /tmp/bench.json) results for device $DEVICE"
 
       # Snapshot the merged result for artifact upload.

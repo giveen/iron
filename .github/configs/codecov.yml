@@ -75,8 +75,7 @@ flag_management:
 ignore:
   - "crates/metaltile/src/lib.rs"
   - "crates/metaltile/src/prelude.rs"
-  - "crates/metaltile-std/src/ffai/**"
-  - "crates/metaltile-std/src/mlx/**"
+  - "crates/metaltile-std/src/kernels/**"
   - "**/tests/**"
   - "**/benches/**"
   - "**/build.rs"

@@ -56,7 +56,7 @@ jobs:
         run: |
           cargo llvm-cov --workspace --codecov \
             --output-path coverage.json \
-            --ignore-filename-regex '(crates/metaltile/src/(lib|prelude)\.rs|crates/metaltile-std/src/(ffai|mlx)/.*\.rs|tests/|benches/|build\.rs)'
+            --ignore-filename-regex '(crates/metaltile/src/(lib|prelude)\.rs|crates/metaltile-std/src/kernels/.*\.rs|tests/|benches/|build\.rs)'
 
       - name: Upload to Codecov
         # No `token:` — this is a public repo, so `codecov-action@v5`

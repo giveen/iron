@@ -1361,11 +1361,20 @@ impl NameFilter {
 }
 
 /// Kernel family of a registration site — the directory component below
-/// `src/` in the `file!()` path (`crates/metaltile-std/src/mlx/copy.rs` →
-/// `"mlx"`). Empty when the layout doesn't follow the family convention.
+/// `src/kernels/` in the `file!()` path
+/// (`crates/metaltile-std/src/kernels/gemm/gemv_quantized.rs` → `"gemm"`).
+/// A leading `kernels/` segment is skipped so the family is the directory
+/// *below* it, not the literal `"kernels"`. Empty when the layout doesn't
+/// follow the `kernels/<family>/` convention (top-level files, non-src paths).
 pub(crate) fn kernel_family(file: &str) -> &str {
     let Some(pos) = file.find("/src/") else { return "" };
-    let rest = &file[pos + "/src/".len()..];
+    let mut rest = &file[pos + "/src/".len()..];
+    // The kernel std lives under `src/kernels/<family>/`; step past the
+    // `kernels/` umbrella so families like `gemm`/`moe`/`ssm` are returned
+    // rather than the constant `"kernels"`.
+    if let Some(below) = rest.strip_prefix("kernels/") {
+        rest = below;
+    }
     match rest.find('/') {
         Some(end) => &rest[..end],
         None => "",
@@ -1448,21 +1457,30 @@ mod name_filter_tests {
 
     #[test]
     fn group_filter_also_matches_kernel_family() {
-        // The CI bench shards select whole families this way:
-        // `tile bench --match-group 'ffai'` / `--match-group 'mlx'`.
+        // The CI bench shards select family groups this way, e.g.
+        // `tile bench --match-group 'gemm|moe|ssm|quant|kv_cache|hyper_connections|sdpa'`.
         let nf = NameFilter::from_args(&args_with(|a| {
-            a.match_group = Some("mlx".into());
+            a.match_group = Some("norm|ops|sampling".into());
         }))
         .unwrap();
-        assert!(nf.matches("mt_copy_f32", "bench", "mlx"));
-        assert!(!nf.matches("mt_copy_f32", "bench", "ffai"));
+        assert!(nf.matches("mt_copy_f32", "bench", "ops"));
+        assert!(!nf.matches("mt_copy_f32", "bench", "gemm"));
     }
 
     #[test]
     fn kernel_family_from_registration_file() {
-        assert_eq!(kernel_family("crates/metaltile-std/src/mlx/copy.rs"), "mlx");
-        assert_eq!(kernel_family("crates/metaltile-std/src/ffai/sdpa_multi.rs"), "ffai");
-        // Top-level files and non-src paths have no family.
+        // Family is the directory below `src/kernels/`, not the `kernels` umbrella.
+        assert_eq!(
+            kernel_family("crates/metaltile-std/src/kernels/gemm/gemv_quantized.rs"),
+            "gemm"
+        );
+        assert_eq!(kernel_family("crates/metaltile-std/src/kernels/ops/copy.rs"), "ops");
+        assert_eq!(
+            kernel_family("crates/metaltile-std/src/kernels/sdpa/steel_attn/mod.rs"),
+            "sdpa"
+        );
+        // Top-level kernels files and non-src paths have no family.
+        assert_eq!(kernel_family("crates/metaltile-std/src/kernels/primitives.rs"), "");
         assert_eq!(kernel_family("crates/metaltile-std/src/utils.rs"), "");
         assert_eq!(kernel_family("examples/foo.rs"), "");
     }
