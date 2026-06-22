@@ -344,7 +344,7 @@ pub mod kernel_benches {
 
     use super::mt_sdpa_prefill;
     use crate::{
-        mlx::steel::attn::{
+        kernels::sdpa::steel_attn::{
             steel_attention_mma::mt_sdpa_prefill_mma,
             steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
         },
@@ -533,7 +533,7 @@ pub mod kernel_tests {
 
     use super::mt_sdpa_prefill;
     use crate::{
-        mlx::steel::attn::{
+        kernels::sdpa::steel_attn::{
             steel_attention_mma::mt_sdpa_prefill_mma,
             steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
         },

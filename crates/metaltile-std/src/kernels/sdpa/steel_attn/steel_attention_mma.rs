@@ -713,7 +713,7 @@ pub mod kernel_tests {
 
     use super::mt_sdpa_prefill_mma;
     use crate::{
-        mlx::steel::attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
+        kernels::sdpa::steel_attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
         utils::{pack_f32, unpack_f32},
     };
 

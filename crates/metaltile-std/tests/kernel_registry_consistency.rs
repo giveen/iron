@@ -15,7 +15,7 @@
 //!    c. Defined locally in the same emit (template/inline function).
 //!
 //! 2. **Empty / unregistered kernel** — every `#[kernel] pub fn name`
-//!    in `crates/metaltile-std/src/{mlx,ffai}/**` should have a matching
+//!    in `crates/metaltile-std/src/kernels/**` should have a matching
 //!    `inventory::submit!` for a BenchSpec that references its
 //!    `kernel_ir_for` function. PR #19 silently emptied a kernel body
 //!    via macro refactor; the inverse failure (kernel defined but
@@ -41,7 +41,7 @@ use std::{
 use metaltile::codegen::{MslGenerator, msl::MslConfig};
 // Import the registries via `metaltile_std` (not `metaltile_core`) so the std
 // rlib — which carries the `#[kernel]` / `#[bench]` / `#[test_kernel]` inventory
-// statics in its `ffai` / `mlx` modules — is force-linked into this test binary.
+// statics in its `kernels` modules — is force-linked into this test binary.
 // Importing them from `metaltile_core` would yield empty registries here.
 use metaltile_std::{all_benches, all_kernels};
 
@@ -340,9 +340,9 @@ fn kernel_annotations_have_matching_inventory_submit() {
     // `CARGO_MANIFEST_DIR` points at `crates/metaltile-std`.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let src_root = Path::new(manifest_dir).join("src");
-    // Restrict the walk to mlx + ffai (where actual kernels live) to
-    // avoid scanning spec.rs / run_spec.rs glue files.
-    let scan_dirs = ["mlx", "ffai"];
+    // Restrict the walk to the consolidated `kernels/` tree (where every
+    // kernel now lives) to avoid scanning spec.rs / run_spec.rs glue files.
+    let scan_dirs = ["kernels"];
 
     // Track (kernel_name, source_file_path) for the second-pass check
     // that looks up `kernel_ir: <name>::kernel_ir_for` in inventory
@@ -386,7 +386,7 @@ fn kernel_annotations_have_matching_inventory_submit() {
 
     assert!(
         !annotated.is_empty(),
-        "no `#[kernel]` annotations found under `src/{{mlx,ffai}}` — walker broken?"
+        "no `#[kernel]` annotations found under `src/kernels` — walker broken?"
     );
 
     // Now: for each annotated kernel, it should match a registered

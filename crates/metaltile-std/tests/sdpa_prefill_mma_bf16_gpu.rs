@@ -37,7 +37,7 @@ mod common;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use metaltile::Context;
-use metaltile_std::mlx::steel::attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16;
+use metaltile_std::kernels::sdpa::steel_attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16;
 
 /// Causal-prefill SDPA reference for the (B, n_q_heads, q_len, head_dim)
 /// + (B, n_kv_heads, k_len, head_dim) layout the kernel reads.

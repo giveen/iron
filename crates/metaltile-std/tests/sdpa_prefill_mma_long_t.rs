@@ -29,7 +29,7 @@ mod common;
 
 use common::{Dt, gpu_lock, pack_bytes, ramp, unpack_bytes};
 use metaltile::Context;
-use metaltile_std::mlx::steel::attn::steel_attention_mma::mt_sdpa_prefill_mma;
+use metaltile_std::kernels::sdpa::steel_attn::steel_attention_mma::mt_sdpa_prefill_mma;
 
 /// Naive SDPA prefill (single batch, full causal). Q/K/V are
 /// `[n_heads_or_kv * T * D]` row-major; output is `[n_heads * T * D]`.
