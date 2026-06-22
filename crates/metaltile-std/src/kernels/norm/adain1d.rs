@@ -121,6 +121,11 @@ pub mod kernel_tests {
     }
 
     // (batch*channels) rows; non-128-aligned length to exercise the strided path.
+    // f32 tol is 1e-3 (looser than the 1e-4 house default) on purpose: variance
+    // uses the one-pass `E[x^2] - E[x]^2` form over a length-300 reduce_sum, which
+    // is cancellation-prone, and the GPU tree/simd reduction accumulates in a
+    // different order than the oracle's sequential sum, so the per-element diff
+    // exceeds 1e-4. Do not tighten without switching to a two-pass variance.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_adain1d(dt: DType) -> TestSetup { adain_setup(8, 300, dt) }
 }
