@@ -6,12 +6,11 @@
 //! `#[test_kernel]`) and the shared bench-setup utilities used by the kernels.
 
 pub mod kernels;
-pub mod mlx;
 pub mod probe;
 
 // Re-export the kernel inventories from the harness registry. The `#[kernel]` /
-// `#[bench]` / `#[test_kernel]` registrations live in this crate's `ffai` /
-// `mlx` modules; importing these accessors via `metaltile_std` (rather than
+// `#[bench]` / `#[test_kernel]` registrations live in this crate's `kernels`
+// modules; importing these accessors via `metaltile_std` (rather than
 // `metaltile`) pulls the std rlib into a downstream link, which is what
 // retains those inventory statics.
 pub use metaltile::harness::registry::{all_benches, all_kernels, all_tests};
