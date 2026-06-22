@@ -329,6 +329,23 @@ pub const CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET: c_int = 6;
 // cublasLtMatmulDescAttributes_t
 pub const CUBLASLT_MATMUL_DESC_TRANSA: c_int = 3;
 pub const CUBLASLT_MATMUL_DESC_TRANSB: c_int = 4;
+// Device-pointer mode + per-tensor scale pointers/modes for the fp4/fp8 GEMM
+// epilogue (cublasLtMatmulDescAttributes_t + cublasLtPointerMode_t).
+pub const CUBLASLT_MATMUL_DESC_POINTER_MODE: c_int = 2;
+pub const CUBLASLT_POINTER_MODE_DEVICE: c_int = 1;
+pub const CUBLASLT_MATMUL_DESC_A_SCALE_POINTER: c_int = 17;
+pub const CUBLASLT_MATMUL_DESC_B_SCALE_POINTER: c_int = 18;
+// D (output) scale pointer — bound for completeness of the A/B/D set; not wired
+// into a GEMM call yet.
+#[allow(dead_code)]
+pub const CUBLASLT_MATMUL_DESC_D_SCALE_POINTER: c_int = 20;
+pub const CUBLASLT_MATMUL_DESC_A_SCALE_MODE: c_int = 31;
+pub const CUBLASLT_MATMUL_DESC_B_SCALE_MODE: c_int = 32;
+// cublasLtMatmulMatrixScale_t — per-16 UE4M3 block scaling (NVFP4).
+pub const CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3: c_int = 1;
+// cudaDataType_t: E2M1 (4-bit fp4) + E4M3 (8-bit fp8).
+pub const CUDA_R_4F_E2M1: c_int = 33;
+pub const CUDA_R_8F_E4M3: c_int = 28;
 // cublasLtMatmulPreferenceAttributes_t
 pub const CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES: c_int = 1;
 pub const CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK: c_int = 3;

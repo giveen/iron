@@ -62,6 +62,11 @@ THR = "THR"
 optin = "optin"
 Optin = "Optin"
 OPTIN = "OPTIN"
+# Microscaling unsigned-exponent FP scale-format prefix (ue4m3 / ue8m0 block
+# scales in the NVFP4/MXFP cutlass path); only ever appears as this prefix.
+ue = "ue"
+Ue = "Ue"
+UE = "UE"
 
 [type.go]
 extend-glob = []

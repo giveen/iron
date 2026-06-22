@@ -15,6 +15,7 @@
 //! untouched and stays the zero-config default.
 
 mod ffi;
+mod nvfp4_moe;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -305,6 +306,10 @@ pub struct CudaDevice {
     /// heuristic / atomics-mode could not on sm_121. `(handle_ptr, workspace_ptr)`
     /// as `usize` to stay plain-Send; workspace is a single 32 MiB slab.
     cublaslt: Mutex<(usize, usize)>,
+    /// Lazily-allocated device f32 scalar `0.0`, used as the `beta` pointer for
+    /// the cuBLASLt fp4/fp8 GEMM epilogue (device pointer mode). `usize` to stay
+    /// plain-Send; see `lt_beta_zero_ptr` (in `nvfp4_moe`).
+    lt_beta_zero: Mutex<usize>,
 }
 
 /// Fixed cublasLt workspace size (32 MiB). Large enough for the heuristic to
@@ -399,6 +404,7 @@ impl CudaDevice {
                 capturing: std::sync::atomic::AtomicBool::new(false),
                 cublas: Mutex::new(0),
                 cublaslt: Mutex::new((0, 0)),
+                lt_beta_zero: Mutex::new(0),
             }))
         }
     }
