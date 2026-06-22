@@ -216,7 +216,7 @@ mod tests {
     use super::*;
 
     /// Developer aid — dump the full generated MSL for inspection.
-    /// `cargo test -p metaltile-std --lib --release -- ffai::gated_delta_prep::tests::dump --nocapture`
+    /// `cargo test -p metaltile-std --lib --release -- kernels::ssm::gated_delta_prep::tests::dump --nocapture`
     #[test]
     fn dump() {
         use metaltile::codegen::msl::MslGenerator;
