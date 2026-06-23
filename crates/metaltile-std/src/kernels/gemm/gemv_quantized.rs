@@ -238,7 +238,7 @@ pub fn mt_gemv_q8_coalesced_accum<T>(
 #[kernel]
 pub fn mt_gemv_q4_coalesced<T>(
     qs: Tensor<u32>,
-    d_f32: Tensor<f16>,
+    d_f32: Tensor<f32>,
     x: Tensor<T>,
     mut out: Tensor<T>,
     #[constexpr] k_in: u32,
@@ -432,7 +432,7 @@ pub fn mt_gemv_q4_coalesced_2row<T>(
 #[kernel]
 pub fn mt_gemv_q4_coalesced_relu2<T>(
     qs: Tensor<u32>,
-    d_f32: Tensor<f16>,
+    d_f32: Tensor<f32>,
     x: Tensor<T>,
     mut out: Tensor<T>,
     #[constexpr] k_in: u32,
@@ -482,7 +482,7 @@ pub fn mt_gemv_q4_coalesced_relu2<T>(
 #[allow(clippy::too_many_arguments)]
 pub fn mt_gemv_q4_coalesced_accum<T>(
     qs: Tensor<u32>,
-    d_f32: Tensor<f16>,
+    d_f32: Tensor<f32>,
     x: Tensor<T>,
     mut acc: Tensor<T>,
     scale: Tensor<f32>,
