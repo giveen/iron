@@ -1,0 +1,23 @@
+[package]
+name = "ffai-kernels-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core IR types and data structures for the MetalTile GPU kernel DSL"
+keywords = ["metal", "gpu", "apple-silicon", "compiler", "ir"]
+categories = ["compilers", "hardware-support"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+ffai-kernels-macros.workspace = true
+thiserror.workspace = true
+smallvec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+inventory.workspace = true
+rustc-hash.workspace = true

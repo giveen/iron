@@ -15,10 +15,10 @@ the release binary:
 
 ```bash
 # From a local clone (recommended for contributors):
-cargo install --path crates/metaltile-cli
+cargo install --path crates/ffai-kernels-cli
 
 # Directly from the repository without cloning:
-cargo install --git https://github.com/0xClandestine/metaltile metaltile-cli
+cargo install --git https://github.com/thewafflehaus/ffai-kernels ffai-kernels-cli
 ```
 
 Requires Rust nightly — the toolchain is pinned in `rust-toolchain.toml` and
@@ -27,8 +27,8 @@ installed automatically by `rustup` on first build.
 ## Clone and set up
 
 ```bash
-git clone git@github.com:0xClandestine/metaltile.git
-cd metaltile
+git clone git@github.com:thewafflehaus/ffai-kernels.git
+cd ffai-kernels
 ./scripts/setup-dev.sh
 ```
 
@@ -49,22 +49,22 @@ The workspace is seven crates:
 
 | Crate | Description |
 |---|---|
-| [`metaltile-core`](../crates/metaltile-core/README.md) | IR types, `DType`, `Shape` |
-| [`metaltile-macros`](../crates/metaltile-macros/README.md) | the `#[kernel]` proc-macro + body parser |
-| [`metaltile-codegen`](../crates/metaltile-codegen/README.md) | MSL lowering + optimization passes |
-| [`metaltile-runtime`](../crates/metaltile-runtime/README.md) | Metal dispatch, PSO cache |
-| [`metaltile`](../crates/metaltile/README.md) | facade re-exporting all crates |
-| [`metaltile-std`](../crates/metaltile-std/README.md) | kernel stdlib, op files, bench types |
-| [`metaltile-cli`](../crates/metaltile-cli/README.md) | the `tile` CLI binary |
+| [`ffai-kernels-core`](../crates/ffai-kernels-core/README.md) | IR types, `DType`, `Shape` |
+| [`ffai-kernels-macros`](../crates/ffai-kernels-macros/README.md) | the `#[kernel]` proc-macro + body parser |
+| [`ffai-kernels-codegen`](../crates/ffai-kernels-codegen/README.md) | MSL lowering + optimization passes |
+| [`ffai-kernels-runtime`](../crates/ffai-kernels-runtime/README.md) | Metal dispatch, PSO cache |
+| [`ffai-kernels`](../crates/ffai-kernels/README.md) | facade re-exporting all crates |
+| [`ffai-kernels-std`](../crates/ffai-kernels-std/README.md) | kernel stdlib, op files, bench types |
+| [`ffai-kernels-cli`](../crates/ffai-kernels-cli/README.md) | the `tile` CLI binary |
 
-The compile pipeline: `#[kernel] fn` → `metaltile-macros` parses the body into **MetalTile IR** → `metaltile-codegen` runs the optimization passes and emits **MSL** → `metaltile-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `ffai-kernels-macros` parses the body into **MetalTile IR** → `ffai-kernels-codegen` runs the optimization passes and emits **MSL** → `ffai-kernels-runtime` dispatches it on the GPU.
 
 ## Your first kernel
 
 A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into MetalTile IR; the codegen lowers it to Metal Shading Language.
 
 ```rust
-use metaltile::prelude::*;
+use ffai-kernels::prelude::*;
 
 #[kernel]
 fn vector_add(a: Tensor<f32>, b: Tensor<f32>, c: Tensor<f32>) {
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Inspect the generated MSL without running anything:
 
 ```rust
-use metaltile::codegen::msl::MslGenerator;
+use ffai-kernels::codegen::msl::MslGenerator;
 let msl = MslGenerator::default().generate(&vector_add::kernel_ir())?;
 println!("{msl}");
 ```

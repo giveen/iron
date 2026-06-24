@@ -1,5 +1,5 @@
 # tile CLI configuration
-# https://github.com/0xClandestine/metaltile
+# https://github.com/thewafflehaus/ffai-kernels
 #
 # Values here are overridden by TILE_* environment variables and CLI flags.
 # Select a named profile with --profile <name> or TILE_PROFILE=<name>.

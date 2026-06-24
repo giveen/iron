@@ -6,12 +6,12 @@ relevant issue with `#<issue-number>`.
 ## Crates affected
 
 <!-- Check all that apply -->
-- [ ] `metaltile-core` (IR types, ops)
-- [ ] `metaltile-macros` (proc macros, body parser)
-- [ ] `metaltile-codegen` (MSL lowering, passes)
-- [ ] `metaltile-runtime` (Metal dispatch)
-- [ ] `metaltile-std` (kernel stdlib, op files)
-- [ ] `metaltile-cli` (`tile` binary)
+- [ ] `ffai-kernels-core` (IR types, ops)
+- [ ] `ffai-kernels-macros` (proc macros, body parser)
+- [ ] `ffai-kernels-codegen` (MSL lowering, passes)
+- [ ] `ffai-kernels-runtime` (Metal dispatch)
+- [ ] `ffai-kernels-std` (kernel stdlib, op files)
+- [ ] `ffai-kernels-cli` (`tile` binary)
 
 ## Testing
 

@@ -146,17 +146,17 @@ OUT ?=
 # Named wrappers for flag combos that aren't ergonomic via passthrough.
 .PHONY: bench-v bench-vv
 bench-v: ## tile bench -v — adds occupancy + register-pressure profile
-	cargo run --release -q -p metaltile-cli -- bench -v $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- bench -v $(ARGS)
 bench-vv: ## tile bench -vv — adds GPU timing stats (min µs + bandwidth)
-	cargo run --release -q -p metaltile-cli -- bench -vv $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- bench -vv $(ARGS)
 
 .PHONY: inspect-stats inspect-ir inspect-list
 inspect-stats: ## tile inspect KERNEL=<name> --stats — per-pass op-count deltas
-	cargo run --release -q -p metaltile-cli -- inspect $(KERNEL) --stats $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- inspect $(KERNEL) --stats $(ARGS)
 inspect-ir: ## tile inspect KERNEL=<name> --ir — raw IR before passes
-	cargo run --release -q -p metaltile-cli -- inspect $(KERNEL) --ir $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- inspect $(KERNEL) --ir $(ARGS)
 inspect-list: ## tile inspect --all — list every registered kernel
-	cargo run --release -q -p metaltile-cli -- inspect --all $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- inspect --all $(ARGS)
 
 .PHONY: emit-all time-passes
 emit-all: ## tile build --emit all OUT=<dir> — codegen for FFAI consumption
@@ -164,9 +164,9 @@ emit-all: ## tile build --emit all OUT=<dir> — codegen for FFAI consumption
 	  echo "Error: set OUT=<dir>, e.g. make emit-all OUT=../FFAI/Sources/MetalTileSwift"; \
 	  exit 1; \
 	fi
-	cargo run --release -q -p metaltile-cli -- build --emit all -o $(OUT) $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- build --emit all -o $(OUT) $(ARGS)
 time-passes: ## tile build --time-passes — wall-clock per codegen pass
-	cargo run --release -q -p metaltile-cli -- build --time-passes $(ARGS)
+	cargo run --release -q -p ffai-kernels-cli -- build --time-passes $(ARGS)
 
 # ─── insta MSL snapshot loop ──────────────────────────────────────────
 .PHONY: snapshots snapshots-review snapshots-accept snapshots-pending
@@ -198,9 +198,9 @@ snapshots-pending: ## cargo insta pending-snapshots — list pending without acc
 # elsewhere (e.g. `make typotypo`) still error normally.
 .PHONY: tile tile-args
 tile: ## tile passthrough: `make tile <subcommand>` (use tile-args for flags)
-	@cargo run --release -q -p metaltile-cli -- $(filter-out tile,$(MAKECMDGOALS))
+	@cargo run --release -q -p ffai-kernels-cli -- $(filter-out tile,$(MAKECMDGOALS))
 tile-args: ## tile passthrough with flags: `make tile-args ARGS="bench -vv --filter sdpa"`
-	@cargo run --release -q -p metaltile-cli -- $(ARGS)
+	@cargo run --release -q -p ffai-kernels-cli -- $(ARGS)
 
 ifeq (tile,$(firstword $(MAKECMDGOALS)))
 %:

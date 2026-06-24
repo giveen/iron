@@ -1,31 +1,31 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/metaltile-core",
-  "crates/metaltile-macros",
-  "crates/metaltile-codegen",
-  "crates/metaltile-runtime",
-  "crates/metaltile",
-  "crates/metaltile-cli",
-  "crates/metaltile-std",
+  "crates/ffai-kernels-core",
+  "crates/ffai-kernels-macros",
+  "crates/ffai-kernels-codegen",
+  "crates/ffai-kernels-runtime",
+  "crates/ffai-kernels",
+  "crates/ffai-kernels-cli",
+  "crates/ffai-kernels-std",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/metaltile/metaltile"
-homepage = "https://github.com/metaltile/metaltile"
-documentation = "https://docs.rs/metaltile"
+repository = "https://github.com/thewafflehaus/ffai-kernels"
+homepage = "https://github.com/thewafflehaus/ffai-kernels"
+documentation = "https://docs.rs/ffai-kernels"
 
 [workspace.dependencies]
 # Internal
-metaltile = { path = "crates/metaltile", version = "0.1.0" }
-metaltile-core = { path = "crates/metaltile-core", version = "0.1.0" }
-metaltile-macros = { path = "crates/metaltile-macros", version = "0.1.0" }
-metaltile-codegen = { path = "crates/metaltile-codegen", version = "0.1.0" }
-metaltile-runtime = { path = "crates/metaltile-runtime", version = "0.1.0" }
-metaltile-std = { path = "crates/metaltile-std", version = "0.1.0" }
+ffai-kernels = { path = "crates/ffai-kernels", version = "0.1.0" }
+ffai-kernels-core = { path = "crates/ffai-kernels-core", version = "0.1.0" }
+ffai-kernels-macros = { path = "crates/ffai-kernels-macros", version = "0.1.0" }
+ffai-kernels-codegen = { path = "crates/ffai-kernels-codegen", version = "0.1.0" }
+ffai-kernels-runtime = { path = "crates/ffai-kernels-runtime", version = "0.1.0" }
+ffai-kernels-std = { path = "crates/ffai-kernels-std", version = "0.1.0" }
 
 # External
 clap = { version = "4.6", features = ["derive", "env"] }
@@ -50,8 +50,8 @@ rayon = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 
-# Apple Metal FFI. Workspace-deduped because metaltile-runtime and
-# metaltile-std previously declared overlapping-but-drifting feature
+# Apple Metal FFI. Workspace-deduped because ffai-kernels-runtime and
+# ffai-kernels-std previously declared overlapping-but-drifting feature
 # sets — that bit us at link time when one crate's feature was the
 # other's hard requirement.
 objc2 = "0.6"
@@ -84,7 +84,7 @@ insta = { version = "1.43", default-features = false }
 arc_with_non_send_sync = "warn"
 
 [profile.release]
-# metaltile-std is `publish = true`, so workspace-wide `lto = "fat"` +
+# ffai-kernels-std is `publish = true`, so workspace-wide `lto = "fat"` +
 # `codegen-units = 1` would balloon downstream caller build times 5-10×
 # (rustls caveat in the playbook). Keep release downstream-friendly;
 # push the aggressive inlining settings into `[profile.bench]` where

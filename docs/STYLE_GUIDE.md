@@ -1,6 +1,6 @@
 # MetalTile Kernel Style Guide
 
-The authority on **how to write one kernel** in `metaltile-std` — file shape,
+The authority on **how to write one kernel** in `ffai-kernels-std` — file shape,
 naming, the `#[kernel(variants(...))]` axis, shared primitives, the CPU oracle,
 and the bench. Follow it to produce a kernel that is consistent with the rest of
 the library: correct, testable, benchmarkable, and maintainable. This is the
@@ -36,7 +36,7 @@ upstream metal reference exists (that's a property of one optional bench, not of
 the kernel):
 
 ```
-crates/metaltile-std/src/kernels/
+crates/ffai-kernels-std/src/kernels/
   ops/   core/gather/scatter/reduce/elementwise primitives
   gemm/ sdpa/ moe/ norm/ rope/ convolution/ ssm/ quant/ audio/ vision/ sampling/ kv_cache/
   primitives.rs   cross-family decode/reduce ops inlined at codegen
@@ -55,7 +55,7 @@ family list and the migration state (the crate is mid-migration from the legacy
 
 A kernel whose *purpose* is to validate a codegen path or HW intrinsic
 end-to-end — not to do production work — is a **probe**. Probes live in
-`crates/metaltile-std/src/probe/` (a crate-root module, like `utils`, **outside**
+`crates/ffai-kernels-std/src/probe/` (a crate-root module, like `utils`, **outside**
 the `kernels/<family>/` tree) and are named **`mt_<thing>_probe`**:
 `mt_simdgroup_load_probe` (the `Op::SimdgroupLoad` round-trip),
 `mt_mpp_matmul_probe`, `mt_mma_probe_*` (MMA layout). Use `_probe`, not `_smoke`
@@ -87,7 +87,7 @@ Every kernel file has the same four-section shape, in this order:
 //! - **TPG must be a multiple of 32.**
 //! - **Grid: 1 threadgroup per row.**
 
-use metaltile::kernel;
+use ffai-kernels::kernel;
 
 // ── 1. Kernel function(s) ────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ pub fn mt_my_kernel<T>(...) { ... }
 // ── 2. Correctness tests ─────────────────────────────────────────────────────
 
 pub mod kernel_tests {
-    use metaltile::{test::*, test_kernel};
+    use ffai-kernels::{test::*, test_kernel};
     use super::mt_my_kernel;
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -110,7 +110,7 @@ pub mod kernel_tests {
 // ── 3. Benchmarks ────────────────────────────────────────────────────────────
 
 pub mod kernel_benches {
-    use metaltile::{bench, test::*};
+    use ffai-kernels::{bench, test::*};
     use super::mt_my_kernel;
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -458,7 +458,7 @@ Buffers **shared by name** (e.g. `"inp"`) are filled with the same random data a
 After creating the file, declare it in its family `mod.rs`:
 
 ```rust
-// crates/metaltile-std/src/kernels/<family>/mod.rs
+// crates/ffai-kernels-std/src/kernels/<family>/mod.rs
 pub mod my_kernel;
 ```
 
@@ -547,7 +547,7 @@ A complete, minimal kernel that multiplies every element of a tensor by a scalar
 //! SPDX-License-Identifier: Apache-2.0
 //! Elementwise scale — multiplies every input element by a scalar `alpha`.
 
-use metaltile::kernel;
+use ffai-kernels::kernel;
 
 /// Multiply each element of `inp` by `alpha`, writing to `out`.
 ///
@@ -560,7 +560,7 @@ pub fn mt_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) 
 
 /// Correctness: GPU output must match `alpha * x` within dtype precision.
 pub mod kernel_tests {
-    use metaltile::{test::*, test_kernel};
+    use ffai-kernels::{test::*, test_kernel};
 
     use super::mt_scale;
     use crate::utils::{pack_f32, unpack_f32};
@@ -587,7 +587,7 @@ pub mod kernel_tests {
 
 /// Benchmark: 64M-element scale, reads + writes one stream each.
 pub mod kernel_benches {
-    use metaltile::{bench, test::*};
+    use ffai-kernels::{bench, test::*};
 
     use super::mt_scale;
 
@@ -611,4 +611,4 @@ After creating the file, add one line to its family `mod.rs` (e.g.
 pub mod scale;
 ```
 
-Run `cargo test -p metaltile-std` to confirm the tests register and pass.
+Run `cargo test -p ffai-kernels-std` to confirm the tests register and pass.

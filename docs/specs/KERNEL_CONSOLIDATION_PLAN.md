@@ -4,7 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # Kernel Consolidation Plan
 
-The single roadmap for restructuring `metaltile-std`'s ~150k lines of kernels
+The single roadmap for restructuring `ffai-kernels-std`'s ~150k lines of kernels
 into a smaller, family-organized library. This doc owns **what the target
 structure is and the order we get there**; [`STYLE_GUIDE.md`](../STYLE_GUIDE.md)
 owns **how an individual kernel/bench/test is written** in the target style.
@@ -42,7 +42,7 @@ the FFAI emit path is unaffected).
 ## 2. Target directory layout
 
 ```
-crates/metaltile-std/src/kernels/
+crates/ffai-kernels-std/src/kernels/
   ops/        ✅ DONE — elementwise/core primitives: binary · unary · ternary · copy · arange ·
               random · reduce · arg_reduce · scan · indexing · gather/scatter · hadamard ·
               fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation ·
@@ -197,11 +197,11 @@ k-quant paths, and the AURA codec stack. The target:
 
 - Generated MSL per kernel — identical post-consolidation (same IR, same
   passes); `variants(...)` suffix templates reproduce each body exactly.
-- `metaltile-core` / `-codegen` / `-runtime` / `-cli` — zero changes; this is a
-  `metaltile-std` source reorg only.
+- `ffai-kernels-core` / `-codegen` / `-runtime` / `-cli` — zero changes; this is a
+  `ffai-kernels-std` source reorg only.
 
 (Inventory *names* do change where the `ffai_`/model prefix is dropped, §9.1.
-This is source-internal to `metaltile-std`, but it is **not** transparent to
+This is source-internal to `ffai-kernels-std`, but it is **not** transparent to
 downstream: the FFAI/Swift consumer references the generated kernel symbols by
 name, so each family migration needs a **paired consumer-side PR** that
 regenerates against the new inventory. Land the two together, or stage the

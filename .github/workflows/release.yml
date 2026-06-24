@@ -32,7 +32,7 @@ jobs:
           save-if: false   # release builds are rare; don't pollute the cache
 
       - name: Build release binary
-        run: cargo build --release -p metaltile-cli
+        run: cargo build --release -p ffai-kernels-cli
 
       - name: Package binary
         run: |

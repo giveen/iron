@@ -10,9 +10,9 @@ readers — MetalTile is an optimized-kernel generator, not an inference engine.
 
 ## 1. Motivation
 
-MetalTile today is a single-target toolchain: the IR in `metaltile-core` lowers
-through `metaltile-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
-*"lowers the algorithm IR to Metal Shading Language"*), and `metaltile-runtime`
+MetalTile today is a single-target toolchain: the IR in `ffai-kernels-core` lowers
+through `ffai-kernels-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
+*"lowers the algorithm IR to Metal Shading Language"*), and `ffai-kernels-runtime`
 dispatches exclusively through Metal (`metal_device.rs`). The algorithm IR and
 the `#[kernel]` DSL are, by contrast, **backend-neutral** — they describe parallel
 compute (program ids, threadgroup memory, simd reductions, MMA tiles, elementwise
@@ -36,7 +36,7 @@ eventually tuned) code for both Apple GPUs and NVIDIA GPUs.
   NVRTC at runtime, or offline `nvcc` → PTX/cubin) for every kernel expressible
   in the pure `#[kernel]` DSL.
 - A `cuda` runtime backend (device, buffers, dispatch) behind a shared trait, so
-  `metaltile-std` kernels and the `tile` CLI (`build`/`test`/`bench`) work against
+  `ffai-kernels-std` kernels and the `tile` CLI (`build`/`test`/`bench`) work against
   either backend.
 - Reuse the IR, the `#[kernel]` macro, and the **entire `quant::{codec,format}`
   layer unchanged**.
@@ -55,12 +55,12 @@ eventually tuned) code for both Apple GPUs and NVIDIA GPUs.
 
 | Layer | Crate | Backend-neutral? | Notes |
 |---|---|---|---|
-| Algorithm IR (`Op`, `Kernel`, `DType`, `Shape`, `ConstExpr`) | `metaltile-core` | **Yes** | `op.rs` is abstract math/parallelism; comment already references "backends" (plural). |
-| `#[kernel]` DSL macro | `metaltile-macros` | **Yes** | Produces IR, not MSL. |
-| Quant codec / format / packer | `metaltile-std::quant` | **Yes** | Pure host Rust; the 30-format matrix is layout + arithmetic, no Metal. |
-| Codegen | `metaltile-codegen` | **No** | `emit.rs` + `msl/` emit MSL strings directly; no backend seam yet. |
-| Runtime | `metaltile-runtime` | **No** | `metal_device.rs`, Metal dispatch/buffers, `gpu_family.rs`. |
-| Cooperative kernels (`Op::InlineMsl` with `mpp::`, `coop_tile_*`) | `metaltile-std` | **Partly** | The raw-MSL escape hatch is Metal-only; needs a CUDA analog. |
+| Algorithm IR (`Op`, `Kernel`, `DType`, `Shape`, `ConstExpr`) | `ffai-kernels-core` | **Yes** | `op.rs` is abstract math/parallelism; comment already references "backends" (plural). |
+| `#[kernel]` DSL macro | `ffai-kernels-macros` | **Yes** | Produces IR, not MSL. |
+| Quant codec / format / packer | `ffai-kernels-std::quant` | **Yes** | Pure host Rust; the 30-format matrix is layout + arithmetic, no Metal. |
+| Codegen | `ffai-kernels-codegen` | **No** | `emit.rs` + `msl/` emit MSL strings directly; no backend seam yet. |
+| Runtime | `ffai-kernels-runtime` | **No** | `metal_device.rs`, Metal dispatch/buffers, `gpu_family.rs`. |
+| Cooperative kernels (`Op::InlineMsl` with `mpp::`, `coop_tile_*`) | `ffai-kernels-std` | **Partly** | The raw-MSL escape hatch is Metal-only; needs a CUDA analog. |
 
 So the work is **two new backend modules + one abstraction seam**, not a rewrite.
 

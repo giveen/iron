@@ -22,12 +22,12 @@ Describe any alternative solutions or features you've considered.
 ## Scope
 
 <!-- Which crate(s) would this touch? -->
-- [ ] `metaltile-core`
-- [ ] `metaltile-macros`
-- [ ] `metaltile-codegen`
-- [ ] `metaltile-runtime`
-- [ ] `metaltile-std`
-- [ ] `metaltile-cli`
+- [ ] `ffai-kernels-core`
+- [ ] `ffai-kernels-macros`
+- [ ] `ffai-kernels-codegen`
+- [ ] `ffai-kernels-runtime`
+- [ ] `ffai-kernels-std`
+- [ ] `ffai-kernels-cli`
 
 ## Additional context
 

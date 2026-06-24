@@ -12,8 +12,8 @@ MetalTile was developed with contributions from the following individuals:
 - Eric Kryski (@ekryski): Contributed most of the kernels, including int4, int8, bf16 and fp16 completeness, AURA, image and audio kernels. Additionally, added the initial documentation and performed and catalogued the kernel audit against upstream sources with verification against real model workloads.
 - Ambisphaeric (@Ambisphaeric): CI hygiene, bench dirty-tree guard, GPU correctness tests, a few kernel tuning wins, project bot, and PM duties.
 
-<a href="https://github.com/0xClandestine/metaltile/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=0xClandestine/metaltile&anon=0&columns=20&max=100&r=true" />
+<a href="https://github.com/thewafflehaus/ffai-kernels/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=thewafflehaus/ffai-kernels&anon=0&columns=20&max=100&r=true" />
 </a>
 
 # Third-Party Software

@@ -3,9 +3,9 @@
 `tile` is the command-line driver for benchmarking, building, and inspecting kernels. Install it, or run it through `cargo` from a checkout.
 
 ```bash
-cargo install --path crates/metaltile-cli      # installs the `tile` binary
+cargo install --path crates/ffai-kernels-cli      # installs the `tile` binary
 # or, from a checkout, without installing:
-cargo run -p metaltile-cli -- <command> …
+cargo run -p ffai-kernels-cli -- <command> …
 ```
 
 `make bench` wraps `tile bench`; for the other subcommands run `tile` (or the `cargo run` form) directly.
@@ -25,7 +25,7 @@ tile bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
 | Flag | Effect |
 |---|---|
 | `-f, --filter <substr>` | only run kernels whose name contains `<substr>` |
-| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `MT%` columns and the output-equivalence check. Off by default (the metaltile kernels have superseded the references; correctness lives in `tile test`); roughly doubles bench time |
+| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `MT%` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `tile test`); roughly doubles bench time |
 | `-v` / `-vv` | `-v` adds the roofline (`%BW` / `%FLOP` / arithmetic intensity), occupancy/registers, and a bottleneck verdict (plus the reference latency when `--mlx` is set); `-vv` adds the GPU timing distribution (`p95` / `p99` / `cv%`) |
 | `-o, --json <file>` | also write results as JSON |
 | `--allow-dirty` | run on a dirty working tree (default: refuses, so numbers tie to a clean SHA) |
@@ -47,7 +47,7 @@ applicable, the SIMD pipe otherwise), `AI` (arithmetic intensity, FLOPs/byte),
 the estimated `occ%`/`regs`, and a combined `bottleneck` verdict
 (`memory-bound` / `compute-bound` / `occupancy-limited` / `register-limited` /
 `latency-bound`). Peak ceilings come from a per-device table
-(`crates/metaltile/src/runner/device_specs.rs`); an unknown GPU leaves the roofline
+(`crates/ffai-kernels/src/runner/device_specs.rs`); an unknown GPU leaves the roofline
 columns blank rather than failing.
 
 GFLOP/s, latency, and the roofline figures only appear for kernels that declared

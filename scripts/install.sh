@@ -2,14 +2,14 @@
 # install.sh — download and install the latest tile release binary.
 #
 # Usage:
-#   curl -fsSL https://github.com/0xClandestine/metaltile/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/thewafflehaus/ffai-kernels/releases/latest/download/install.sh | sh
 #
 # By default installs to /usr/local/bin if writable, else ~/.local/bin.
 # Override with TILE_INSTALL_DIR:
 #   TILE_INSTALL_DIR=~/.cargo/bin curl -fsSL ... | sh
 set -eu
 
-REPO="0xClandestine/metaltile"
+REPO="thewafflehaus/ffai-kernels"
 BINARY="tile"
 ASSET="tile-aarch64-apple-darwin.tar.gz"
 

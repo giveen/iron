@@ -1,6 +1,6 @@
-# metaltile kernel-op coverage audit
+# ffai-kernels kernel-op coverage audit
 
-Snapshot of the kernels shipped by `metaltile-std` as of `dev` `c017c94`. Comparison columns track parity with `ml-explore/mlx@main` (commit `2414e5df`) and `ekryski/mlx@alpha` (commit `4919270e`).
+Snapshot of the kernels shipped by `ffai-kernels-std` as of `dev` `c017c94`. Comparison columns track parity with `ml-explore/mlx@main` (commit `2414e5df`) and `ekryski/mlx@alpha` (commit `4919270e`).
 
 ## Summary
 
@@ -26,13 +26,13 @@ NAX requires **macOS 26+** (Metal 4) and **Apple GPU family ≥ 10**:
 - **M5 family** — Apple11 ✓
 - **M1 / M2 / M3** — Apple7/8/9, **no NAX**; correctness tests use a `skip_unless_apple10` runtime gate so the suite still passes on pre-M4 hardware
 
-The runtime gate lives in `crates/metaltile-runtime/src/context.rs::Context::chip_family()` — it reports the highest supported `MTLGPUFamily` value the device claims (returning `None` when no Metal device is available or on the virtualised GPU GitHub macOS runners expose).
+The runtime gate lives in `crates/ffai-kernels-runtime/src/context.rs::Context::chip_family()` — it reports the highest supported `MTLGPUFamily` value the device claims (returning `None` when no Metal device is available or on the virtualised GPU GitHub macOS runners expose).
 
 ### Build-time gating
 
-None. NAX kernels compile unconditionally and register their `inventory::submit!` BenchSpecs alongside every other kernel. `tile build` reports the full 374-kernel count on every host that can compile `metaltile-std`. The decision to dispatch them is made at runtime through `Context::chip_family()` (see [§ CI coverage](#ci-coverage) for the macOS Paravirtual-GPU caveat) and `skip_unless_apple10` guards in the GPU-correctness tests.
+None. NAX kernels compile unconditionally and register their `inventory::submit!` BenchSpecs alongside every other kernel. `tile build` reports the full 374-kernel count on every host that can compile `ffai-kernels-std`. The decision to dispatch them is made at runtime through `Context::chip_family()` (see [§ CI coverage](#ci-coverage) for the macOS Paravirtual-GPU caveat) and `skip_unless_apple10` guards in the GPU-correctness tests.
 
-The previous `metaltile-std/nax` Cargo feature was removed — there's no longer a way to opt out at build time. Dispatching a NAX kernel on pre-M4 hardware will fail at pipeline-creation time when the device rejects the `mpp::tensor_ops::matmul2d` symbol; callers should consult `chip_family()` before selecting the NAX path.
+The previous `ffai-kernels-std/nax` Cargo feature was removed — there's no longer a way to opt out at build time. Dispatching a NAX kernel on pre-M4 hardware will fail at pipeline-creation time when the device rejects the `mpp::tensor_ops::matmul2d` symbol; callers should consult `chip_family()` before selecting the NAX path.
 
 ### NAX kernels
 
@@ -58,7 +58,7 @@ Local verification of NAX kernels is the developer's responsibility on M4+ hardw
 
 ## Op coverage table
 
-| Op | MLX (upstream) | MLX (ekryski@alpha) | metaltile | Notes |
+| Op | MLX (upstream) | MLX (ekryski@alpha) | ffai-kernels | Notes |
 |---|---|---|---|---|
 | arange | ✓ | ✓ | ✓ | `kernels/ops/arange.rs` → `mt_arange`. Generic `T`. |
 | arg_reduce (argmax/argmin → u32 index) | ✓ | ✓ | ✓ | `kernels/ops/arg_reduce.rs` → `mt_argmax<T>` + `mt_argmin<T>`. Both generic over `T` (values widened to f32 for comparison); winning index emitted as `u32`; ties take the smallest index. (The former `ffai_argmax` was a byte-for-byte duplicate of `mt_argmax` and was dropped.) |
@@ -288,12 +288,12 @@ family lacks an integer path.
 
 ### Model-format decode — one codec, no per-oracle drift
 
-The Track-1 `QFormat` matrix above is metaltile's own block-scaled layout. Alongside it,
+The Track-1 `QFormat` matrix above is ffai-kernels's own block-scaled layout. Alongside it,
 several kernels consume **external model formats** with their own on-disk byte layouts but
 the *same* element/scale arithmetic. These all now decode through the shared
-[`quant::codec`](../crates/metaltile-std/src/quant/codec.rs) primitives (`e2m1_decode`,
+[`quant::codec`](../crates/ffai-kernels-std/src/quant/codec.rs) primitives (`e2m1_decode`,
 `e4m3_decode`, `e8m0_decode`, `int8_decode`, `f16_scale_decode`) and the
-[`quant::gguf`](../crates/metaltile-std/src/quant/gguf.rs) host packer/oracle — the single
+[`quant::gguf`](../crates/ffai-kernels-std/src/quant/gguf.rs) host packer/oracle — the single
 source of truth the kernel, the host quantizer, and the CPU correctness oracle all read,
 so an oracle can no longer drift from its kernel (the bug class fixed twice, independently,
 in PRs #264 and #265, once per duplicated copy of the layout map):
@@ -347,11 +347,11 @@ Some hot-path patterns require codegen-layer support to land cleanly and are doc
 - **`fast::` math intrinsics** — `mt_mel_spectrogram`, `mt_softmax`, `mt_logsumexp`, `mt_vocoder_istft` use IEEE-precise built-ins. Switching to `fast::exp`/`fast::log`/`fast::sin`/`fast::cos` would give ~1.5–2× speedup at 1–3 ULP. Needs new `UnaryOpKind` IR variants + precision validation against existing test tolerances.
 - **K-loop software pipelining** — overlap next K-block load with current MMA in MMA-tiled K-loop kernels. ~15–25 % throughput win on M3+. Needs a new `Op::PrefetchAsync` IR op + a `prefetch.rs` codegen pass.
 
-Already in place: **`float4` / `half4` vectorized X loads** via the existing `VectorizePass` (`crates/metaltile-codegen/src/passes/vectorize.rs`). **fp32 accumulators** are correctness-required across all production shapes; the f16/bf16-accumulator proposal was rejected.
+Already in place: **`float4` / `half4` vectorized X loads** via the existing `VectorizePass` (`crates/ffai-kernels-codegen/src/passes/vectorize.rs`). **fp32 accumulators** are correctness-required across all production shapes; the f16/bf16-accumulator proposal was rejected.
 
 ## Fence ops — intentionally out of scope
 
-MLX's `fence.metal` (`mlx/backend/metal/kernels/fence.metal`, ~52 lines) is **not a compute kernel** — it's a GPU-side synchronisation primitive. Deliberately not ported to metaltile; the `fence` audit row is marked `—` rather than `✗`.
+MLX's `fence.metal` (`mlx/backend/metal/kernels/fence.metal`, ~52 lines) is **not a compute kernel** — it's a GPU-side synchronisation primitive. Deliberately not ported to ffai-kernels; the `fence` audit row is marked `—` rather than `✗`.
 
 ### What the fence ops are
 
@@ -370,9 +370,9 @@ So MLX itself treats the GPU spin-wait fence as an opt-in latency micro-optimiza
 
 - FFAI's current pipeline is single-stream autoregressive decode. Within a forward pass, Metal's automatic hazard tracking orders kernels in a command buffer for free; across command buffers on one queue, submission order suffices.
 - CPU/GPU pipelining (build command buffer N+1 while the GPU runs N) is `commit` + completion handlers, not a fence.
-- For genuine cross-queue / cross-stream GPU sync, `MTLEvent` / `MTLSharedEvent` (encoder-level — `encodeWaitForEvent` / `encodeSignalEvent`) are the correct, power-efficient primitive, and they belong in `metaltile-runtime`'s dispatch layer, not as a `#[kernel]`.
+- For genuine cross-queue / cross-stream GPU sync, `MTLEvent` / `MTLSharedEvent` (encoder-level — `encodeWaitForEvent` / `encodeSignalEvent`) are the correct, power-efficient primitive, and they belong in `ffai-kernels-runtime`'s dispatch layer, not as a `#[kernel]`.
 - A `fence_wait` spin-wait is a deliberate near-infinite GPU loop: it burns a shader core + power, and a counter that never updates (a bug, a wrong dispatch) is a permanent GPU pin → hard reboot.
 
 ### When this could change
 
-If FFAI later runs **multiple concurrent GPU streams** — e.g. speculative decoding (draft/target overlap), prefill/decode overlap, or ANE+GPU concurrency — it will need cross-stream ordering. The right implementation is `MTLEvent`-based encoder-level sync added to `metaltile-runtime` (MLX's own default), **not** a spin-wait `#[kernel]`. Only if profiling later shows that `MTLEvent`'s command-processor latency is a measured bottleneck for an ultra-fine-grained sync pattern would the opt-in spin-wait become worth revisiting — and even then it's a runtime concern, not a metaltile kernel.
+If FFAI later runs **multiple concurrent GPU streams** — e.g. speculative decoding (draft/target overlap), prefill/decode overlap, or ANE+GPU concurrency — it will need cross-stream ordering. The right implementation is `MTLEvent`-based encoder-level sync added to `ffai-kernels-runtime` (MLX's own default), **not** a spin-wait `#[kernel]`. Only if profiling later shows that `MTLEvent`'s command-processor latency is a measured bottleneck for an ultra-fine-grained sync pattern would the opt-in spin-wait become worth revisiting — and even then it's a runtime concern, not a ffai-kernels kernel.

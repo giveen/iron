@@ -20,12 +20,12 @@
 
 A Rust-embedded DSL for writing GPU kernels once and running them everywhere. Write tile-level algorithms in Rust with `#[kernel]`, and the same kernel source lowers to **four GPU backends** — Apple Metal (MSL), NVIDIA (CUDA), AMD (HIP/ROCm), and any Vulkan-class GPU (SPIR-V) — verified against, and frequently faster than, hand-tuned MLX.
 
-Write once, run on Apple, NVIDIA, AMD, and Vulkan-class GPUs — no per-backend kernel rewrite. metaltile is the kernel layer beneath an LLM inference engine that runs a 30B-parameter hybrid model (Mamba2 SSM + 128-expert MoE + GQA attention) resident-decode on a single Grace-Blackwell (GB10) box; the same kernels also run on Apple GPUs.
+Write once, run on Apple, NVIDIA, AMD, and Vulkan-class GPUs — no per-backend kernel rewrite. ffai-kernels is the kernel layer beneath an LLM inference engine that runs a 30B-parameter hybrid model (Mamba2 SSM + 128-expert MoE + GQA attention) resident-decode on a single Grace-Blackwell (GB10) box; the same kernels also run on Apple GPUs.
 
 ## Installation
 
 ```sh
-curl -fsSL https://github.com/0xClandestine/metaltile/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/thewafflehaus/ffai-kernels/releases/latest/download/install.sh | sh
 ```
 
 Run `tile update` at any time to upgrade to the latest release.
@@ -85,7 +85,7 @@ kernel void mt_exp(
 **2. Install the CLI and run.**
 
 ```sh
-cargo install --path crates/metaltile-cli
+cargo install --path crates/ffai-kernels-cli
 tile bench --filter mlx/gemv
 ```
 
@@ -107,9 +107,9 @@ Read the [docs](docs/) to learn more.
 
 ## Architecture
 
-One `#[kernel]` DSL, four GPU backends. Your kernel lowers to a shared IR; the codegen passes optimise it once; then each backend emitter turns that IR into the target's native shader source. Two **peer hosts** consume the same kernels with no FFI between them — a Swift host (Metal/Apple, ships to the App Store) and the Rust host (`metaltile-runtime` + downstream engine crates).
+One `#[kernel]` DSL, four GPU backends. Your kernel lowers to a shared IR; the codegen passes optimise it once; then each backend emitter turns that IR into the target's native shader source. Two **peer hosts** consume the same kernels with no FFI between them — a Swift host (Metal/Apple, ships to the App Store) and the Rust host (`ffai-kernels-runtime` + downstream engine crates).
 
-![metaltile architecture](docs/architecture.png)
+![ffai-kernels architecture](docs/architecture.png)
 
 `#[kernel]` lowers your DSL function to IR; the codegen passes optimise it; each backend emitter then produces native shader source — MSL (`.metal`, compiled by `xcrun metal`), CUDA C++ (NVRTC → PTX at runtime), HIP C++ (hipRTC → AMDGPU code object), or SPIR-V (via shaderc). `#[bench]` / `#[test_kernel]` are optional annotations on the same function that register a setup callback the runner uses to dispatch the kernel and measure it (or diff against a CPU oracle).
 
@@ -124,13 +124,13 @@ One `#[kernel]` DSL, four GPU backends. Your kernel lowers to a shared IR; the c
 
 The non-Metal backends are opt-in Cargo features so the macOS Metal path stays zero-config and dependency-light. Each requires its toolchain/driver at link/run time (CUDA toolkit, ROCm, or the Vulkan SDK). HIP and Vulkan have the full kernel set implemented (codegen-complete); end-to-end model validation is in progress — they are not yet verified against a full model run. See `specs/AMD_BACKEND_SPEC.md` and `specs/VULKAN_BACKEND_SPEC.md`.
 
-The CUDA runtime (`crates/metaltile-runtime/src/device/cuda/`) adds NVRTC runtime kernel compile, a dedicated capturable non-blocking stream, CUDA-graph capture hooks (`begin_capture` / `end_capture` / `graph_launch`), a buffer pool, pinned async host-to-device copies, and an optional `--fmad` codegen gate (`MT_FMAD=1`). See `specs/CUDA_BACKEND_SPEC.md`.
+The CUDA runtime (`crates/ffai-kernels-runtime/src/device/cuda/`) adds NVRTC runtime kernel compile, a dedicated capturable non-blocking stream, CUDA-graph capture hooks (`begin_capture` / `end_capture` / `graph_launch`), a buffer pool, pinned async host-to-device copies, and an optional `--fmad` codegen gate (`MT_FMAD=1`). See `specs/CUDA_BACKEND_SPEC.md`.
 
 > Today `tile bench` / `tile test` dispatch through the in-process `GpuRunner` on the Metal path; moving the runner into a dedicated subprocess (for isolation and parallelism) and wiring the CLI harness across all backends (Phase 6) is planned.
 
 ## Scope & naming
 
-metaltile began as a Metal-only (MSL) kernel/code generator. It now emits MSL, CUDA, HIP, and Vulkan (SPIR-V) from a single `#[kernel]` DSL, so the "metal" in the name understates the current scope. A rename is under discussion to better reflect the multi-backend reality — a candidate is **TileForge**, but this is not final and is open for discussion. The current name (`metaltile`) still applies everywhere until any rename is decided.
+ffai-kernels began as a Metal-only (MSL) kernel/code generator. It now emits MSL, CUDA, HIP, and Vulkan (SPIR-V) from a single `#[kernel]` DSL, so the "metal" in the name understates the current scope. A rename is under discussion to better reflect the multi-backend reality — a candidate is **TileForge**, but this is not final and is open for discussion. The current name (`ffai-kernels`) still applies everywhere until any rename is decided.
 
 ## CLI reference
 
@@ -151,13 +151,13 @@ See [`docs/cli.md`](docs/cli.md) for the full flag surface.
 
 | Crate | Role |
 |---|---|
-| `metaltile-core` | Core IR types and `Op` variants shared by every backend. |
-| `metaltile-macros` | The `#[kernel]` / `#[bench]` / `#[test_kernel]` proc-macros. |
-| `metaltile-codegen` | IR optimisation passes + the four backend emitters (`msl/`, `cuda/`, `hip/`, `spirv/`). |
-| `metaltile-runtime` | Host runtime + per-backend device modules (`device/{metal,cuda,hip,vulkan}/`); CUDA/HIP/Vulkan behind the `cuda`/`hip`/`vulkan` features. |
-| `metaltile-std` | Kernel standard library — bench/test metadata and shared type definitions. |
-| `metaltile` | Umbrella crate re-exporting the public DSL surface. |
-| `metaltile-cli` | The `tile` CLI — build, bench, test, inspect. |
+| `ffai-kernels-core` | Core IR types and `Op` variants shared by every backend. |
+| `ffai-kernels-macros` | The `#[kernel]` / `#[bench]` / `#[test_kernel]` proc-macros. |
+| `ffai-kernels-codegen` | IR optimisation passes + the four backend emitters (`msl/`, `cuda/`, `hip/`, `spirv/`). |
+| `ffai-kernels-runtime` | Host runtime + per-backend device modules (`device/{metal,cuda,hip,vulkan}/`); CUDA/HIP/Vulkan behind the `cuda`/`hip`/`vulkan` features. |
+| `ffai-kernels-std` | Kernel standard library — bench/test metadata and shared type definitions. |
+| `ffai-kernels` | Umbrella crate re-exporting the public DSL surface. |
+| `ffai-kernels-cli` | The `tile` CLI — build, bench, test, inspect. |
 
 The Swift host (`MetalTileSwift`, Metal/Apple, App Store) is a separate peer consumer of the same kernels and lives outside this workspace.
 
@@ -168,7 +168,7 @@ Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for the iss
 ## Acknowledgements
 
 MetalTile's benchmark suite and kernel library stand on the shoulders of the MLX ecosystem. A large
-portion of the `metaltile-std` kernels are ports or faithful re-implementations of kernels from the following projects:
+portion of the `ffai-kernels-std` kernels are ports or faithful re-implementations of kernels from the following projects:
 
 - [**ml-explore/mlx**](https://github.com/ml-explore/mlx) — primary source for reference kernels.
 - [**ekryski/mlx**](https://github.com/ekryski/mlx) (`alpha`) — FFAI extensions: gated-delta, SSM replay, AURA codec.

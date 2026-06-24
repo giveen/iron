@@ -24,7 +24,7 @@ Table of contents for the MetalTile docs. The top-level [`README`](../README.md)
 Long-form specs and design docs live in [`specs/`](specs/).
 
 - [Bench metrics spec](specs/BENCH_METRICS_SPEC.md) — planned `tile bench` measurement additions (latency, GFLOP/s, roofline/utilization, bottleneck) so kernels can actually be optimized and precisions compared; includes the precision-support roadmap (nvfp4/mxfp4/mxfp8) and M5 Neural Accelerator context.
-- [Kernel consolidation plan](specs/KERNEL_CONSOLIDATION_PLAN.md) — the singular roadmap for restructuring `metaltile-std`'s kernels: the `kernels/<family>/` target layout, the three LOC-reduction tools, the proven `conv/` exemplar, and the family-by-family migration order. (Authoring style lives in the [style guide](STYLE_GUIDE.md).)
+- [Kernel consolidation plan](specs/KERNEL_CONSOLIDATION_PLAN.md) — the singular roadmap for restructuring `ffai-kernels-std`'s kernels: the `kernels/<family>/` target layout, the three LOC-reduction tools, the proven `conv/` exemplar, and the family-by-family migration order. (Authoring style lives in the [style guide](STYLE_GUIDE.md).)
 - [Toolchain design](specs/TOOLCHAIN_DESIGN.md) — the `#[kernel]` / `#[bench]` / `#[test_kernel]` macro surface and how the IR lowers to MSL.
 - [Proposed optimizations](specs/PROPOSED_OPTIMIZATIONS.md) — hot-path patterns that need codegen-layer support, with rationale and implementation sketches.
 

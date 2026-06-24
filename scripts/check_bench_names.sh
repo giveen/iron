@@ -39,7 +39,7 @@ while IFS= read -r match; do
     fi
 done < <(grep -rn '#\[bench(' "$CRATES_DIR" \
             --include='*.rs' \
-            --exclude-dir='metaltile-macros')
+            --exclude-dir='ffai-kernels-macros')
 
 if [[ ${#bad_lines[@]} -eq 0 ]]; then
     echo "✓ All #[bench] names use a known CI group prefix (${KNOWN_GROUPS[*]})."

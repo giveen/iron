@@ -84,7 +84,7 @@ integer arithmetic across BinOp / Select / DeclareLocal / Load chains.
 
 ## What landed in Phase 3 (codegen + runtime)
 
-### Codegen (`metaltile-codegen/src/spirv/mod.rs`)
+### Codegen (`ffai-kernels-codegen/src/spirv/mod.rs`)
 
 - Full fp16 / bf16 / i8 / u8 / i16 / u16 / i64 / u64 dtype coverage with
   `mt_bf16_to_f32` / `mt_f32_to_bf16` helpers and `scalar` block layout.
@@ -115,7 +115,7 @@ integer arithmetic across BinOp / Select / DeclareLocal / Load chains.
   (`shared`, `length`, `input`, `output`, …).
 - `mt_atan2` helper to bypass AMD driver `atan(y, x)` quirk.
 
-### Runtime (`metaltile-runtime/src/device/vulkan/`)
+### Runtime (`ffai-kernels-runtime/src/device/vulkan/`)
 
 - Vulkan 1.3 feature chain: `subgroupSizeControl` + `computeFullSubgroups`
   + 1.2's `shaderFloat16` / `shaderInt8` / 16-bit + 8-bit storage /
@@ -123,7 +123,7 @@ integer arithmetic across BinOp / Select / DeclareLocal / Load chains.
   fallback path if any of these fail.
 - `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` pinned to 32 at
   every compute pipeline creation so `subgroupAdd` etc. reduce within a
-  32-lane SIMD group (matches the metaltile kernels' Apple-simdgroup
+  32-lane SIMD group (matches the ffai-kernels kernels' Apple-simdgroup
   assumption — AMD compute defaults to 64 for small workgroups).
 - Descriptor pool reset between dispatches.
 - Strided companion buffer synthesis from static shape.
@@ -134,10 +134,10 @@ integer arithmetic across BinOp / Select / DeclareLocal / Load chains.
 $env:Path += ";$env:USERPROFILE\.cargo\bin;C:\Program Files\AMD\ROCm\7.1\bin"
 
 # Smokes (under 1 minute):
-cargo test -p metaltile-runtime --features hip,vulkan --tests -- --nocapture
+cargo test -p ffai-kernels-runtime --features hip,vulkan --tests -- --nocapture
 
 # Full corpora (HIP ≈ 25 min through 4000+ hipRTC compiles;
 # Vulkan ≈ 2-3 min through 4000+ shaderc compiles):
-cargo test -p metaltile-std --features hip --test hip_kernel_corpus -- --nocapture
-cargo test -p metaltile-std --features vulkan --test vulkan_kernel_corpus -- --nocapture
+cargo test -p ffai-kernels-std --features hip --test hip_kernel_corpus -- --nocapture
+cargo test -p ffai-kernels-std --features vulkan --test vulkan_kernel_corpus -- --nocapture
 ```

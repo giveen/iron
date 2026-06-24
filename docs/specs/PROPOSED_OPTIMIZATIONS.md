@@ -1,4 +1,4 @@
-# Proposed Micro-Optimizations — metaltile perf kernels
+# Proposed Micro-Optimizations — ffai-kernels perf kernels
 
 Generated: 2026-05-23  
 Branch: `ek/t4-microopts`  
@@ -20,10 +20,10 @@ would need to change before it could land.
 `mt_qmm_mma_int8`, `mt_qmm_mma_m16_int8`.
 
 **Finding**: The `VectorizePass` in
-`crates/metaltile-codegen/src/passes/vectorize.rs` already detects
+`crates/ffai-kernels-codegen/src/passes/vectorize.rs` already detects
 consecutive `Load` ops at contiguous indices and promotes them to
 `Op::VectorLoad` with width up to 4 (`MAX_VEC_RUN = 4`).  The MSL
-emitter (`crates/metaltile-codegen/src/msl/emit_block.rs`) then lowers
+emitter (`crates/ffai-kernels-codegen/src/msl/emit_block.rs`) then lowers
 `VectorLoad{len:4, dtype:F32}` → `float4`, `{len:4, dtype:F16}` →
 `half4`, `{len:4, dtype:BF16}` → `bfloat4`.
 
@@ -123,7 +123,7 @@ hardware or future non-Apple targets), add a `FastPath` flag to the
 store), `vocoder_istft` (sin/cos inner iDFT).
 
 **Current emission**: `UnaryOpKind::{Exp,Log,Sin,Cos}` in
-`crates/metaltile-core/src/ir.rs` emit `exp(arg)`, `log(arg)`,
+`crates/ffai-kernels-core/src/ir.rs` emit `exp(arg)`, `log(arg)`,
 `sin(arg)`, `cos(arg)` — IEEE-754 precise Metal built-ins.  No
 `fast::exp`, `fast::log`, `fast::sin`, `fast::cos` variants exist
 anywhere in the codegen stack.
@@ -154,7 +154,7 @@ argument range analysis as `mel_spectrogram`.  Safe.
 
 **What needs to change**:
 
-1. **New `UnaryOpKind` variants** in `metaltile-core/src/ir.rs`:
+1. **New `UnaryOpKind` variants** in `ffai-kernels-core/src/ir.rs`:
    ```rust
    FastExp,
    FastLog,
@@ -164,7 +164,7 @@ argument range analysis as `mel_spectrogram`.  Safe.
    ```
    with `msl_emit` returning `fast::exp(arg)` etc.
 
-2. **New DSL keywords** in `metaltile-macros/src/body_parser.rs`:
+2. **New DSL keywords** in `ffai-kernels-macros/src/body_parser.rs`:
    ```rust
    "fast_exp"  => quote! { UnaryOpKind::FastExp },
    "fast_log"  => quote! { UnaryOpKind::FastLog },
@@ -181,10 +181,10 @@ argument range analysis as `mel_spectrogram`.  Safe.
 
 4. **Kernel edits**: Replace `sin`/`cos`/`exp`/`log` with `fast_sin` /
    `fast_cos` / `fast_exp` / `fast_log` at the relevant call sites in:
-   - `crates/metaltile-std/src/ffai/mel_spectrogram.rs`
-   - `crates/metaltile-std/src/mlx/softmax.rs`
-   - `crates/metaltile-std/src/mlx/logsumexp.rs`
-   - `crates/metaltile-std/src/ffai/vocoder.rs`
+   - `crates/ffai-kernels-std/src/ffai/mel_spectrogram.rs`
+   - `crates/ffai-kernels-std/src/mlx/softmax.rs`
+   - `crates/ffai-kernels-std/src/mlx/logsumexp.rs`
+   - `crates/ffai-kernels-std/src/ffai/vocoder.rs`
 
 **Risk**: If the fast-math approximation error accumulates over many
 inner-loop iterations (e.g. 400 DFT taps), the cosine similarity of the

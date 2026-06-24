@@ -39,10 +39,10 @@ GB/s alone can't tell you the int4 path is *fastest* (¼ the bytes), nor that th
 
 ## 3. Current state (what already exists)
 
-- **`BenchStats`** (`crates/metaltile-std/src/stats.rs`) already captures per-kernel timing: `min_us`, `mean_us`, `median_us`, `p95_us`, `p99_us`, `stddev_us`, `cv_pct`. **Latency is measured but not surfaced** in the default table or JSON.
-- **`OpResult`** (`crates/metaltile-std/src/bench_types.rs`) carries `ref_perf`/`mt_perf` (GB/s), `equiv`, and optional `mt_timing`/`ref_timing` (`BenchStats`).
-- **`run_kernel_bench`** (`crates/metaltile-std/src/run_kernel.rs`) computes `gbps` from `bench_gbps(...)` and **discards the `BenchStats`** (`let (gbps, _stats) = ...`). `bytes_moved` comes from `BenchSetup::compute_bytes_moved()` (sum of buffer sizes unless overridden via `.bytes_moved()`).
-- **`-vv` profile** (`compute_profiles` in `crates/metaltile-cli/src/cmd/bench.rs`) already shows `occ%`, `regs`, and a coarse `bottleneck` label (e.g. "register-limited"), plus `p95/p99/cv%`.
+- **`BenchStats`** (`crates/ffai-kernels-std/src/stats.rs`) already captures per-kernel timing: `min_us`, `mean_us`, `median_us`, `p95_us`, `p99_us`, `stddev_us`, `cv_pct`. **Latency is measured but not surfaced** in the default table or JSON.
+- **`OpResult`** (`crates/ffai-kernels-std/src/bench_types.rs`) carries `ref_perf`/`mt_perf` (GB/s), `equiv`, and optional `mt_timing`/`ref_timing` (`BenchStats`).
+- **`run_kernel_bench`** (`crates/ffai-kernels-std/src/run_kernel.rs`) computes `gbps` from `bench_gbps(...)` and **discards the `BenchStats`** (`let (gbps, _stats) = ...`). `bytes_moved` comes from `BenchSetup::compute_bytes_moved()` (sum of buffer sizes unless overridden via `.bytes_moved()`).
+- **`-vv` profile** (`compute_profiles` in `crates/ffai-kernels-cli/src/cmd/bench.rs`) already shows `occ%`, `regs`, and a coarse `bottleneck` label (e.g. "register-limited"), plus `p95/p99/cv%`.
 - **JSON** (`tile bench --json`) emits only `{op, shape, metric, ref, mt}` — consumed by baseline diffing; must stay backward-compatible.
 
 ## 4. Proposed additions
@@ -120,7 +120,7 @@ Goal: **support all precisions in every weight-bearing kernel** (matmul/gemv/att
 | int8 (symmetric) | int8 | group 64 | per-group FP32 | ✅ (`Int8`) |
 | int2–8 affine | int | group 64 | per-group scale+bias | ✅ (qmv/qmm/gather — current, **not** legacy: MLX-checkpoint + KV-cache interop) |
 
-**Status (✅ FULL MATRIX implemented):** spec-conformant block-scaled codecs (`crates/metaltile-std/src/quant/{codec,format}.rs`) — the single source of truth shared by the host packer, the CPU correctness oracle, and the kernels via first-class DSL decode intrinsics (`e2m1_decode`/`e4m3_decode`/`e5m2_decode`/`int8_decode`). **All 9 quant formats** (int8, legacy fp4, legacy fp8 e4m3/e5m2, mxfp4, nvfp4, mxfp8 e4m3/e5m2, nvfp8) are wired across **every weight-bearing family** in fp16/bf16/fp32 activation:
+**Status (✅ FULL MATRIX implemented):** spec-conformant block-scaled codecs (`crates/ffai-kernels-std/src/quant/{codec,format}.rs`) — the single source of truth shared by the host packer, the CPU correctness oracle, and the kernels via first-class DSL decode intrinsics (`e2m1_decode`/`e4m3_decode`/`e5m2_decode`/`int8_decode`). **All 9 quant formats** (int8, legacy fp4, legacy fp8 e4m3/e5m2, mxfp4, nvfp4, mxfp8 e4m3/e5m2, nvfp8) are wired across **every weight-bearing family** in fp16/bf16/fp32 activation:
 
 | family | file |
 |---|---|
@@ -180,8 +180,8 @@ self-consistent. The geometry is one simdgroup per query, identical across dims 
 the per-lane dim count changes), so the extension added no freeze surface.
 
 > **Test-gate note:** the `#[test_kernel]` harness (`tests/kernel_tests_harness.rs`)
-> must enumerate the registry via `metaltile_std::all_tests()`, not
-> `metaltile::harness::registry::all_tests()` — the latter leaves metaltile-std's
+> must enumerate the registry via `ffai_kernels_std::all_tests()`, not
+> `ffai-kernels::harness::registry::all_tests()` — the latter leaves ffai-kernels-std's
 > inventory statics dead-code-eliminated from the integration-test link, so the
 > harness silently runs **zero** checks (a vacuous gate). With the correct
 > accessor it runs ~1910 GPU-correctness checks, all green on f32/f16/bf16.

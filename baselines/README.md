@@ -8,7 +8,7 @@ output directory used by `tile snap`).
 Workflow when adding a new baseline:
 
 1. Sync to the SHA you want to capture (typically `dev` HEAD).
-2. `cargo build --release -p metaltile-cli`
+2. `cargo build --release -p ffai-kernels-cli`
 3. `tile bench --json /tmp/bench-raw.json`
 4. `tile snap --from /tmp/bench-raw.json -o baselines/<chip-slug>.json
    --note "<context, e.g. compiler flags, env vars>"`
@@ -105,7 +105,7 @@ optimal block size differs from M3/M4.
 
 ```sh
 git checkout 0cb0a85           # the SHA this baseline was captured against
-cargo build --release -p metaltile-cli
+cargo build --release -p ffai-kernels-cli
 ./target/release/tile device   # confirm "Apple M5 Max" / "Apple10 (M5)"
 # Auto-diffs against the merge-base baseline on success; emits JSON
 # at /tmp/bench.json for snap/diff round-trips.

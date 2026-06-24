@@ -27,7 +27,7 @@ flag_management:
   individual_flags:
     - name: codegen
       paths:
-        - crates/metaltile-codegen/
+        - crates/ffai-kernels-codegen/
       statuses:
         - type: project
           target: auto
@@ -35,7 +35,7 @@ flag_management:
           if_ci_failed: success
     - name: core
       paths:
-        - crates/metaltile-core/
+        - crates/ffai-kernels-core/
       statuses:
         - type: project
           target: auto
@@ -43,7 +43,7 @@ flag_management:
           if_ci_failed: success
     - name: macros
       paths:
-        - crates/metaltile-macros/
+        - crates/ffai-kernels-macros/
       statuses:
         - type: project
           target: auto
@@ -51,7 +51,7 @@ flag_management:
           if_ci_failed: success
     - name: runtime
       paths:
-        - crates/metaltile-runtime/
+        - crates/ffai-kernels-runtime/
       statuses:
         - type: project
           target: auto
@@ -59,7 +59,7 @@ flag_management:
           if_ci_failed: success
     - name: cli
       paths:
-        - crates/metaltile-cli/
+        - crates/ffai-kernels-cli/
       statuses:
         - type: project
           target: auto
@@ -73,9 +73,9 @@ flag_management:
 #     validated end-to-end via `tile bench` numerical-equiv vs MLX)
 #   - tests, benches, build scripts
 ignore:
-  - "crates/metaltile/src/lib.rs"
-  - "crates/metaltile/src/prelude.rs"
-  - "crates/metaltile-std/src/kernels/**"
+  - "crates/ffai-kernels/src/lib.rs"
+  - "crates/ffai-kernels/src/prelude.rs"
+  - "crates/ffai-kernels-std/src/kernels/**"
   - "**/tests/**"
   - "**/benches/**"
   - "**/build.rs"

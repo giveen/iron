@@ -7,15 +7,15 @@
 
 ### HIP / ROCm
 - **Wave64 (CDNA) transform** — `HipGenerator::with_profile(TargetProfile::hip_wave64())` now propagates `lane_width = 64` to the inner CUDA generator (so the reduction tree is sized for 64-lane warps) and widens the shuffle mask from `0xffffffffull` (wave32) to `0xffffffffffffffffull` (wave64) in the textual transform. Unit-tested in `hip::tests::wave32_emits_32bit_mask` / `wave64_emits_64bit_mask`. **No CDNA hardware on hand → HW validation deferred.**
-- **HIP corpus harness** — `metaltile-std/tests/hip_kernel_corpus.rs` runs every registered `#[test_kernel]` through `HipDevice::run_kernel`. PASS / MISMATCH / UNSUPPORTED / ERROR triage matches the CUDA corpus, so results are comparable. Hard ERROR budget = 64 (anything past that signals a codegen regression, not numerics).
+- **HIP corpus harness** — `ffai-kernels-std/tests/hip_kernel_corpus.rs` runs every registered `#[test_kernel]` through `HipDevice::run_kernel`. PASS / MISMATCH / UNSUPPORTED / ERROR triage matches the CUDA corpus, so results are comparable. Hard ERROR budget = 64 (anything past that signals a codegen regression, not numerics).
 
 ### Vulkan / SPIR-V
 - **`KernelMode::Reduction` lowering** — per-thread grid-stride accumulator (`Op::StrideReduce`) → workgroup-shared barrier-tree (`Op::Reduce`). The reduction is **subgroup-width agnostic** (the portable path called out in `VULKAN_BACKEND_SPEC.md §4.1`), depending only on `local_size_x` and `barrier()`. **`row_reduce_sum` bit-accurate (max_rel = 3.32e-7) on RX 9070 XT.**
 - **`KernelMode::Grid3D` lowering** — per-axis `gl_GlobalInvocationID.{x,y,z}`. Same wiring as CUDA's `blockIdx.*`/`threadIdx.*`.
 - **3-D dispatch / 3-D workgroup** — `GlslGenerator::with_local_size_3d`, `VulkanDevice::run_kernel(&kernel, &bufs, grid: [u32;3], block: [u32;3])`. Same calling convention as `HipDevice` and `CudaDevice` so the corpus harness shares its loop.
 - **Broader op coverage** — added `Select`, `DeclareLocal`/`SetLocal`, `ThreadgroupAlloc`/`Load`/`Store`, `StackAlloc`/`Load`/`Store`, `Barrier`, `Loop`/`If` (nested-block recursion mirroring CUDA), `Zeros`/`Splat` scalar.
-- **`safe_glsl_ident` shim** — metaltile param names like `out` / `in` / `inout` collide with GLSL keywords. We rename them to `_b_out` / `_b_in` / `_b_inout` *only* inside SSBO arrays + array accesses, preserving readability for any non-conflicting param name.
-- **Vulkan corpus harness** — `metaltile-std/tests/vulkan_kernel_corpus.rs`, same triage as HIP / CUDA.
+- **`safe_glsl_ident` shim** — ffai-kernels param names like `out` / `in` / `inout` collide with GLSL keywords. We rename them to `_b_out` / `_b_in` / `_b_inout` *only* inside SSBO arrays + array accesses, preserving readability for any non-conflicting param name.
+- **Vulkan corpus harness** — `ffai-kernels-std/tests/vulkan_kernel_corpus.rs`, same triage as HIP / CUDA.
 
 ## Gotchas (Phase-2 additions)
 
@@ -31,7 +31,7 @@
 2. **GLSL reserved-word collisions.** Any param named `out`, `in`,
    `inout`, `uniform`, etc. gets a `_b_` prefix in the emitted SSBO.
    We hit `out` immediately in `row_reduce_sum` — the standard "output
-   buffer" name in the metaltile corpus.
+   buffer" name in the ffai-kernels corpus.
 3. **`shared` arrays must live at file scope** in GLSL. Phase-2 hoists
    every `Op::ThreadgroupAlloc` and the implicit `_red_<vid>` reduction
    scratch buffers to file scope by walking every block before
@@ -115,19 +115,19 @@ math) and a sanity check that the codegen paths are aligned.
 $env:Path += ";$env:USERPROFILE\.cargo\bin;C:\Program Files\AMD\ROCm\7.1\bin"
 
 # Quick smokes (under 1 minute):
-cargo test -p metaltile-runtime --features hip --test hip_smoke -- --nocapture
-cargo test -p metaltile-runtime --features vulkan --test vulkan_smoke -- --nocapture
+cargo test -p ffai-kernels-runtime --features hip --test hip_smoke -- --nocapture
+cargo test -p ffai-kernels-runtime --features vulkan --test vulkan_smoke -- --nocapture
 
 # Full corpus runs (multiple minutes — ~4164 kernels × dtypes):
-cargo test -p metaltile-std --features hip --test hip_kernel_corpus -- --nocapture
-cargo test -p metaltile-std --features vulkan --test vulkan_kernel_corpus -- --nocapture
+cargo test -p ffai-kernels-std --features hip --test hip_kernel_corpus -- --nocapture
+cargo test -p ffai-kernels-std --features vulkan --test vulkan_kernel_corpus -- --nocapture
 ```
 
 Dump generated source for a single kernel:
 
 ```pwsh
 $env:DUMP_HIP = "rms_norm"
-cargo test -p metaltile-std --features hip --test hip_kernel_corpus -- --nocapture
+cargo test -p ffai-kernels-std --features hip --test hip_kernel_corpus -- --nocapture
 # or DUMP_VK for Vulkan/GLSL
 ```
 

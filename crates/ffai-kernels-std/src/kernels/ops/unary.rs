@@ -1,0 +1,945 @@
+//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! SPDX-License-Identifier: Apache-2.0
+//! Unary elementwise benchmark — #[kernel] DSL vs MLX metal/unary.metal
+
+use ffai_kernels::kernel;
+
+#[kernel]
+pub fn mt_exp<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], exp(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_log<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], log(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_sqrt<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], sqrt(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_rsqrt<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], rsqrt(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_abs<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], abs(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_silu<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], silu(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_gelu<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], gelu(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_relu<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], relu(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_cos<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], cos(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_sin<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], sin(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_ceil<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], ceil(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_floor<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], floor(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_erf<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], erf(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_exp2<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], exp2(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_log2<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], log2(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_sign<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], sign(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_round<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], round(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_neg<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], -load(a[idx]));
+}
+
+#[kernel]
+pub fn mt_recip<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], 1.0f32.cast::<T>() / load(a[idx]));
+}
+
+#[kernel]
+pub fn mt_square<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    let x = load(a[idx]);
+    store(out[idx], x * x);
+}
+
+#[kernel]
+pub fn mt_sigmoid<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    // Compute in f32 to match MLX precision (convert back to T at store).
+    let x = load(a[idx]).cast::<f32>();
+    let result = 1.0f32 / (1.0f32 + exp(-x));
+    store(out[idx], result.cast::<T>());
+}
+
+#[kernel]
+pub fn mt_log1p<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    let x = load(a[idx]);
+    store(out[idx], log(1.0f32.cast::<T>() + x));
+}
+
+// ─── Transcendental ops shipped as discrete MLX kernels ───────────────
+// Every op below has a matching `instantiate_unary_float` in MLX's
+// unary.metal and produces a kernel named `v_<Op>{tn}{tn}`.
+
+#[kernel]
+pub fn mt_sinh<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], sinh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_cosh<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], cosh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_tan<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], tan(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_tanh_op<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], tanh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_asin<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], asin(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_atan<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], atan(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_asinh<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], asinh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_acos<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], acos(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_trunc<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], trunc(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_acosh<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], acosh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_atanh<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], atanh(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_expm1<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], expm1(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_log10<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], log10(load(a[idx])));
+}
+
+#[kernel]
+pub fn mt_erfinv<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    store(out[idx], erfinv(load(a[idx])));
+}
+
+/// New-syntax correctness for the simple unary elementwise ops.
+///
+/// Each test rounds its input to `dt` (so the oracle sees what the GPU loads),
+/// computes the f32 reference, and compares per-dtype. Exact ops (abs, relu,
+/// neg, sign, ceil, floor, round, trunc) hold at 1e-6; transcendentals use a
+/// generous-but-bounded per-dtype band that still catches an empty-body or
+/// wrong-formula kernel. `erf`/`gelu`/`erfinv` are bench-only — there's no
+/// std f32 oracle for them (the legacy test didn't cover them either).
+// Device-glue casts + scalar scale (keep activation pipelines on-GPU).
+/// Scale a vector in place by a scalar (router weights × routed_scaling_factor).
+#[kernel]
+pub fn mt_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(buf[i], load(buf[i]) * scale);
+    }
+}
+
+/// Elementwise dtype cast f32 → f16. Compacts the attention KV cache to half
+/// precision: at 32K context the sdpa read is bandwidth-bound, so halving the
+/// cache bytes roughly halves the per-layer attention cost. One thread / elem.
+#[kernel]
+pub fn mt_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<f16>());
+    }
+}
+
+/// Elementwise dtype cast f16 → f32 (reverse): the sdpa f16 output is widened
+/// back to f32 for the downstream o_proj Q4 GEMV, which consumes f32 activations.
+#[kernel]
+pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<f32>());
+    }
+}
+
+/// Elementwise dtype cast f32 → bf16. Same compaction as the f16 variant, for
+/// models whose residual stream / cache dtype is bf16 (wider exponent range
+/// than f16, so large-magnitude residuals survive the narrowing). The reverse
+/// bf16 → f32 widening is covered by the generic `mt_cast_to_f32`.
+#[kernel]
+pub fn mt_cast_f32_bf16(src: Tensor<f32>, mut dst: Tensor<bf16>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<bf16>());
+    }
+}
+
+pub mod kernel_tests {
+    use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
+
+    use super::*;
+    use crate::utils::{pack_f32, unpack_f32};
+
+    const N: usize = 512;
+
+    fn signed() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.35 - 3.0).collect() }
+    // Small range that stays clear of the tan poles at ±π/2.
+    fn small() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.12 - 1.0).collect() }
+    fn positive() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.1 + 0.1).collect() }
+    fn unit() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.1 - 0.8).collect() }
+    fn ge_one() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.12 + 1.0).collect() }
+    // Offset to dodge .5 boundaries where round-half-even vs -away disagree.
+    fn round_safe() -> Vec<f32> { (0..N).map(|i| (i % 23) as f32 * 0.137 - 1.5).collect() }
+
+    fn un<F: Fn(f32) -> f32>(kernel: Kernel, a: &[f32], op: F, dt: DType) -> TestSetup {
+        let a_dt = unpack_f32(&pack_f32(a, dt), dt);
+        let expected: Vec<f32> = a_dt.iter().map(|&x| op(x)).collect();
+        TestSetup::new(kernel)
+            .input(TestBuffer::from_vec("a", pack_f32(a, dt), dt))
+            .input(TestBuffer::zeros("out", a.len(), dt))
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_1d(a.len(), 256)
+    }
+
+    // ── Exact ops (bit-exact in every dtype) ──────────────────────────────
+    macro_rules! exact_test {
+        ($name:ident, $kernel:ident, $input:ident, $op:expr) => {
+            #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
+            fn $name(dt: DType) -> TestSetup { un($kernel::kernel_ir_for(dt), &$input(), $op, dt) }
+        };
+    }
+    exact_test!(test_unary_abs, mt_abs, signed, f32::abs);
+    exact_test!(test_unary_relu, mt_relu, signed, |x| x.max(0.0));
+    exact_test!(test_unary_neg, mt_neg, signed, |x| -x);
+    exact_test!(test_unary_ceil, mt_ceil, round_safe, f32::ceil);
+    exact_test!(test_unary_floor, mt_floor, round_safe, f32::floor);
+    exact_test!(test_unary_round, mt_round, round_safe, f32::round);
+    exact_test!(test_unary_trunc, mt_trunc, round_safe, f32::trunc);
+    exact_test!(test_unary_sign, mt_sign, signed, |x| if x > 0.0 {
+        1.0
+    } else if x < 0.0 {
+        -1.0
+    } else {
+        0.0
+    });
+
+    // ── Transcendental ops (per-dtype band) ───────────────────────────────
+    macro_rules! trans_test {
+        ($name:ident, $kernel:ident, $input:ident, $op:expr) => {
+            #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-2, 1e-1])]
+            fn $name(dt: DType) -> TestSetup { un($kernel::kernel_ir_for(dt), &$input(), $op, dt) }
+        };
+    }
+    trans_test!(test_unary_exp, mt_exp, signed, f32::exp);
+    trans_test!(test_unary_exp2, mt_exp2, signed, f32::exp2);
+    trans_test!(test_unary_expm1, mt_expm1, signed, f32::exp_m1);
+    trans_test!(test_unary_log, mt_log, positive, f32::ln);
+    trans_test!(test_unary_log2, mt_log2, positive, f32::log2);
+    trans_test!(test_unary_log10, mt_log10, positive, f32::log10);
+    trans_test!(test_unary_log1p, mt_log1p, positive, f32::ln_1p);
+    trans_test!(test_unary_sqrt, mt_sqrt, positive, f32::sqrt);
+    trans_test!(test_unary_rsqrt, mt_rsqrt, positive, |x| 1.0 / x.sqrt());
+    trans_test!(test_unary_recip, mt_recip, positive, |x| 1.0 / x);
+    trans_test!(test_unary_square, mt_square, signed, |x| x * x);
+    trans_test!(test_unary_sin, mt_sin, signed, f32::sin);
+    trans_test!(test_unary_cos, mt_cos, signed, f32::cos);
+    trans_test!(test_unary_tan, mt_tan, small, f32::tan);
+    trans_test!(test_unary_asin, mt_asin, unit, f32::asin);
+    trans_test!(test_unary_acos, mt_acos, unit, f32::acos);
+    trans_test!(test_unary_atan, mt_atan, signed, f32::atan);
+    trans_test!(test_unary_sinh, mt_sinh, signed, f32::sinh);
+    trans_test!(test_unary_cosh, mt_cosh, signed, f32::cosh);
+    trans_test!(test_unary_tanh, mt_tanh_op, signed, f32::tanh);
+    trans_test!(test_unary_asinh, mt_asinh, signed, f32::asinh);
+    trans_test!(test_unary_acosh, mt_acosh, ge_one, f32::acosh);
+    trans_test!(test_unary_atanh, mt_atanh, unit, f32::atanh);
+    trans_test!(test_unary_silu, mt_silu, signed, |x| x / (1.0 + (-x).exp()));
+    trans_test!(test_unary_sigmoid, mt_sigmoid, signed, |x| 1.0 / (1.0 + (-x).exp()));
+    trans_test!(test_unary_softplus, mt_softplus, signed, |x| x.max(0.0)
+        + (1.0 + (-x.abs()).exp()).ln());
+}
+
+/// New-syntax benchmarks for the simple unary elementwise ops (vs MLX
+/// `metal/unary.metal`). All read `a` once and write `out` once.
+pub mod kernel_benches {
+    use ffai_kernels::{bench, core::ir::Kernel, test::*};
+
+    use super::*;
+    use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
+
+    const UNARY_N: usize = 64 * 1024 * 1024;
+
+    fn ub(kernel: Kernel, dt: DType) -> BenchSetup {
+        let n = UNARY_N;
+        BenchSetup::new(kernel)
+            .buffer(BenchBuffer::random("a", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((2 * n * dt.size_bytes()) as u64)
+    }
+
+    /// Like [`ub`], but seeds `a` with `domain`'s deterministic in-range pattern
+    /// and attaches the MLX `metal/unary.metal` reference `v_<Op><tn><tn>`
+    /// (`unary_v`, 1 element/thread) for an A/B perf + correctness comparison.
+    ///
+    /// `tol_floor` lifts the equivalence tolerance above the per-dtype default
+    /// for ops where MetalTile and MLX legitimately diverge by more than 1 ULP —
+    /// e.g. `expm1`, where MT computes `exp(x) − 1` (catastrophic cancellation
+    /// near 0) while MLX uses an accurate `expm1`.
+    fn ub_ref(
+        kernel: Kernel,
+        dt: DType,
+        mlx_op: &str,
+        domain: InputDomain,
+        tol_floor: f32,
+    ) -> BenchSetup {
+        let n = UNARY_N;
+        let tn = mlx_tname(dt);
+        BenchSetup::new(kernel)
+            .buffer(input_buffer("a", n, dt, domain))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((2 * n * dt.size_bytes()) as u64)
+            .with_reference(
+                RefKernel::new(
+                    format!("v_{mlx_op}{tn}{tn}"),
+                    include_str!(concat!(env!("OUT_DIR"), "/metal/unary.metal")),
+                )
+                // "a" is shared by name with the MT input above (same data); the
+                // runner overrides this placeholder with the MT bytes.
+                .buffer(BenchBuffer::zeros("a", n, dt))
+                .buffer(BenchBuffer::zeros("out", n, dt).output())
+                .buffer(BenchBuffer::from_vec("n", (n as u32).to_le_bytes().to_vec(), DType::U32))
+                .grid_1d(n, 256)
+                .tol(dtype_tol(dt).max(tol_floor)),
+            )
+    }
+
+    macro_rules! ubench {
+        ($name:ident, $kernel:ident) => {
+            #[bench(dtypes = [f32, f16, bf16])]
+            fn $name(dt: DType) -> BenchSetup { ub($kernel::kernel_ir_for(dt), dt) }
+        };
+    }
+
+    /// `#[bench]` registration with an MLX reference comparison. The optional 6th
+    /// argument is a tolerance floor for ops that diverge by more than 1 ULP.
+    macro_rules! ubench_ref {
+        ($name:ident, $kernel:ident, $mlxop:literal, $domain:expr) => {
+            ubench_ref!($name, $kernel, $mlxop, $domain, 0.0);
+        };
+        ($name:ident, $kernel:ident, $mlxop:literal, $domain:expr, $floor:expr) => {
+            #[bench(dtypes = [f32, f16, bf16])]
+            fn $name(dt: DType) -> BenchSetup {
+                ub_ref($kernel::kernel_ir_for(dt), dt, $mlxop, $domain, $floor)
+            }
+        };
+    }
+    // MT-specific / no MLX unary counterpart (exp2, recip, relu, trunc, silu,
+    // gelu, softplus) bench MetalTile-only; the rest carry an MLX A/B reference.
+    ubench_ref!(bench_exp, mt_exp, "Exp", InputDomain::Signed);
+    ubench!(bench_exp2, mt_exp2);
+    // expm1: MT `exp(x)-1` cancels catastrophically near 0 vs MLX's accurate
+    // expm1; legacy used tol=5e-3.
+    ubench_ref!(bench_expm1, mt_expm1, "Expm1", InputDomain::Signed, 5e-3);
+    ubench_ref!(bench_log, mt_log, "Log", InputDomain::Positive);
+    ubench_ref!(bench_log2, mt_log2, "Log2", InputDomain::Positive);
+    ubench_ref!(bench_log10, mt_log10, "Log10", InputDomain::Positive);
+    ubench_ref!(bench_log1p, mt_log1p, "Log1p", InputDomain::Positive);
+    ubench_ref!(bench_sqrt, mt_sqrt, "Sqrt", InputDomain::Positive);
+    ubench_ref!(bench_rsqrt, mt_rsqrt, "Rsqrt", InputDomain::Positive);
+    ubench!(bench_recip, mt_recip);
+    ubench_ref!(bench_square, mt_square, "Square", InputDomain::Signed);
+    ubench_ref!(bench_abs, mt_abs, "Abs", InputDomain::Signed);
+    ubench_ref!(bench_neg, mt_neg, "Negative", InputDomain::Signed);
+    ubench_ref!(bench_sign, mt_sign, "Sign", InputDomain::Signed);
+    ubench!(bench_relu, mt_relu);
+    ubench_ref!(bench_ceil, mt_ceil, "Ceil", InputDomain::Signed);
+    ubench_ref!(bench_floor, mt_floor, "Floor", InputDomain::Signed);
+    ubench_ref!(bench_round, mt_round, "Round", InputDomain::Signed);
+    ubench!(bench_trunc, mt_trunc);
+    ubench_ref!(bench_sin, mt_sin, "Sin", InputDomain::Signed);
+    ubench_ref!(bench_cos, mt_cos, "Cos", InputDomain::Signed);
+    ubench_ref!(bench_tan, mt_tan, "Tan", InputDomain::Signed);
+    ubench_ref!(bench_asin, mt_asin, "ArcSin", InputDomain::Unit);
+    ubench_ref!(bench_acos, mt_acos, "ArcCos", InputDomain::Unit);
+    ubench_ref!(bench_atan, mt_atan, "ArcTan", InputDomain::Signed);
+    ubench_ref!(bench_sinh, mt_sinh, "Sinh", InputDomain::Signed);
+    ubench_ref!(bench_cosh, mt_cosh, "Cosh", InputDomain::Signed);
+    ubench_ref!(bench_tanh, mt_tanh_op, "Tanh", InputDomain::Signed);
+    ubench_ref!(bench_asinh, mt_asinh, "ArcSinh", InputDomain::Signed);
+    ubench_ref!(bench_acosh, mt_acosh, "ArcCosh", InputDomain::Positive);
+    ubench_ref!(bench_atanh, mt_atanh, "ArcTanh", InputDomain::Unit);
+    ubench!(bench_silu, mt_silu);
+    ubench!(bench_gelu, mt_gelu);
+    ubench_ref!(bench_sigmoid, mt_sigmoid, "Sigmoid", InputDomain::Signed);
+    ubench!(bench_softplus, mt_softplus);
+    ubench_ref!(bench_erf, mt_erf, "Erf", InputDomain::Signed);
+    ubench_ref!(bench_erfinv, mt_erfinv, "ErfInv", InputDomain::Unit);
+
+    // ── Fused / cast variants ─────────────────────────────────────────────
+    // These have signatures the `ub` helper can't cover (f32 output, scalar
+    // broadcast buffers, multi-input FMA chains, or a reduction). One thread
+    // per output element (Elementwise) unless noted.
+
+    // cast / silu-cast: read model dtype `T`, write f32.
+    fn cast_b(kernel: Kernel, dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(kernel)
+            .buffer(BenchBuffer::random("input", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, DType::F32).output())
+            .grid_1d(n, 256)
+            .bytes_moved((n * (dt.size_bytes() + DType::F32.size_bytes())) as u64)
+    }
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_cast_to_f32(dt: DType) -> BenchSetup { cast_b(mt_cast_to_f32::kernel_ir_for(dt), dt) }
+    #[bench(dtypes = [f16, bf16])]
+    fn bench_silu_cast_to_f32(dt: DType) -> BenchSetup {
+        cast_b(mt_silu_cast_to_f32::kernel_ir_for(dt), dt)
+    }
+
+    // sigmoid_mul: out[i] = a[i] * sigmoid(b[i]). Two full-length inputs.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sigmoid_mul(dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(mt_sigmoid_mul::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("a", n, dt))
+            .buffer(BenchBuffer::random("b", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((3 * n * dt.size_bytes()) as u64)
+    }
+
+    // scalar_fma: out[i] = base[i] + scalar[0] * value[i]. `scalar` is a
+    // 1-element broadcast buffer; `value` + `base` are full-length.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_scalar_fma(dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(mt_scalar_fma::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("scalar", 1, dt))
+            .buffer(BenchBuffer::random("value", n, dt))
+            .buffer(BenchBuffer::random("base", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((3 * n * dt.size_bytes()) as u64)
+    }
+
+    // sigmoid_scalar_fma: out[i] = base[i] + sigmoid(gate[0]) * value[i].
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sigmoid_scalar_fma(dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(mt_sigmoid_scalar_fma::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("gate", 1, dt))
+            .buffer(BenchBuffer::random("value", n, dt))
+            .buffer(BenchBuffer::random("base", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((3 * n * dt.size_bytes()) as u64)
+    }
+
+    // sigmoid_scalar_fma_residual: out = residual + base + sigmoid(gate[0])·value.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sigmoid_scalar_fma_residual(dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(mt_sigmoid_scalar_fma_residual::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("gate", 1, dt))
+            .buffer(BenchBuffer::random("value", n, dt))
+            .buffer(BenchBuffer::random("base", n, dt))
+            .buffer(BenchBuffer::random("residual", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((4 * n * dt.size_bytes()) as u64)
+    }
+
+    // scalar_fma_chain8: out[i] = sum_{k=0..8} scalar_k[0] * value_k[i].
+    // Eight 1-element scalar buffers + eight full-length value buffers.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_scalar_fma_chain8(dt: DType) -> BenchSetup {
+        let n = 16 * 1024 * 1024usize;
+        let mut s = BenchSetup::new(mt_scalar_fma_chain8::kernel_ir_for(dt));
+        for k in 0..8 {
+            s = s
+                .buffer(BenchBuffer::random(&format!("scalar{k}"), 1, dt))
+                .buffer(BenchBuffer::random(&format!("value{k}"), n, dt));
+        }
+        s.buffer(BenchBuffer::zeros("out", n, dt).output())
+            .grid_1d(n, 256)
+            .bytes_moved((9 * n * dt.size_bytes()) as u64)
+    }
+
+    // add_rms_norm: Reduction, one threadgroup per row, N = tpg*4. Fused
+    // residual-add (a+b) + RMSNorm with two outputs (residual + normed).
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_add_rms_norm(dt: DType) -> BenchSetup {
+        let (rows, n) = (4096usize, 4096usize);
+        BenchSetup::new(mt_add_rms_norm::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("a", rows * n, dt))
+            .buffer(BenchBuffer::random("b", rows * n, dt))
+            .buffer(BenchBuffer::random("w", n, dt))
+            .buffer(BenchBuffer::from_vec("eps_buf", 1e-5f32.to_le_bytes().to_vec(), DType::F32))
+            .buffer(BenchBuffer::zeros("residual_out", rows * n, dt).output())
+            .buffer(BenchBuffer::zeros("normed_out", rows * n, dt).output())
+            .constexpr("n", n as u32)
+            .grid_3d(rows as u32, 1, 1, [(n / 4) as u32, 1, 1])
+            .bytes_moved((4 * rows * n * dt.size_bytes()) as u64)
+    }
+}
+
+// Numerically-stable softplus: softplus(x) = max(x, 0) + log1p(exp(-|x|)).
+// Avoids overflow at large positive x and underflow at large negative x —
+// the naive `log(1 + exp(x))` blows up for x > ~80 (f32) / ~10 (f16).
+// MLX has no dedicated softplus kernel (it composes log1p + exp at the
+// graph layer); FFAI Ops.softplus calls this fused per-element variant
+// directly because it lives on Mamba 2's hot path (`dt = softplus(dt_raw)`).
+#[kernel]
+pub fn mt_softplus<T>(a: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    let x = load(a[idx]).cast::<f32>();
+    let zero = 0.0f32;
+    let pos = x > zero;
+    let m = select(pos, x, zero);
+    let ax = select(pos, x, zero - x);
+    let r = m + log(1.0f32 + exp(zero - ax));
+    store(out[idx], r.cast::<T>());
+}
+
+/// Cast a tensor of model dtype `T` to fp32 in-place per element. One
+/// thread per element. Used by callers that need to mix fp32 state with
+/// bf16 / f16 model activations on the GPU without a host round-trip —
+/// the fused GDN prep step is the immediate consumer (its cache state
+/// stays fp32 to avoid the 7-bit-mantissa drift over long decodes, but
+/// the model activations into the kernel are bf16).
+#[kernel]
+pub fn mt_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
+    let idx = program_id(0);
+    store(out[idx], load(input[idx]).cast::<f32>());
+}
+
+/// Fused silu + cast-to-f32. Replaces the `silu(bf16) → cast_to_f32`
+/// two-dispatch chain in FFAI's batched-prefill GDN inner loop with a
+/// single dispatch: read bf16/f16, apply silu, write f32.
+///
+/// silu(x) = x · sigmoid(x) = x · (1 / (1 + exp(-x))) computed at f32
+/// precision to match the bf16 → fp32 + silu → fp32 chain bit-for-bit
+/// (modulo rounding mode on the final write — same as the standalone
+/// silu kernel).
+///
+/// Saves T·30 ≈ 15k dispatches per Qwen3.6-A3B prefill at T=512 (one
+/// silu + one cast per GDN-layer per-token iter → one fused dispatch).
+#[kernel]
+pub fn mt_silu_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
+    let idx = program_id(0);
+    let x = load(input[idx]).cast::<f32>();
+    let sig = 1.0f32 / (1.0f32 + exp(0.0f32 - x));
+    store(out[idx], x * sig);
+}
+
+/// Fused scalar-sigmoid fan-out + FMA. Computes
+///   `out[i] = base[i] + sigmoid(gate[0]) * value[i]`
+/// for `i in 0..hidden`, broadcasting the scalar `gate` across the
+/// `[hidden]` vectors. One thread per output element; the scalar
+/// re-loads through the GPU L1 cache so the broadcast is free.
+///
+/// Replaces FFAI's shared-expert host detour: `gateLogit.toFloatArray()`
+/// + host `sigmoid()` + `Tensor.filled([hidden])` + `Ops.mul` + `Ops.add`
+/// + a `commit + wait` to ensure the scalar is resident. With this
+/// kernel the entire fan-out stays on the GPU and the command buffer
+/// the gate was produced on no longer needs a host stall before the
+/// next layer queues work.
+///
+/// Inputs are all in model dtype `T` (typically bf16 on Qwen3.6); the
+/// internal accumulation widens to fp32 via the load-side `.cast` to
+/// preserve sigmoid precision near saturation.
+#[kernel]
+pub fn mt_sigmoid_scalar_fma<T>(
+    gate: Tensor<T>,
+    value: Tensor<T>,
+    base: Tensor<T>,
+    out: Tensor<T>,
+) {
+    let idx = program_id(0);
+    let gx = load(gate[0]).cast::<f32>();
+    let g = 1.0f32 / (1.0f32 + exp(0.0f32 - gx));
+    let v = load(value[idx]).cast::<f32>();
+    let b = load(base[idx]).cast::<f32>();
+    store(out[idx], (b + g * v).cast::<T>());
+}
+
+/// Fused elementwise sigmoid-scalar FMA WITH residual add. Computes
+///   `out[i] = residual[i] + base[i] + sigmoid(gate[0]) * value[i]`
+/// in one dispatch. Used by Qwen3.6-A3B's post-MoE-FFN site to
+/// collapse the existing two-dispatch chain:
+///   1. `mt_sigmoid_scalar_fma(gate, sharedOut, routed)` → ffnOut
+///   2. `mt_add(postMix, ffnOut)`                       → result
+/// into a single dispatch that reads `routed`, `sharedOut`, and
+/// `postMix` once each and writes `result` once. Saves one full
+/// `[hidden]` DRAM roundtrip on the intermediate `ffnOut` plus one
+/// dispatch per MoE layer per token (×40 layers for Qwen3.6-A3B).
+///
+/// Same precision contract as `mt_sigmoid_scalar_fma`: model dtype
+/// `T` on the read+write boundary, fp32 accumulation internally so
+/// the sigmoid stays accurate at saturation.
+#[kernel]
+pub fn mt_sigmoid_scalar_fma_residual<T>(
+    gate: Tensor<T>,
+    value: Tensor<T>,
+    base: Tensor<T>,
+    residual: Tensor<T>,
+    out: Tensor<T>,
+) {
+    let idx = program_id(0);
+    let gx = load(gate[0]).cast::<f32>();
+    let g = 1.0f32 / (1.0f32 + exp(0.0f32 - gx));
+    let v = load(value[idx]).cast::<f32>();
+    let b = load(base[idx]).cast::<f32>();
+    let r = load(residual[idx]).cast::<f32>();
+    store(out[idx], (r + b + g * v).cast::<T>());
+}
+
+/// Scalar-broadcast FMA. Computes
+///   `out[i] = base[i] + scalar[0] * value[i]`
+/// for `i in 0..n`, broadcasting a 1-element scalar buffer across the
+/// `[n]` vectors. One thread per output element; the scalar re-loads
+/// through the GPU L1 cache so the broadcast is free.
+///
+/// Replaces FFAI's MoE per-expert weighted-add chain at decode T=1:
+/// instead of `Tensor.filled([hidden], weight)` (host alloc + memcpy)
+/// + `Ops.mul(expertOut, broadcast)` + `Ops.add(accumulator, scaled)`,
+/// we pack the routing weight into a 4-byte scalar buffer + dispatch
+/// this kernel once. Saves 8 host allocations + 16 dispatches per MoE
+/// layer × 40 layers = 320 allocations + 640 dispatches per
+/// Qwen3.6-A3B decode token.
+///
+/// Numerical: accumulation widens to f32 via load-side `.cast` to keep
+/// long sums of many small-weight expert outputs precise, then narrows
+/// back to T on store.
+#[kernel]
+pub fn mt_scalar_fma<T>(scalar: Tensor<T>, value: Tensor<T>, base: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    let s = load(scalar[0]).cast::<f32>();
+    let v = load(value[idx]).cast::<f32>();
+    let b = load(base[idx]).cast::<f32>();
+    store(out[idx], (b + s * v).cast::<T>());
+}
+
+/// 8-way fused scalar-FMA chain. Computes
+///   `out[i] = sum_{k=0..8} scalar_k[0] * value_k[i]`
+/// in a single dispatch. Replaces the topK=8 expert accumulator chain
+/// in FFAI's MoE decode (8 sequential `mt_scalar_fma` dispatches +
+/// 1 acc.zero) with one fused kernel that reads each value tensor
+/// once and writes the output once — saving 7 acc reads + 1 zero
+/// dispatch per MoE layer × 40 layers = 320 dispatches + ~660 KB of
+/// L1/L2 traffic per Qwen3.6-A3B decode token.
+///
+/// Accumulation widens to f32 via load-side `.cast` to preserve
+/// precision on long sums of small-weight expert outputs, then
+/// narrows back to T on store. Bit-equivalent to the 8-call chain
+/// modulo final-rounding mode.
+#[kernel]
+pub fn mt_scalar_fma_chain8<T>(
+    scalar0: Tensor<T>,
+    value0: Tensor<T>,
+    scalar1: Tensor<T>,
+    value1: Tensor<T>,
+    scalar2: Tensor<T>,
+    value2: Tensor<T>,
+    scalar3: Tensor<T>,
+    value3: Tensor<T>,
+    scalar4: Tensor<T>,
+    value4: Tensor<T>,
+    scalar5: Tensor<T>,
+    value5: Tensor<T>,
+    scalar6: Tensor<T>,
+    value6: Tensor<T>,
+    scalar7: Tensor<T>,
+    value7: Tensor<T>,
+    out: Tensor<T>,
+) {
+    let idx = program_id(0);
+    let sa = load(scalar0[0]).cast::<f32>();
+    let sb = load(scalar1[0]).cast::<f32>();
+    let sc = load(scalar2[0]).cast::<f32>();
+    let sd = load(scalar3[0]).cast::<f32>();
+    let se = load(scalar4[0]).cast::<f32>();
+    let sf = load(scalar5[0]).cast::<f32>();
+    let sg = load(scalar6[0]).cast::<f32>();
+    let sh = load(scalar7[0]).cast::<f32>();
+    let va = load(value0[idx]).cast::<f32>();
+    let vb = load(value1[idx]).cast::<f32>();
+    let vc = load(value2[idx]).cast::<f32>();
+    let vd = load(value3[idx]).cast::<f32>();
+    let ve = load(value4[idx]).cast::<f32>();
+    let vf = load(value5[idx]).cast::<f32>();
+    let vg = load(value6[idx]).cast::<f32>();
+    let vh = load(value7[idx]).cast::<f32>();
+    let sum = sa * va + sb * vb + sc * vc + sd * vd + se * ve + sf * vf + sg * vg + sh * vh;
+    store(out[idx], sum.cast::<T>());
+}
+
+/// Fused elementwise sigmoid + mul. Computes
+///   `out[i] = a[i] * sigmoid(b[i])`
+/// in one dispatch. Used by Qwen3 attention layer's output gate:
+///   attn_out = attn(x) * sigmoid(gate_proj(x))
+/// Currently expressed as `Ops.mul(attnFlat, Ops.sigmoid(gate))` —
+/// two dispatches. This fuses to one, saving 10 dispatches per
+/// Qwen3.6-A3B decode token (1 per attn layer × 10 attn layers).
+///
+/// Sigmoid is computed at f32 precision via load-side cast to avoid
+/// bf16 saturation drift near the asymptotes.
+#[kernel]
+pub fn mt_sigmoid_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+    let idx = program_id(0);
+    let av = load(a[idx]).cast::<f32>();
+    let bv = load(b[idx]).cast::<f32>();
+    let sig = 1.0f32 / (1.0f32 + exp(0.0f32 - bv));
+    store(out[idx], (av * sig).cast::<T>());
+}
+
+/// ⚠️ BROKEN — produces NaN/wrong output in FFAI integration test
+/// (forwardManyEquivalence fails T=8 + T=128). Kept here as a stub
+/// for future debug. Likely issue: multi-output codegen + the inlined
+/// `mt_rms_inv_scalar` reduction call don't compose correctly in this
+/// kernel shape. Possible fix paths:
+///   1. Manually inline the reduction without `mt_rms_inv_scalar`
+///   2. Use TWO compiled variants — one for residual write only, one
+///      for residual+norm — and dispatch both in a shared encoder
+///   3. Investigate the codegen MSL output for residual_out + normed_out
+///      ordering vs the reduction-tg threadgroup layout
+///
+/// Fused residual-add + RMSNorm. For each row of `[n]` elements:
+///   residual_out[i] = a[i] + b[i]
+///   normed_out[i]   = (a[i] + b[i]) * w[i] / sqrt(mean((a+b)^2) + eps)
+///
+/// Standard transformer pattern at layer boundary:
+///   h_new = h_old + mixer_out           (residual add)
+///   normed = rms_norm(h_new, w)         (pre-norm for next mixer)
+///
+/// Both outputs are needed downstream: `residual_out` is the persistent
+/// residual stream (input to the SECOND residual add of the same
+/// layer); `normed_out` is the pre-FFN/pre-next-mixer input.
+///
+/// Same TG=n/4 contract as `mt_rms_norm`. Saves 1 dispatch per
+/// residual-add+norm pair × 80 such pairs in Qwen3.6-A3B decode
+/// (2 per layer × 40 layers) = ~1.4 ms / token at 17 µs encoder
+/// overhead each.
+#[kernel]
+pub fn mt_add_rms_norm<T>(
+    a: Tensor<T>,
+    b: Tensor<T>,
+    w: Tensor<T>,
+    eps_buf: Tensor<f32>,
+    mut residual_out: Tensor<T>,
+    mut normed_out: Tensor<T>,
+    #[constexpr] n: u32,
+) {
+    let row = program_id::<0>();
+    let rs = row * n;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < n;
+    let safe_col = select(in_bounds, col, 0u32);
+    let safe_base = rs + safe_col;
+    let base = rs + col;
+    // Read a + b for 4 elements.
+    let a0 = load(a[safe_base]).cast::<f32>();
+    let a1 = load(a[safe_base + 1u32]).cast::<f32>();
+    let a2 = load(a[safe_base + 2u32]).cast::<f32>();
+    let a3 = load(a[safe_base + 3u32]).cast::<f32>();
+    let b0 = load(b[safe_base]).cast::<f32>();
+    let b1 = load(b[safe_base + 1u32]).cast::<f32>();
+    let b2 = load(b[safe_base + 2u32]).cast::<f32>();
+    let b3 = load(b[safe_base + 3u32]).cast::<f32>();
+    let s0 = a0 + b0;
+    let s1 = a1 + b1;
+    let s2 = a2 + b2;
+    let s3 = a3 + b3;
+    let raw_ssq = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
+    let partial_ssq = select(in_bounds, raw_ssq, 0.0f32);
+    // ITER 50 (Bagel 2): inline the reduction with `reduce_sum` directly
+    // (no cross-kernel call to `mt_rms_inv_scalar`). The previous stub
+    // used the cross-kernel call but the multi-output codegen path
+    // didn't compose with the inlined reduction. Inlining matches the
+    // working `mt_rms_norm` pattern exactly.
+    let tg_ssq = reduce_sum(partial_ssq);
+    let eps = load(eps_buf[0u32]);
+    let rms = rsqrt(tg_ssq / n + eps);
+    if in_bounds {
+        // Write the residual stream (just the add).
+        store(residual_out[base], s0.cast::<T>());
+        store(residual_out[base + 1u32], s1.cast::<T>());
+        store(residual_out[base + 2u32], s2.cast::<T>());
+        store(residual_out[base + 3u32], s3.cast::<T>());
+        // Write the normalized stream.
+        let n0 = s0 * rms * load(w[col]).cast::<f32>();
+        let n1 = s1 * rms * load(w[col + 1u32]).cast::<f32>();
+        let n2 = s2 * rms * load(w[col + 2u32]).cast::<f32>();
+        let n3 = s3 * rms * load(w[col + 3u32]).cast::<f32>();
+        store(normed_out[base], n0.cast::<T>());
+        store(normed_out[base + 1u32], n1.cast::<T>());
+        store(normed_out[base + 2u32], n2.cast::<T>());
+        store(normed_out[base + 3u32], n3.cast::<T>());
+    }
+}
+
+/// Fused add + RMSNorm with an f16 NORMED output (residual stays f32).
+/// Folds the standalone `cast_f32_f16(normed)` into the producer epilogue:
+/// mirrors `mt_add_rms_norm` exactly, only `normed_out` narrows to f16. The
+/// residual stream stays f32 (no narrowing drift over long decodes). Saves one
+/// cast dispatch per residual-add+norm pair on bf16/f16-activation paths.
+/// Bit-identical to `add_rms_norm(f32) -> cast_f32_f16`.
+#[kernel]
+pub fn mt_add_rms_norm_f16norm<T>(
+    a: Tensor<T>,
+    b: Tensor<T>,
+    w: Tensor<T>,
+    eps_buf: Tensor<f32>,
+    mut residual_out: Tensor<f32>,
+    mut normed_out: Tensor<f16>,
+    #[constexpr] n: u32,
+) {
+    let row = program_id::<0>();
+    let rs = row * n;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < n;
+    let safe_col = select(in_bounds, col, 0u32);
+    let safe_base = rs + safe_col;
+    let base = rs + col;
+    let a0 = load(a[safe_base]).cast::<f32>();
+    let a1 = load(a[safe_base + 1u32]).cast::<f32>();
+    let a2 = load(a[safe_base + 2u32]).cast::<f32>();
+    let a3 = load(a[safe_base + 3u32]).cast::<f32>();
+    let b0 = load(b[safe_base]).cast::<f32>();
+    let b1 = load(b[safe_base + 1u32]).cast::<f32>();
+    let b2 = load(b[safe_base + 2u32]).cast::<f32>();
+    let b3 = load(b[safe_base + 3u32]).cast::<f32>();
+    let s0 = a0 + b0;
+    let s1 = a1 + b1;
+    let s2 = a2 + b2;
+    let s3 = a3 + b3;
+    let raw_ssq = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
+    let partial_ssq = select(in_bounds, raw_ssq, 0.0f32);
+    let tg_ssq = reduce_sum(partial_ssq);
+    let eps = load(eps_buf[0u32]);
+    let rms = rsqrt(tg_ssq / n + eps);
+    if in_bounds {
+        store(residual_out[base], s0.cast::<f32>());
+        store(residual_out[base + 1u32], s1.cast::<f32>());
+        store(residual_out[base + 2u32], s2.cast::<f32>());
+        store(residual_out[base + 3u32], s3.cast::<f32>());
+        let g0 = s0 * rms * load(w[col]).cast::<f32>();
+        let g1 = s1 * rms * load(w[col + 1u32]).cast::<f32>();
+        let g2 = s2 * rms * load(w[col + 2u32]).cast::<f32>();
+        let g3 = s3 * rms * load(w[col + 3u32]).cast::<f32>();
+        store(normed_out[base], g0.cast::<f16>());
+        store(normed_out[base + 1u32], g1.cast::<f16>());
+        store(normed_out[base + 2u32], g2.cast::<f16>());
+        store(normed_out[base + 3u32], g3.cast::<f16>());
+    }
+}

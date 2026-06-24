@@ -87,13 +87,13 @@ jobs:
         with:
           filters: |
             heavy:
-              - 'crates/metaltile-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
+              - 'crates/ffai-kernels-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
             light:
-              - 'crates/metaltile-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
+              - 'crates/ffai-kernels-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
             other:
               - 'crates/**/*.rs'
-              - '!crates/metaltile-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
-              - '!crates/metaltile-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
+              - '!crates/ffai-kernels-std/src/kernels/{gemm,moe,ssm,quant,kv_cache,hyper_connections,sdpa}/**'
+              - '!crates/ffai-kernels-std/src/kernels/{norm,ops,sampling,convolution,rope,vision,audio}/**'
               - 'crates/**/Cargo.toml'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -133,7 +133,7 @@ jobs:
 
       - name: Build tile CLI and runner
         if: steps.binary-cache.outputs.cache-hit != 'true'
-        run: cargo build --profile ci -p metaltile-cli -p metaltile-std
+        run: cargo build --profile ci -p ffai-kernels-cli -p ffai-kernels-std
 
       # Upload so every downstream job gets both binaries without any cargo
       # invocation.  retention-days=1 keeps storage costs near zero.
