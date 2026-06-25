@@ -1327,9 +1327,17 @@ impl CudaDevice {
         )?;
 
         // Compile to the device's virtual architecture.
-        let arch =
-            CString::new(format!("--gpu-architecture=compute_{}{}", self.cc_major, self.cc_minor))
-                .unwrap();
+        let arch = {
+            // Blackwell (CC 12.x) block-scaled FP4/FP8 MMA requires the
+            // accelerated `a` target (compute_120a/121a); plain compute_120
+            // fails PTX JIT ("a PTX JIT compilation failed") on those kernels.
+            let accel = if self.cc_major >= 12 { "a" } else { "" };
+            CString::new(format!(
+                "--gpu-architecture=compute_{}{}{}",
+                self.cc_major, self.cc_minor, accel
+            ))
+        }
+        .unwrap();
         // NVRTC does not auto-include the toolkit headers (cuda_fp16.h,
         // cuda_bf16.h) — point it at <toolkit>/include.
         let cuda_root = std::env::var("CUDA_PATH")
