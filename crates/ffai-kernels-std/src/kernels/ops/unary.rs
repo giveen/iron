@@ -307,6 +307,33 @@ pub mod kernel_tests {
             .grid_1d(a.len(), 256)
     }
 
+    // sigmoid_row_fma: out[r,h] = base[r,h] + sigmoid(gate[r]) * value[r,h].
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
+    fn test_sigmoid_row_fma(dt: DType) -> TestSetup {
+        let (t, hidden) = (4usize, 64usize);
+        let n = t * hidden;
+        let gate_f: Vec<f32> = (0..t).map(|r| (r as f32) * 0.7 - 1.0).collect();
+        let value_f: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.013).sin()).collect();
+        let base_f: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.007).cos()).collect();
+        let gate = unpack_f32(&pack_f32(&gate_f, dt), dt);
+        let value = unpack_f32(&pack_f32(&value_f, dt), dt);
+        let base = unpack_f32(&pack_f32(&base_f, dt), dt);
+        let expected: Vec<f32> = (0..n)
+            .map(|i| {
+                let g = 1.0f32 / (1.0f32 + (-gate[i / hidden]).exp());
+                base[i] + g * value[i]
+            })
+            .collect();
+        TestSetup::new(mt_sigmoid_row_fma::kernel_ir_for(dt))
+            .input(TestBuffer::from_vec("gate", pack_f32(&gate_f, dt), dt))
+            .input(TestBuffer::from_vec("value", pack_f32(&value_f, dt), dt))
+            .input(TestBuffer::from_vec("base", pack_f32(&base_f, dt), dt))
+            .input(TestBuffer::zeros("out", n, dt))
+            .constexpr("hidden", hidden as u32)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_1d(n, 256)
+    }
+
     // ── Exact ops (bit-exact in every dtype) ──────────────────────────────
     macro_rules! exact_test {
         ($name:ident, $kernel:ident, $input:ident, $op:expr) => {
@@ -531,6 +558,23 @@ pub mod kernel_benches {
             .bytes_moved((3 * n * dt.size_bytes()) as u64)
     }
 
+    // sigmoid_row_fma: out[r,h] = base[r,h] + sigmoid(gate[r]) * value[r,h].
+    // Bench shape mirrors the Qwen3.6-A3B prefill fan-in: T=2048 rows x
+    // hidden=2048.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sigmoid_row_fma(dt: DType) -> BenchSetup {
+        let (t, hidden) = (2048usize, 2048usize);
+        let n = t * hidden;
+        BenchSetup::new(mt_sigmoid_row_fma::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("gate", t, dt))
+            .buffer(BenchBuffer::random("value", n, dt))
+            .buffer(BenchBuffer::random("base", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .constexpr("hidden", hidden as u32)
+            .grid_1d(n, 256)
+            .bytes_moved(((3 * n + t) * dt.size_bytes()) as u64)
+    }
+
     // sigmoid_scalar_fma: out[i] = base[i] + sigmoid(gate[0]) * value[i].
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sigmoid_scalar_fma(dt: DType) -> BenchSetup {
@@ -702,6 +746,39 @@ pub fn mt_sigmoid_scalar_fma_residual<T>(
     let b = load(base[idx]).cast::<f32>();
     let r = load(residual[idx]).cast::<f32>();
     store(out[idx], (r + b + g * v).cast::<T>());
+}
+
+/// Row-broadcast sigmoid FMA — the T-batched form of
+/// `mt_sigmoid_scalar_fma`. Computes
+///   `out[r*hidden + h] = base[r*hidden + h] + sigmoid(gate[r]) * value[r*hidden + h]`
+/// over a `[T, hidden]` layout, broadcasting each row's 1-element gate
+/// logit across that row. One thread per output element; `gate[row]`
+/// re-loads through L1 so the broadcast is free.
+///
+/// Replaces FFAI's per-row shared-expert fan-out at batched prefill:
+/// the previous shape was T separate command buffers each carrying one
+/// `mt_sigmoid_scalar_fma` dispatch (row-sliced gate) — ~82k command
+/// buffers per 2k-token prefill on Qwen3.6-A3B (40 MoE layers). This
+/// kernel collapses each layer's fan-out into ONE dispatch on the
+/// already-open command buffer.
+///
+/// Same precision contract as `mt_sigmoid_scalar_fma`: model dtype `T`
+/// at the read/write boundary, fp32 sigmoid + FMA internally.
+#[kernel]
+pub fn mt_sigmoid_row_fma<T>(
+    gate: Tensor<T>,
+    value: Tensor<T>,
+    base: Tensor<T>,
+    out: Tensor<T>,
+    #[constexpr] hidden: u32,
+) {
+    let idx = program_id(0);
+    let row = idx / hidden;
+    let gx = load(gate[row]).cast::<f32>();
+    let g = 1.0f32 / (1.0f32 + exp(0.0f32 - gx));
+    let v = load(value[idx]).cast::<f32>();
+    let b = load(base[idx]).cast::<f32>();
+    store(out[idx], (b + g * v).cast::<T>());
 }
 
 /// Scalar-broadcast FMA. Computes
