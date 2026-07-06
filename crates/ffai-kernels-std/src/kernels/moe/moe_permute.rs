@@ -117,6 +117,44 @@ pub fn mt_moe_permute<T>(
     }
 }
 
+// ── mt_moe_sort_plan ─────────────────────────────────────────────────────
+//
+// Build the expert-sorted MoE dispatch plan ON DEVICE from the router's
+// top-k expert ids, so the layer needs no readback / waitUntilCompleted /
+// host sort between routing and the grouped expert matmul:
+//   sorted_experts[dst] — expert id per expert-sorted row (GEMM `indices`)
+//   source_tokens[dst]  — source token per sorted row (row gather)
+//   inv_perm[i]         — where (token i/k, slot i%k) landed (unpermute)
+//
+// Stable counting sort computed per element with two rank terms:
+//   dst(i) = #{ j : ids[j] < ids[i] } + #{ j < i : ids[j] == ids[i] }
+// Each thread scans the full [m_total] id list (u32, L1-resident). No
+// atomics, stable, bit-identical run to run. Grid = [m_total], tpg 256.
+#[kernel]
+pub fn mt_moe_sort_plan(
+    topk_ids: Tensor<u32>,
+    mut sorted_experts: Tensor<u32>,
+    mut source_tokens: Tensor<u32>,
+    mut inv_perm: Tensor<u32>,
+    #[constexpr] m_total: u32,
+    #[constexpr] k: u32,
+) {
+    let i = program_id(0);
+    if i < m_total {
+        let e = load(topk_ids[i]);
+        let mut dst = 0u32;
+        for j in range(0u32, m_total, 1u32) {
+            let ej = load(topk_ids[j]);
+            let smaller = select(ej < e, 1u32, 0u32);
+            let equal_before = select(ej == e, 1u32, 0u32) * select(j < i, 1u32, 0u32);
+            dst = dst + smaller + equal_before;
+        }
+        store(sorted_experts[dst], e);
+        store(source_tokens[dst], i / k);
+        store(inv_perm[i], dst);
+    }
+}
+
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
@@ -124,6 +162,35 @@ pub mod kernel_tests {
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+    // mt_moe_sort_plan: device-built expert-sorted dispatch plan.
+    #[test_kernel(dtypes = [f32], tol = 0.0)]
+    fn test_moe_sort_plan(_dt: DType) -> TestSetup {
+        let (n_tokens, k) = (6usize, 2usize);
+        let m_total = n_tokens * k;
+        let ids: Vec<u32> = vec![2, 0, 1, 2, 0, 0, 4, 1, 2, 4, 0, 1];
+        let mut order: Vec<usize> = (0..m_total).collect();
+        order.sort_by_key(|&i| (ids[i], i));
+        let mut se = vec![0u32; m_total];
+        let mut st = vec![0u32; m_total];
+        let mut ip = vec![0u32; m_total];
+        for (dst, &i) in order.iter().enumerate() {
+            se[dst] = ids[i];
+            st[dst] = (i / k) as u32;
+            ip[i] = dst as u32;
+        }
+        TestSetup::new(mt_moe_sort_plan::kernel_ir())
+            .input(TestBuffer::from_vec("topk_ids", u32_bytes(&ids), DType::U32))
+            .input(TestBuffer::zeros("sorted_experts", m_total, DType::U32))
+            .input(TestBuffer::zeros("source_tokens", m_total, DType::U32))
+            .input(TestBuffer::zeros("inv_perm", m_total, DType::U32))
+            .constexpr("m_total", m_total as u32)
+            .constexpr("k", k as u32)
+            .expect(TestBuffer::from_vec("sorted_experts", u32_bytes(&se), DType::U32))
+            .expect(TestBuffer::from_vec("source_tokens", u32_bytes(&st), DType::U32))
+            .expect(TestBuffer::from_vec("inv_perm", u32_bytes(&ip), DType::U32))
+            .grid_1d(m_total, 256)
+    }
 
     // mt_moe_permute: gather token rows into expert-sorted order.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
@@ -194,6 +261,23 @@ pub mod kernel_benches {
     // ── permute — pure gather, bench-only ─────────────────────────────────
     // ABI: tokens, sort_token_idx, permuted + {hidden}. Grid [k*B*T, 1, 1],
     // tpg [128,1,1].
+    #[bench(dtypes = [f32])]
+    fn bench_moe_sort_plan(_dt: DType) -> BenchSetup {
+        let (t, k) = (2048usize, 8usize);
+        let m_total = t * k;
+        let ids: Vec<u32> = (0..m_total).map(|i| ((i * 2654435761usize) % 256) as u32).collect();
+        let bytes: Vec<u8> = ids.iter().flat_map(|x| x.to_le_bytes()).collect();
+        BenchSetup::new(mt_moe_sort_plan::kernel_ir())
+            .buffer(BenchBuffer::from_vec("topk_ids", bytes, DType::U32))
+            .buffer(BenchBuffer::zeros("sorted_experts", m_total, DType::U32).output())
+            .buffer(BenchBuffer::zeros("source_tokens", m_total, DType::U32).output())
+            .buffer(BenchBuffer::zeros("inv_perm", m_total, DType::U32).output())
+            .constexpr("m_total", m_total as u32)
+            .constexpr("k", k as u32)
+            .grid_1d(m_total, 256)
+            .bytes_moved((m_total * 4 * 4) as u64)
+    }
+
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_permute(dt: DType) -> BenchSetup {
         let bt = 512usize;
