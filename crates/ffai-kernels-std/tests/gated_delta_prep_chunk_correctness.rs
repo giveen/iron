@@ -21,7 +21,10 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::ssm::gated_delta_prep_chunk::mt_gated_delta_prep_chunk;
+use ffai_kernels_std::kernels::ssm::{
+    gated_delta_prep_chunk::mt_gated_delta_prep_chunk,
+    gated_delta_qknorm_prepass::mt_gated_delta_qknorm_prepass,
+};
 
 // ────────────────────────────────────────────────────────────────────
 //  CPU oracle: T-step prep + recurrence with state carried forward.
@@ -146,15 +149,40 @@ fn run_gpu(
 ) -> (Vec<f32>, Vec<f32>) {
     assert!(dk.is_multiple_of(32));
     let n_total = b * hv;
+    let ctx = Context::new().expect("Context::new on macOS");
 
+    // ── Pass 1: q/k RMSNorm pre-pass — once per (b, t, hk_idx). ────────
+    let mut prepass_buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    prepass_buffers.insert("conv_out".into(), pack_bytes(conv_out, dt));
+    prepass_buffers.insert("q_norm_weight".into(), pack_bytes(q_norm_weight, dt));
+    prepass_buffers.insert("k_norm_weight".into(), pack_bytes(k_norm_weight, dt));
+    prepass_buffers.insert("q_normed".into(), pack_bytes(&vec![0.0_f32; b * t * hk * dk], dt));
+    prepass_buffers.insert("k_normed".into(), pack_bytes(&vec![0.0_f32; b * t * hk * dk], dt));
+    prepass_buffers.insert("t_len".into(), (t as u32).to_le_bytes().to_vec());
+    prepass_buffers.insert("dk".into(), (dk as u32).to_le_bytes().to_vec());
+    prepass_buffers.insert("dv".into(), (dv as u32).to_le_bytes().to_vec());
+    prepass_buffers.insert("hv".into(), (hv as u32).to_le_bytes().to_vec());
+    prepass_buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
+
+    let mut prepass_kernel = mt_gated_delta_qknorm_prepass::kernel_ir_for(dt.to_dtype());
+    prepass_kernel.mode = KernelMode::Reduction;
+    let prepass_result = ctx
+        .dispatch_with_grid(&prepass_kernel, &prepass_buffers, &BTreeMap::new(), [t, b * hk, 1], [
+            32, 1, 1,
+        ])
+        .expect("mt_gated_delta_qknorm_prepass dispatch");
+    let q_normed = prepass_result.outputs.get("q_normed").expect("q_normed").clone();
+    let k_normed = prepass_result.outputs.get("k_normed").expect("k_normed").clone();
+
+    // ── Pass 2: chunked recurrence, consuming the pre-pass output. ─────
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     buffers.insert("conv_out".into(), pack_bytes(conv_out, dt));
     buffers.insert("a_log".into(), pack_bytes(a_log, dt));
     buffers.insert("dt_bias".into(), pack_bytes(dt_bias, dt));
     buffers.insert("a_raw".into(), pack_bytes(a_raw, dt));
     buffers.insert("b_raw".into(), pack_bytes(b_raw, dt));
-    buffers.insert("q_norm_weight".into(), pack_bytes(q_norm_weight, dt));
-    buffers.insert("k_norm_weight".into(), pack_bytes(k_norm_weight, dt));
+    buffers.insert("q_normed".into(), q_normed);
+    buffers.insert("k_normed".into(), k_normed);
     buffers.insert("state_in".into(), pack_bytes(state_in, dt));
     buffers.insert("state_out".into(), pack_bytes(&vec![0.0_f32; state_in.len()], dt));
     buffers.insert("y".into(), pack_bytes(&vec![0.0_f32; b * t * hv * dv], dt));
@@ -164,7 +192,6 @@ fn run_gpu(
     buffers.insert("hv".into(), (hv as u32).to_le_bytes().to_vec());
     buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
 
-    let ctx = Context::new().expect("Context::new on macOS");
     let mut kernel = mt_gated_delta_prep_chunk::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
