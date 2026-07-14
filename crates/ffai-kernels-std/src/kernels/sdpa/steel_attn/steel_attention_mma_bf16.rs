@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill SDPA via `simdgroup_multiply_accumulate` (MMA) — `mt_sdpa_prefill_mma`.
 //!

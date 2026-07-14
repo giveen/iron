@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Snake activation: `out[c,t] = x[c,t] + (1/α_c)·sin²(α_c · x[c,t])`.
 //!

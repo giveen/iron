@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for `mt_qmm_mma_mpp` — the production int4
 //! quantized matmul backed by `mpp::tensor_ops::matmul2d` (NAX path).
@@ -17,7 +17,7 @@
 //! Run:
 //!   cargo test --release -p ffai-kernels-std --test qmm_mpp_correctness -- --nocapture
 //!
-//! Bench: on M2 mini per `feedback_metaltile_bench_on_m2_mini.md`, never
+//! Bench: on M2 mini per `feedback_ffai_kernels_bench_on_m2_mini.md`, never
 //! on M5 Max under load. The bench harness lives in `ffai-kernels-cli` and is
 //! not wired in this test — this file is correctness only.
 

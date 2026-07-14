@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill MoE IQ2_XXS GEMV-over-rows — the fast decode gemv
 //! (mt_moe_gather_gemv_iq2xxs, ~270 GB/s) applied to a whole batch of

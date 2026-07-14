@@ -1,8 +1,8 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `__tile_runner` entry point for the ffai-kernels workspace.
+//! `__ffai_runner` entry point for the ffai-kernels workspace.
 //!
-//! User projects get their own copy scaffolded by `tile init`. This copy
+//! User projects get their own copy scaffolded by `ffaik init`. This copy
 //! serves the ffai-kernels workspace itself (e.g. `make bench` / `make test`).
 
 // Force the linker to include all `inventory::submit!` statics from the
@@ -13,7 +13,7 @@ fn main() {
     let args = match ffai_kernels::runner::RunnerArgs::from_env_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("__tile_runner: {e}");
+            eprintln!("__ffai_runner: {e}");
             std::process::exit(2);
         },
     };

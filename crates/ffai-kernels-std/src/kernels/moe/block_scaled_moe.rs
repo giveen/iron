@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Block-scaled **MoE gather-GEMM** kernels — per-token expert-routed matmul:
 //! `output[m, n] = Σ_k dequant(weight[expert_ids[m], n, k]) · x[m, k]` for the

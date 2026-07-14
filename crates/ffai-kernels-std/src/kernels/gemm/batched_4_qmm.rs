@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched 4-output 4-bit quantized QMM (M>1) — fuses the FOUR
 //! independent A, B, C, D projection matmuls that share a single `x`

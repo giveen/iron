@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! MetalTile kernel standard library: kernel definitions and bench helpers.
+//! FFAI Kernels kernel standard library: kernel definitions and bench helpers.
 //!
 //! `ffai-kernels-std` provides the kernel definitions (`#[kernel]` / `#[bench]` /
 //! `#[test_kernel]`) and the shared bench-setup utilities used by the kernels.

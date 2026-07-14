@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! SINGLE-COPY fast prefill MoE IQ2_XXS: the gemv-over-rows kernel
 //! (moe_gemv_rows_iq2xxs, ~100 GB/s) reading raw 66-byte IQ2_XXS blocks

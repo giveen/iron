@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Depthwise causal 1-D convolution — the streaming-decode step and the
 //! batched-prefill form. Used by the Mamba / SSM short-conv (the conv that

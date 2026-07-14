@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `mt_grouped_gemv_q8_rows_tiled` — the
 //! token-TILED grouped Q8 gemv (8-fold weight-DRAM amortization). It must

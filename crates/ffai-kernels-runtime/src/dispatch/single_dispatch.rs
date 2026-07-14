@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Single‑kernel Metal dispatch.
@@ -23,7 +23,7 @@ use crate::{
     DispatchResult,
     device::{buffer_pool::BufRc, metal_device::MetalDevice},
     dispatch::buffer_plan::{ParamBufferPlan, build_param_buffer_plans, resolve_strided_metadata},
-    error::MetalTileError,
+    error::FFAIError,
 };
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ impl<'a> SingleDispatch<'a> {
     }
 
     /// Execute the dispatch and return the result.
-    pub fn execute(&self) -> Result<DispatchResult, MetalTileError> {
+    pub fn execute(&self) -> Result<DispatchResult, FFAIError> {
         use objc2_metal::MTLCommandBuffer as _;
 
         let binding_plans = build_param_buffer_plans(self.kernel, self.buffers)?;
@@ -92,7 +92,7 @@ impl<'a> SingleDispatch<'a> {
         )?;
 
         let cb = self.dev.command_buffer()?;
-        let enc = (*cb).computeCommandEncoder().ok_or(MetalTileError::NoDevice)?;
+        let enc = (*cb).computeCommandEncoder().ok_or(FFAIError::NoDevice)?;
         enc.setComputePipelineState(self.pso);
 
         for (i, buf) in metal_bufs.iter().enumerate() {
@@ -135,7 +135,7 @@ impl<'a> SingleDispatch<'a> {
     fn allocate_buffers(
         &self,
         binding_plans: &[ParamBufferPlan],
-    ) -> Result<(Vec<BufRc>, usize), MetalTileError> {
+    ) -> Result<(Vec<BufRc>, usize), FFAIError> {
         let mut bufs = Vec::with_capacity(self.kernel.params.len() * 2);
         let mut n_threads = 1usize;
 
@@ -168,7 +168,7 @@ impl<'a> SingleDispatch<'a> {
             // ~µs/buffer `newBufferWithBytes` allocator round-trip.
             let buf = if let Some(bytes) = data.filter(|b| !b.is_empty()) {
                 if bytes.len() < required {
-                    return Err(MetalTileError::Buffer(format!(
+                    return Err(FFAIError::Buffer(format!(
                         "buffer allocation expected {required} bytes but received {}",
                         bytes.len()
                     )));

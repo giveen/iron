@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Runtime context — public entry point for Metal dispatch.
@@ -27,7 +27,7 @@ use crate::{
     device::metal_device::MetalDevice,
     dispatch::{chain_dispatch::ChainDispatch, single_dispatch::SingleDispatch},
 };
-use crate::{device::gpu_family::GpuFamily, error::MetalTileError};
+use crate::{device::gpu_family::GpuFamily, error::FFAIError};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -70,10 +70,10 @@ impl DispatchResult {
     /// Returns an error if the named output is absent. Interprets the bytes as
     /// 4-byte `f32`; for half-precision outputs use [`output`](Self::output)
     /// plus a dtype-aware unpack helper instead.
-    pub fn output_f32(&self, name: &str) -> Result<Vec<f32>, MetalTileError> {
+    pub fn output_f32(&self, name: &str) -> Result<Vec<f32>, FFAIError> {
         let bytes = self
             .output(name)
-            .ok_or_else(|| MetalTileError::Dispatch(format!("output '{name}' not found")))?;
+            .ok_or_else(|| FFAIError::Dispatch(format!("output '{name}' not found")))?;
         Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
     }
 
@@ -82,10 +82,10 @@ impl DispatchResult {
     /// # Errors
     ///
     /// Returns an error if the named output is absent.
-    pub fn output_u32(&self, name: &str) -> Result<Vec<u32>, MetalTileError> {
+    pub fn output_u32(&self, name: &str) -> Result<Vec<u32>, FFAIError> {
         let bytes = self
             .output(name)
-            .ok_or_else(|| MetalTileError::Dispatch(format!("output '{name}' not found")))?;
+            .ok_or_else(|| FFAIError::Dispatch(format!("output '{name}' not found")))?;
         Ok(bytes.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
     }
 }
@@ -171,7 +171,7 @@ impl Context {
     /// Probes the default Metal device on macOS.  On other platforms
     /// `has_gpu()` will return `false` but the context is still valid
     /// (dispatches are no‑ops).
-    pub fn new() -> Result<Self, MetalTileError> {
+    pub fn new() -> Result<Self, FFAIError> {
         #[cfg(target_os = "macos")]
         let device = MetalDevice::create()?;
         let gpu_family = GpuFamily::detect();
@@ -222,7 +222,7 @@ impl Context {
 
     /// Dispatch a kernel with no input buffers and no function
     /// constants.
-    pub fn dispatch(&self, kernel: &Kernel) -> Result<DispatchResult, MetalTileError> {
+    pub fn dispatch(&self, kernel: &Kernel) -> Result<DispatchResult, FFAIError> {
         self.dispatch_with_buffers(kernel, &BTreeMap::new())
     }
 
@@ -231,7 +231,7 @@ impl Context {
         &self,
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
-    ) -> Result<DispatchResult, MetalTileError> {
+    ) -> Result<DispatchResult, FFAIError> {
         self.dispatch_with_options(kernel, buffers, &BTreeMap::new())
     }
 
@@ -248,7 +248,7 @@ impl Context {
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
         fn_consts: &BTreeMap<String, u32>,
-    ) -> Result<DispatchResult, MetalTileError> {
+    ) -> Result<DispatchResult, FFAIError> {
         self.dispatch_with_grid_opt(kernel, buffers, fn_consts, None)
     }
 
@@ -273,7 +273,7 @@ impl Context {
         fn_consts: &BTreeMap<String, u32>,
         grid_groups: [usize; 3],
         threads_per_group: [usize; 3],
-    ) -> Result<DispatchResult, MetalTileError> {
+    ) -> Result<DispatchResult, FFAIError> {
         self.dispatch_with_grid_opt(
             kernel,
             buffers,
@@ -290,7 +290,7 @@ impl Context {
         buffers: &BTreeMap<String, Vec<u8>>,
         fn_consts: &BTreeMap<String, u32>,
         grid_override: Option<([usize; 3], [usize; 3])>,
-    ) -> Result<DispatchResult, MetalTileError> {
+    ) -> Result<DispatchResult, FFAIError> {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (kernel, buffers, fn_consts, grid_override);
@@ -327,10 +327,10 @@ impl Context {
     /// as long as any clone of the [`ResidentBuffer`] exists; on the
     /// last drop it returns to the pool.
     #[tracing::instrument(skip(self, bytes), fields(bytes = bytes.len()))]
-    pub fn upload_resident(&self, bytes: &[u8]) -> Result<ResidentBuffer, MetalTileError> {
+    pub fn upload_resident(&self, bytes: &[u8]) -> Result<ResidentBuffer, FFAIError> {
         #[cfg(target_os = "macos")]
         {
-            let dev = self.device.as_ref().ok_or(MetalTileError::NoDevice)?;
+            let dev = self.device.as_ref().ok_or(FFAIError::NoDevice)?;
 
             let buf = dev.acquire_shared(Some(bytes), bytes.len())?;
             Ok(ResidentBuffer { inner: buf })
@@ -363,7 +363,7 @@ impl Context {
     pub fn dispatch_chain(
         &self,
         specs: &[DispatchSpec<'_>],
-    ) -> Result<Vec<DispatchResult>, MetalTileError> {
+    ) -> Result<Vec<DispatchResult>, FFAIError> {
         if specs.is_empty() {
             return Ok(Vec::new());
         }

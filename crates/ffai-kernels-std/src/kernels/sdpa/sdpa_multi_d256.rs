@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Multi-query SDPA for `head_dim == 256`. The d=256 sibling of
 //! `mt_sdpa_multi`, generalising `mt_sdpa_decode_d256` with a
 //! query dimension. One threadgroup per (query, q_head) attends a

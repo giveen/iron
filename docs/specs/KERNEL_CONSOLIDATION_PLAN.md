@@ -1,5 +1,5 @@
 <!--
-Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 SPDX-License-Identifier: Apache-2.0
 -->
 # Kernel Consolidation Plan
@@ -151,7 +151,7 @@ Mechanics, per family:
 4. Rename to `mt_<op>`, dropping the legacy `ffai_` prefix **and any model name**
    — name the operation / layout, not the model (§9.1); regenerate the FFAI emit
    consumer from the new inventory.
-5. Gate: `cargo build` + `tile test -f <family>` green + `make fmt`. The
+5. Gate: `cargo build` + `ffaik test -f <family>` green + `make fmt`. The
    *generated MSL per kernel* is unchanged — diffs are whitespace/comments and
    the inventory-name rename.
 

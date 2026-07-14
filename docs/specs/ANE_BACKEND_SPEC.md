@@ -1,7 +1,7 @@
 # Apple Neural Engine (ANE) Backend Spec
 
 **Status:** 📋 Proposed / exploratory (design + feasibility; no implementation)
-**Scope:** Evaluate and design a path for MetalTile to target the **Apple Neural
+**Scope:** Evaluate and design a path for FFAI Kernels to target the **Apple Neural
 Engine**, via two routes — **(A) Core ML / MIL** (supported) and **(B) the direct
 private ANE APIs** (reverse-engineered). Focus stays on **compute lowering**, not
 model loading/execution (engine concern, separate project).
@@ -21,13 +21,13 @@ practical answer is *no, not in any supported way*. The ANE only runs **whole
 graphs/programs compiled by Apple's own ANE compiler** from a **fixed, supported
 op set**.
 
-This is a **category mismatch with MetalTile's model.** MetalTile lowers a Rust
+This is a **category mismatch with FFAI Kernels's model.** FFAI Kernels lowers a Rust
 `#[kernel]` DSL to *one custom kernel*. The ANE cannot accept a custom kernel —
 e.g. our block-scaled `qgemv` with bit-stream unpacking has **no ANE/Core ML
 primitive**; you cannot hand the ANE a hand-written decode loop. So an "ANE
-backend" for MetalTile can only mean:
+backend" for FFAI Kernels can only mean:
 
-> Lower the subset of MetalTile ops that have **ANE-supported equivalents**
+> Lower the subset of FFAI Kernels ops that have **ANE-supported equivalents**
 > (matmul, conv, attention, norm, elementwise, in fp16 / int8 with Core ML's own
 > weight compression) into a **graph** that Apple's compiler places on the ANE —
 > and leave the custom fused / bit-packed kernels on the GPU.
@@ -35,7 +35,7 @@ backend" for MetalTile can only mean:
 It is a **graph emitter constrained to Apple's op set**, not a code generator.
 That reframing should drive expectations: the win is offloading the *standard*
 matmul/attention/conv layers of a model to the ANE's very high int8/fp16 TOPS at
-low power; the win is **not** running MetalTile's bespoke kernels there.
+low power; the win is **not** running FFAI Kernels's bespoke kernels there.
 
 (The roofline `ane_tops` field already in `device_specs.rs` is only a *ceiling for
 comparison*, not evidence of a target path.)
@@ -44,12 +44,12 @@ comparison*, not evidence of a target path.)
 
 - The ANE delivers the **highest perf/Watt** on Apple silicon for the standard
   layers and runs **concurrently** with the GPU — a model could place matmul/attn
-  heavy layers on ANE while custom/unsupported ops run on the MetalTile GPU path.
+  heavy layers on ANE while custom/unsupported ops run on the FFAI Kernels GPU path.
 - Apple's recent **blockwise / grouped weight quantization** in Core ML
   (coremltools 8, iOS 18 / macOS 15) is conceptually the *same* idea as our
   block-scaled formats — so the **format design transfers** even though the
   *kernels* do not.
-- It future-proofs MetalTile as a multi-target toolchain (GPU now; ANE for the
+- It future-proofs FFAI Kernels as a multi-target toolchain (GPU now; ANE for the
   supported subgraph).
 
 **Field evidence (the §8 references).** This is corroborated by working projects:
@@ -71,7 +71,7 @@ and emit an `.mlpackage`; Core ML's compiler + runtime decide ANE/GPU/CPU
 placement. This is the route *The ANE Book* documents for production LLM inference.
 
 ### 3.1 Pipeline
-1. **IR → MIL.** Map MetalTile ops with MIL equivalents (`linear`/`matmul`,
+1. **IR → MIL.** Map FFAI Kernels ops with MIL equivalents (`linear`/`matmul`,
    `conv`, `layer_norm`/`rms_norm`-as-ops, `softmax`, `gelu`/`silu`, elementwise)
    to MIL builder ops (the `coremltools` MIL schema). Unsupported ops are refused
    (stay on GPU) — never silently lowered to a wrong-but-close op.
@@ -130,9 +130,9 @@ lowering pass must encode, found empirically:
   full-vocab repetition-penalty path (CoreML-LLM) — relevant if reductions are
   lowered to ANE; keep accuracy-sensitive reductions verifiable.
 
-### 3.3 What MetalTile contributes vs delegates
+### 3.3 What FFAI Kernels contributes vs delegates
 - **Contributes:** the IR→MIL lowering pass, the op-eligibility analysis
-  (what can go to ANE vs stays on the MetalTile GPU backend), and the
+  (what can go to ANE vs stays on the FFAI Kernels GPU backend), and the
   format→Core-ML-quant mapping.
 - **Delegates to Core ML:** the actual ANE compilation (`.mlmodelc`), placement,
   dequant, and execution.
@@ -166,7 +166,7 @@ compiler** to get a hardware executable; you only take over *submission*.
   (`com.apple.ane.*`); third-party apps generally **cannot** obtain them, which is
   why hollance's answer to "program it directly" is effectively *no*.
 
-**Working precedent:** `ane-infer` (a Rust project, like MetalTile) drives exactly
+**Working precedent:** `ane-infer` (a Rust project, like FFAI Kernels) drives exactly
 this stack — `mil-gen` emits fused MIL, the ANE private compiler produces the
 program, and `doEvaluateDirectWithModel:` submits with inputs/outputs as
 **`IOSurface`s** — reporting the ~3 W fused-FFN throughput in §2. It also documents
@@ -203,7 +203,7 @@ a public low-level ANE API.
    tells us whether a backend is even worth it per workload.
 2. **Route A MVP.** IR→MIL emitter for a small supported subgraph (e.g. an FFN:
    `linear → silu → linear` with Core ML blockwise int8 weights); compile to
-   `.mlpackage`; verify ANE residency + numerical match vs the MetalTile GPU path.
+   `.mlpackage`; verify ANE residency + numerical match vs the FFAI Kernels GPU path.
 3. **Quant mapping.** Map `quant::format` choices → Core ML weight-compression
    config (palettization / linear / blockwise); validate accuracy parity.
 4. **Coverage expansion.** Attention (Core ML SDPA / the book's KV-cache + MLState
@@ -215,7 +215,7 @@ a public low-level ANE API.
 
 ## 6. Risks / open questions
 
-- **Category mismatch (the big one).** The ANE can't run MetalTile's defining
+- **Category mismatch (the big one).** The ANE can't run FFAI Kernels's defining
   artifact — custom fused/quant kernels. The backend's value is narrowly the
   *standard* layers; set expectations accordingly.
 - **Quant divergence.** Core ML's blockwise quant ≠ our exact `quant::codec`
@@ -237,7 +237,7 @@ becomes a priority, starting with the **eligibility-analysis pass (Phase 1)** �
 it's low-cost and tells us whether the payoff justifies an MIL emitter for a given
 model. Keep **Route B as a measurement spike only**. Either way, the ANE is a
 *graph-offload* target for the supported subset, complementary to — not a
-replacement for — MetalTile's GPU kernel generation.
+replacement for — FFAI Kernels's GPU kernel generation.
 
 ## 8. References
 - *The ANE Book* (Alvaro Videla) — https://alvaro-videla.com/ane-book ·
@@ -257,7 +257,7 @@ replacement for — MetalTile's GPU kernel generation.
   a Rust ANE/GPU LLM runtime via the **direct private path**: `mil-gen` fused-MIL
   emitter, `_ANEClient` / `doEvaluateDirectWithModel:` / chaining,
   `_ANEDaemonConnection`, `H11ANE` IOKit; fused-FFN ~3.6 TFLOPS @ ~3 W; the
-  closest existing analog to a MetalTile ANE backend.
+  closest existing analog to a FFAI Kernels ANE backend.
 - john-rocky, *CoreML-LLM* — https://github.com/john-rocky/CoreML-LLM —
   production **Route A** (Core ML) LLM inference: coremltools 8+, INT8 chunking
   (~250 MB) + fp16-embed sidecars, multifunction prefill/decode, `MLState`

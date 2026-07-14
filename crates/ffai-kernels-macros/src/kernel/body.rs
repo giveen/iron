@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! DSL body parser: walks `syn::Expr` trees and translates DSL function calls
-//! into MetalTile IR-building token streams.
+//! into FFAI Kernels IR-building token streams.
 //!
 //! ## How it works
 //!
@@ -415,7 +415,7 @@ impl DslBodyParser {
         if matches!(range.limits, RangeLimits::Closed(_)) {
             self.push_error(syn::Error::new_spanned(
                 range,
-                "inclusive ranges are not supported in MetalTile loops; use `start..end`",
+                "inclusive ranges are not supported in FFAI Kernels loops; use `start..end`",
             ));
             return None;
         }
@@ -428,7 +428,7 @@ impl DslBodyParser {
         let Some(end_expr) = range.end.as_ref() else {
             self.push_error(syn::Error::new_spanned(
                 range,
-                "open-ended ranges are not supported in MetalTile loops",
+                "open-ended ranges are not supported in FFAI Kernels loops",
             ));
             return None;
         };
@@ -672,7 +672,7 @@ impl DslBodyParser {
                 if path.is_empty() {
                     return self.push_error_value(syn::Error::new_spanned(
                         &call.func,
-                        "unrecognized MetalTile DSL call: cannot determine callee name",
+                        "unrecognized FFAI Kernels DSL call: cannot determine callee name",
                     ));
                 }
                 // Only treat as a cross-kernel call if the name follows the
@@ -684,7 +684,7 @@ impl DslBodyParser {
                     return self.push_error_value(syn::Error::new_spanned(
                         &call.func,
                         format!(
-                            "unrecognized MetalTile DSL function `{path}`. \
+                            "unrecognized FFAI Kernels DSL function `{path}`. \
                              Cross-kernel callees must be registered via \
                              #[kernel] and their names must start with `mt_` \
                              or `ffai_`."

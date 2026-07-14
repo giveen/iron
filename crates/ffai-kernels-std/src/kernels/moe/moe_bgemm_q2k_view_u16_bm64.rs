@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! POOL-FREE amortized MoE Q2_K bgemm — bm64 64×64×32 coop_tile MMA reading RAW
 //! resident GGUF Q2_K blocks directly (no CPU deinterleave pool). The down-

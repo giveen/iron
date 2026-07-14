@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Flash quantized SDPA — single-pass online-softmax attention over an
 //! affine-quantized K/V cache. Port of `mt_flash_quantized_sdpa.h`

@@ -18,7 +18,7 @@
 # NOT run here (too slow or environment-specific):
 #   - Full `cargo test --workspace` — runs on macOS CI
 #   - GPU correctness suite — needs Metal
-#   - `tile bench` — multi-minute
+#   - `ffaik bench` — multi-minute
 #
 # Bypass with `git push --no-verify` only when you know what you're
 # doing.

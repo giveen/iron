@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Scan benchmark — #[kernel] DSL vs MLX metal/scan.metal
 //!
@@ -712,7 +712,7 @@ pub mod kernel_benches {
     // ULP over a 1024-element row.
     const SCAN_TOL_FLOOR: f32 = 1e-3;
 
-    /// MetalTile-only scan bench (prod/max/min and the exclusive variants have
+    /// FFAI-only scan bench (prod/max/min and the exclusive variants have
     /// no single-host-named MLX `contig_scan_*` counterpart wired here — only
     /// inclusive sum carries an A/B reference below).
     fn sb(kernel: Kernel, dt: DType) -> BenchSetup {

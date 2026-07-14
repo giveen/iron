@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Benchmark types: [`BenchBuffer`], [`RefKernel`], [`BenchSetup`],
 //! [`KernelBench`], [`KernelBenchEntry`], and supporting primitives.
@@ -164,7 +164,7 @@ impl fmt::Display for Grid {
 ///
 /// `Lazy` defers data generation until [`BenchBuffer::initial_bytes`] is called
 /// (i.e. only when a bench actually runs on-GPU). Building a `BenchSetup` purely
-/// to read its kernel IR — as the codegen-consistency tests and `tile build` do
+/// to read its kernel IR — as the codegen-consistency tests and `ffaik build` do
 /// for all ~1200 benches — then costs nothing.
 #[derive(Clone)]
 enum BufferInit {
@@ -291,11 +291,11 @@ impl BenchBuffer {
 // RefKernel
 // ---------------------------------------------------------------------------
 
-/// A reference Metal kernel (e.g. an MLX kernel) to benchmark a MetalTile
+/// A reference Metal kernel (e.g. an MLX kernel) to benchmark a FFAI Kernels
 /// kernel against.
 ///
 /// The runner times both under the same machinery and compares their outputs
-/// for numerical equivalence, so a bench row can report MetalTile GB/s,
+/// for numerical equivalence, so a bench row can report FFAI Kernels GB/s,
 /// reference GB/s, the speed ratio, and a correctness verdict.
 #[derive(Debug, Clone)]
 pub struct RefKernel {

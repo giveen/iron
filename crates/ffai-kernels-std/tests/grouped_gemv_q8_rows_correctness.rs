@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched grouped Q8 gemv (mt_grouped_gemv_q8_rows) must equal the
 //! per-token single kernel (mt_grouped_gemv_q8) row by row. NO model load.

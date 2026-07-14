@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! HIGH-THROUGHPUT amortized MoE Q4 grouped BGEMM — bm64 tiling (64×64×32,
 //! 4 simdgroups) with the bench's signed-4-bit dequant. The Q4 twin of

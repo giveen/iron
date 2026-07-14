@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! End-to-end correctness + perf bench for the MLX-geometry two-pass
 //! SDPA decode kernel pair.
@@ -242,7 +242,7 @@ fn matches_cpu_reference_f32_chained_resident_gqa() {
 // Narrow-dtype chained+resident saturates on Apple7 (M1) — the f16/bf16
 // MSL store path through `MTLStorageModePrivate` staging diverges to the
 // dtype's max value on that family. Works on Apple8+ (M2/M3/M4/M5). CI
-// runs M1; tile bench's `sdpa_decode_2pass` f16/bf16 rows (181/147 GB/s,
+// runs M1; ffaik bench's `sdpa_decode_2pass` f16/bf16 rows (181/147 GB/s,
 // 12/12 correct on M2) cover the production target.
 #[test]
 #[ignore = "f16 chained+resident: Apple7/M1 codegen divergence; passes on Apple8+"]

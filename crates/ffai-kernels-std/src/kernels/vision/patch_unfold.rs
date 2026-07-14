@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Qwen-VL patch unfold — temporal-group + spatial-merge-block patch raster
 //! with `(t, c, py, px)` columns. The gather Qwen2-VL / Qwen2.5-VL / Qwen3-VL

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Mamba 2 (SSD-form) building blocks: the selective-scan single-token
 //! decode step and the depthwise causal-conv streaming step. Plus

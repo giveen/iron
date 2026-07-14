@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Re-exports and placeholder DSL items for `#[kernel]` functions.
 //!
@@ -19,7 +19,7 @@
 //!   [`ActKind`], [`ReduceKind`], [`AtomicKind`], [`AtomicScope`], [`CoopTileScope`],
 //!   [`CoopTileAccMode`]
 //! - **Runtime:** [`Context`], [`DispatchResult`], [`DispatchSpec`], [`ResidentBuffer`],
-//!   [`MetalTileError`]
+//!   [`FFAIError`]
 //! - **Other:** [`GpuFamily`], [`KernelEntry`], [`make_tile`]
 //! - **DSL stubs:** [`Tensor`], [`program_id`], [`load`], [`store`], [`dot`],
 //!   `exp`, `log`, `sqrt`, `rsqrt`, `abs`, `silu`, `gelu`, `relu`, `tanh`,
@@ -73,7 +73,7 @@ pub use ffai_kernels_core::shape::tile as make_tile;
 pub use ffai_kernels_core::shape::{DimExpr, Shape};
 /// Marks a kernel parameter as a compile-time constant.
 pub use ffai_kernels_macros::constexpr;
-/// Marks a function as a MetalTile kernel.
+/// Marks a function as a FFAI Kernels kernel.
 pub use ffai_kernels_macros::kernel;
 /// Marks a `Tensor` parameter for `constant T&` lowering in MSL.
 pub use ffai_kernels_macros::scalar;
@@ -89,14 +89,14 @@ pub use ffai_kernels_runtime::Context;
 pub use ffai_kernels_runtime::DispatchResult;
 /// Input buffer spec for the launched dispatch pipeline.
 pub use ffai_kernels_runtime::DispatchSpec;
+/// Top-level runtime error.
+pub use ffai_kernels_runtime::FFAIError;
 /// Apple GPU family inference from Metal device name strings.
 pub use ffai_kernels_runtime::GpuFamily;
-/// Top-level runtime error.
-pub use ffai_kernels_runtime::MetalTileError;
 /// A resident Metal buffer managed by the context.
 pub use ffai_kernels_runtime::ResidentBuffer;
 
-/// Registry entry for a MetalTile kernel available for cross-kernel calling.
+/// Registry entry for a FFAI Kernels kernel available for cross-kernel calling.
 ///
 /// You only need this when registering a kernel for use as an inlined callee via the
 /// `inventory::collect!` mechanism. For ordinary `#[kernel]` definitions this is handled

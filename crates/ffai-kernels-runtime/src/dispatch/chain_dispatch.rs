@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Multi‑pass fused dispatch chain.
@@ -36,7 +36,7 @@ use crate::{
     DispatchSpec,
     device::{buffer_pool::BufRc, metal_device::MetalDevice},
     dispatch::buffer_plan::{ParamBufferPlan, build_param_buffer_plans, resolve_strided_metadata},
-    error::MetalTileError,
+    error::FFAIError,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ impl<'a> ChainDispatch<'a> {
     /// Execute all passes on one command buffer and return per‑pass
     /// results.  GPU time is attributed to the first result (chained
     /// passes share one command buffer and cannot be split).
-    pub fn execute(&self) -> Result<Vec<DispatchResult>, MetalTileError> {
+    pub fn execute(&self) -> Result<Vec<DispatchResult>, FFAIError> {
         let binding_plans = self.build_binding_plans()?;
 
         let later_inputs: Vec<HashSet<&str>> = (0..self.specs.len())
@@ -93,7 +93,7 @@ impl<'a> ChainDispatch<'a> {
 
     // ── private helpers ─────────────────────────────────────────────
 
-    fn build_binding_plans(&self) -> Result<Vec<Vec<ParamBufferPlan>>, MetalTileError> {
+    fn build_binding_plans(&self) -> Result<Vec<Vec<ParamBufferPlan>>, FFAIError> {
         let mut binding_plans = Vec::with_capacity(self.specs.len());
         for spec in self.specs {
             binding_plans.push(build_param_buffer_plans(spec.kernel, spec.buffers)?);
@@ -103,7 +103,7 @@ impl<'a> ChainDispatch<'a> {
 
     fn compile_pso_pipeline(
         &self,
-    ) -> Result<Vec<Retained<ProtocolObject<dyn MTLComputePipelineState>>>, MetalTileError> {
+    ) -> Result<Vec<Retained<ProtocolObject<dyn MTLComputePipelineState>>>, FFAIError> {
         let mut pipes = Vec::with_capacity(self.specs.len());
 
         // MSL fetched lazily by `get_pso` only on PSO-cache miss — no
@@ -123,7 +123,7 @@ impl<'a> ChainDispatch<'a> {
         pipes: &[Retained<ProtocolObject<dyn MTLComputePipelineState>>],
         binding_plans: &[Vec<ParamBufferPlan>],
         later_inputs: &[HashSet<&str>],
-    ) -> Result<Vec<Vec<BufRc>>, MetalTileError> {
+    ) -> Result<Vec<Vec<BufRc>>, FFAIError> {
         let mut alias_pool: FxHashMap<String, BufRc> = FxHashMap::default();
         let mut per_spec_bufs: Vec<Vec<BufRc>> = Vec::with_capacity(self.specs.len());
 
@@ -146,7 +146,7 @@ impl<'a> ChainDispatch<'a> {
                 ffai_kernels_codegen::kernel_uses_n_simd(spec.kernel),
             )?;
 
-            let enc = (*cb).computeCommandEncoder().ok_or(MetalTileError::NoDevice)?;
+            let enc = (*cb).computeCommandEncoder().ok_or(FFAIError::NoDevice)?;
 
             enc.setComputePipelineState(&pipes[i]);
             for (idx, buf) in bufs.iter().enumerate() {
@@ -180,7 +180,7 @@ impl<'a> ChainDispatch<'a> {
         plans: &[ParamBufferPlan],
         later_inputs_this: &HashSet<&str>,
         alias_pool: &mut FxHashMap<String, BufRc>,
-    ) -> Result<Vec<BufRc>, MetalTileError> {
+    ) -> Result<Vec<BufRc>, FFAIError> {
         let mut bufs: Vec<BufRc> = Vec::with_capacity(spec.kernel.params.len() * 2);
 
         for (param, plan) in spec.kernel.params.iter().zip(plans) {
@@ -224,7 +224,7 @@ impl<'a> ChainDispatch<'a> {
         bufs: &mut Vec<BufRc>,
         param: &ffai_kernels_core::ir::Param,
         src: &BTreeMap<String, Vec<u8>>,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         if param.kind == ParamKind::Strided {
             let (shape, strides) = resolve_strided_metadata(param, src)?;
             bufs.push(self.dev.acquire_shared(Some(shape.as_ref()), shape.len())?);
@@ -238,7 +238,7 @@ impl<'a> ChainDispatch<'a> {
         enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,
         spec: &DispatchSpec<'_>,
         tensor_binding_count: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         for (j, decl) in spec.kernel.constexprs.iter().enumerate() {
             let key = decl.name.name();
             let elem = decl.dtype.size_bytes().max(4);
@@ -259,7 +259,7 @@ impl<'a> ChainDispatch<'a> {
             unsafe {
                 enc.setBytes_length_atIndex(
                     NonNull::new(staged.as_ptr() as *mut _)
-                        .ok_or_else(|| MetalTileError::Buffer("setBytes null".into()))?,
+                        .ok_or_else(|| FFAIError::Buffer("setBytes null".into()))?,
                     elem,
                     tensor_binding_count + j,
                 );
@@ -274,7 +274,7 @@ impl<'a> ChainDispatch<'a> {
         binding_plans: &[Vec<ParamBufferPlan>],
         later_inputs: &[HashSet<&str>],
         elapsed_us: f64,
-    ) -> Result<Vec<DispatchResult>, MetalTileError> {
+    ) -> Result<Vec<DispatchResult>, FFAIError> {
         let mut results = Vec::with_capacity(self.specs.len());
 
         for (i, spec) in self.specs.iter().enumerate() {

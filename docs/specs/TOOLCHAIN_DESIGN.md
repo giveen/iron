@@ -1,4 +1,4 @@
-# MetalTile Toolchain Design
+# FFAI Kernels Toolchain Design
 
 **Status:** Draft — refactor/bench-logic-3
 
@@ -6,7 +6,7 @@
 
 ## Problem with the current design
 
-The old system compiled all bench logic — buffer allocation strategies, reference kernel names, dispatch shapes, correctness tolerances — directly into the `tile` CLI binary via `inventory::submit!`. This created three problems:
+The old system compiled all bench logic — buffer allocation strategies, reference kernel names, dispatch shapes, correctness tolerances — directly into the `ffaik` CLI binary via `inventory::submit!`. This created three problems:
 
 1. **Every kernel change required reinstalling the CLI.** The bench registration lived in `ffai-kernels-std`, which `ffai-kernels-cli` linked. `cargo install` was not optional.
 
@@ -20,10 +20,10 @@ The old system compiled all bench logic — buffer allocation strategies, refere
 
 | Goal | Description |
 |---|---|
-| **No reinstall** | `tile bench` / `tile test` run the user's project as a subprocess. Changing a kernel or its bench setup only requires recompiling the project, not the CLI. |
+| **No reinstall** | `ffaik bench` / `ffaik test` run the user's project as a subprocess. Changing a kernel or its bench setup only requires recompiling the project, not the CLI. |
 | **Kernel-local policy** | Every decision about how a kernel is benched or tested (buffer sizes, dtypes, tolerance, reference kernel) is authored next to the kernel, in the user's crate. |
 | **Minimal toolchain surface** | The toolchain provides traits and a protocol. It does not define dispatch classes, buffer init strategies, or anything domain-specific. |
-| **Foundry UX** | `cd my-kernels && tile bench` — the project directory is the unit of operation, like Cargo itself. |
+| **Foundry UX** | `cd my-kernels && ffaik bench` — the project directory is the unit of operation, like Cargo itself. |
 | **Idiomatic Rust** | All toolchain and kernel-author code follows Rust best practices: builder pattern, opaque types, trait-based polymorphism, `Result`-propagating errors. |
 
 ---
@@ -140,13 +140,13 @@ Rules:
 │  │  JSON results to stdout.                         │  │
 │  └──────────────────────────────────────────────────┘  │
 └──────────┬──────────────────────────────────────────────┘
-           │ cargo run --bin __tile_runner -- bench --filter exp
+           │ cargo run --bin __ffai_runner -- bench --filter exp
            │ (JSON lines on stdout; harness generated in $CARGO_TARGET_DIR)
            ▼
 ┌─────────────────────────────┐
 │  tile CLI  (ffai-kernels-cli)  │
 │                             │
-│  Detects tile.toml,         │
+│  Detects ffai.toml,         │
 │  spawns subprocess,         │
 │  streams + renders output.  │
 │                             │
@@ -159,9 +159,9 @@ The CLI is a **rendering and orchestration** layer only. It knows nothing about 
 
 ---
 
-## Project manifest — `tile.toml`
+## Project manifest — `ffai.toml`
 
-Every project that uses `tile` has a `tile.toml` at the workspace root:
+Every project that uses `ffaik` has a `ffai.toml` at the workspace root:
 
 ```toml
 [project]
@@ -184,7 +184,7 @@ default_tol = 1e-4
 
 ## The `#[kernel]` macro
 
-`#[kernel]` does exactly one thing: **convert the DSL function body into MetalTile IR** and register a `KernelEntry` in the inventory so `tile build` / `tile inspect` can find it.
+`#[kernel]` does exactly one thing: **convert the DSL function body into FFAI Kernels IR** and register a `KernelEntry` in the inventory so `ffaik build` / `ffaik inspect` can find it.
 
 ```rust
 #[kernel]
@@ -198,7 +198,7 @@ That is all. No bench args, no dispatch class, no tolerance.
 
 The macro generates:
 - `mod mt_exp { pub fn kernel_ir_for(dt: DType) -> Kernel { … } }`
-- A `KernelEntry` submitted to `ffai_kernels_core::inventory` for `tile build`/`inspect`
+- A `KernelEntry` submitted to `ffai_kernels_core::inventory` for `ffaik build`/`inspect`
 
 ---
 
@@ -228,7 +228,7 @@ fn exp_bench(dt: DType) -> BenchSetup { … }
 ```
 
 Compute-bound kernels (matmul, attention, convolution) should also declare a FLOP
-count so `tile bench` reports `GFLOP/s` and the roofline `%FLOP` / arithmetic
+count so `ffaik bench` reports `GFLOP/s` and the roofline `%FLOP` / arithmetic
 intensity. Use the `.flops(n)` builder (the dense-equivalent multiply-accumulate
 count × 2, e.g. `2·M·N·K` for a matmul) or the `flops` key for a closure;
 memory-bound kernels leave it unset and the compute columns stay blank.
@@ -405,11 +405,11 @@ The protocol is versioned. The CLI negotiates with the runner via the `runner_ve
 
 Kernel authors write zero runner code. The subprocess wiring is entirely owned by the toolchain.
 
-When `tile bench` is invoked, it:
+When `ffaik bench` is invoked, it:
 
-1. Finds `tile.toml` walking up from CWD.
+1. Finds `ffai.toml` walking up from CWD.
 2. Generates a harness entry-point on the fly (in `$CARGO_TARGET_DIR/tile/`) — exactly like how `cargo test` generates a test harness without you writing a `fn main`.
-3. Compiles it with `cargo build --bin __tile_runner` (the generated bin is invisible to the author).
+3. Compiles it with `cargo build --bin __ffai_runner` (the generated bin is invisible to the author).
 4. Spawns the compiled binary and streams JSON.
 
 The harness source is a single generated file:
@@ -427,38 +427,38 @@ fn main() {
 
 ## CLI commands
 
-### `tile bench`
+### `ffaik bench`
 
 ```
-tile bench [-f <filter>] [-v] [-o results.json]
+ffaik bench [-f <filter>] [-v] [-o results.json]
 ```
 
-1. Find `tile.toml` walking up from CWD.
+1. Find `ffai.toml` walking up from CWD.
 2. Generate runner harness source into `$CARGO_TARGET_DIR/tile/__runner.rs` if absent or stale.
-3. Spawn `cargo run --bin __tile_runner [runner.cargo_args] -- bench [--filter …]`.
+3. Spawn `cargo run --bin __ffai_runner [runner.cargo_args] -- bench [--filter …]`.
 4. Stream JSON lines → render live table.
 5. Optionally write `results.json`.
 
-### `tile test`
+### `ffaik test`
 
 ```
-tile test [-f <filter>] [-v]
+ffaik test [-f <filter>] [-v]
 ```
 
 Same as bench but invokes `-- test`.
 
-### `tile build`
+### `ffaik build`
 
 ```
-tile build [-f <filter>] [--dtypes f32,f16,bf16] [--emit msl,metallib] [-o <dir>]
+ffaik build [-f <filter>] [--dtypes f32,f16,bf16] [--emit msl,metallib] [-o <dir>]
 ```
 
 Invokes the runner with `-- build`. The runner iterates `KernelEntry` inventory, generates MSL via `ffai-kernels-codegen`, optionally compiles a metallib, and streams artifacts over the protocol.
 
-### `tile inspect`
+### `ffaik inspect`
 
 ```
-tile inspect [<kernel>] [--ir] [--pass <name>] [--dtype f32]
+ffaik inspect [<kernel>] [--ir] [--pass <name>] [--dtype f32]
 ```
 
 Invokes `-- inspect`. Same kernel discovery path.
@@ -479,8 +479,8 @@ Invokes `-- inspect`. Same kernel discovery path.
 | Reference kernel | | ✅ `KernelBench::metal_reference` |
 | Tolerance | | ✅ `KernelTest::tolerance` |
 | CPU oracle | | ✅ `TestSetup::expected` |
-| Runner harness / subprocess wiring | ✅ auto-generated by `tile` | |
-| Bench iterations | ✅ `tile.toml [bench]` | override per-bench if needed |
+| Runner harness / subprocess wiring | ✅ auto-generated by `ffaik` | |
+| Bench iterations | ✅ `ffai.toml [bench]` | override per-bench if needed |
 
 ---
 
@@ -488,7 +488,7 @@ Invokes `-- inspect`. Same kernel discovery path.
 
 ```
 my-kernels/
-├── tile.toml
+├── ffai.toml
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -498,7 +498,7 @@ my-kernels/
 
 The kernel, its bench setup, and its correctness test live in the same file. There is no reason to split them — they share the same constants, the same buffer layout, and the same understanding of what the kernel does. Keeping them together makes that knowledge visible in one place.
 
-No runner binary. No `src/bin/`. No protocol code. The harness is generated by `tile` at build time and lives entirely in `$CARGO_TARGET_DIR`.
+No runner binary. No `src/bin/`. No protocol code. The harness is generated by `ffaik` at build time and lives entirely in `$CARGO_TARGET_DIR`.
 
 ---
 
@@ -507,7 +507,7 @@ No runner binary. No `src/bin/`. No protocol code. The harness is generated by `
 1. **`ffai-kernels-core`**: add `KernelBench`, `KernelTest`, `BenchSetup`, `TestSetup`, `BenchBuffer`, `TestBuffer`, `MetalRef`, `ConstValue` types and `KernelBenchEntry` / `KernelTestEntry` inventory wrappers.
 2. **`ffai-kernels`**: re-export the new traits; add `register_bench!` / `register_test!` macros.
 3. **`ffai-kernels`**: implement `runner::run` — the protocol loop.
-4. **`ffai-kernels-cli`**: implement `tile bench`, `tile test` — harness generation + subprocess launch + JSON rendering.
-5. **`ffai-kernels-std`**: port existing bench specs to `impl KernelBench`; add `tile.toml` at the workspace root.
+4. **`ffai-kernels-cli`**: implement `ffaik bench`, `ffaik test` — harness generation + subprocess launch + JSON rendering.
+5. **`ffai-kernels-std`**: port existing bench specs to `impl KernelBench`; add `ffai.toml` at the workspace root.
 
 No step requires kernel authors to create a runner binary. Step 4 owns that entirely.

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! `#[kernel]` rejects `while` loops — the body parser does not lower them
 //! and would otherwise silently drop the loop, shipping a kernel that does

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Multi-query causal sliding-window SDPA for head_dim=512 with attention
 //! sink — the PREFILL counterpart of `mt_sdpa_decode_d512_sink`. Each

@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Vulkan/RDNA4 correctness for the per-feature bias broadcast used by the
 //! batched prefill path: `out[r, c] = x[r, c] + bias[c]` over an

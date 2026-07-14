@@ -1,19 +1,19 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `TileConfig` — layered configuration for the `tile` CLI.
+//! `FFAIConfig` — layered configuration for the `ffaik` CLI.
 //!
 //! # Load order (later layers override earlier ones)
 //!
 //! 1. Built-in defaults
-//! 2. `extends` base file (resolved relative to the tile.toml that references it)
-//! 3. `tile.toml` found by walking up from CWD (optional, ignored if absent)
+//! 2. `extends` base file (resolved relative to the ffai.toml that references it)
+//! 3. `ffai.toml` found by walking up from CWD (optional, ignored if absent)
 //! 4. Profile-specific overrides from `[profiles.<name>]` section
-//! 5. `TILE_*` environment variables
+//! 5. `FFAI_*` environment variables
 //! 6. CLI flags (applied at the harness level after extraction)
 //!
 //! # Profile selection
 //!
-//! Select a profile with `TILE_PROFILE=ci` or `--profile ci`.
+//! Select a profile with `FFAI_PROFILE=ci` or `--profile ci`.
 //!
 //! ```toml
 //! [profiles.ci]
@@ -43,7 +43,7 @@
 //! time_passes = false
 //!
 //! [runner]
-//! binary = "__tile_runner"
+//! binary = "__ffai_runner"
 //! extra_args = []
 //! ```
 //!
@@ -60,7 +60,7 @@ use serde::{Deserialize, Serialize};
 
 // ── Sub-table structs ─────────────────────────────────────────────────────
 
-/// Bench-specific configuration (`[bench]` table in tile.toml).
+/// Bench-specific configuration (`[bench]` table in ffai.toml).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BenchConfig {
     /// Number of timed benchmark iterations per kernel (after warmup).
@@ -69,7 +69,7 @@ pub struct BenchConfig {
     pub warmup_runs: Option<usize>,
 }
 
-/// Build-specific configuration (`[build]` table in tile.toml).
+/// Build-specific configuration (`[build]` table in ffai.toml).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuildConfig {
     /// Dtypes to compile by default when `--dtypes` is not passed.
@@ -80,27 +80,27 @@ pub struct BuildConfig {
     pub time_passes: Option<bool>,
 }
 
-/// Runner subprocess configuration (`[runner]` table in tile.toml).
+/// Runner subprocess configuration (`[runner]` table in ffai.toml).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunnerConfig {
-    /// Path to the `__tile_runner` subprocess binary.
+    /// Path to the `__ffai_runner` subprocess binary.
     pub binary: Option<String>,
     /// Extra arguments forwarded verbatim to the runner subprocess.
     pub extra_args: Option<Vec<String>>,
 }
 
-// ── TileConfig ─────────────────────────────────────────────────────────────
+// ── FFAIConfig ─────────────────────────────────────────────────────────────
 
-/// Top-level configuration for the `tile` CLI.
+/// Top-level configuration for the `ffaik` CLI.
 ///
 /// Use the `effective_*()` accessors rather than reading fields directly —
 /// they apply the sub-table-over-flat precedence rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TileConfig {
+pub struct FFAIConfig {
     // ── Flat (backward-compat top-level fields) ────────────────────────
-    /// Path to the `__tile_runner` binary.  **Deprecated:** use `[runner] binary`.
+    /// Path to the `__ffai_runner` binary.  **Deprecated:** use `[runner] binary`.
     pub runner_binary: String,
-    /// Optional path to the MetalTile project root.
+    /// Optional path to the FFAI Kernels project root.
     pub project_path: Option<String>,
     /// Verbosity level: 0 = quiet, 1 = profile columns, 2 = timing columns.
     pub verbose: u8,
@@ -124,10 +124,10 @@ pub struct TileConfig {
     pub warnings: Vec<String>,
 }
 
-impl Default for TileConfig {
+impl Default for FFAIConfig {
     fn default() -> Self {
         Self {
-            runner_binary: "__tile_runner".to_string(),
+            runner_binary: "__ffai_runner".to_string(),
             project_path: None,
             verbose: 0,
             runs: 3,
@@ -140,7 +140,7 @@ impl Default for TileConfig {
     }
 }
 
-impl TileConfig {
+impl FFAIConfig {
     /// Effective bench iterations: `[bench] runs` overrides flat `runs`.
     pub fn effective_runs(&self) -> usize { self.bench.runs.unwrap_or(self.runs) }
 
@@ -170,7 +170,7 @@ impl TileConfig {
         self.runner.extra_args.clone().unwrap_or_default()
     }
 
-    /// Serialize the effective config as pretty-printed TOML (`tile config`).
+    /// Serialize the effective config as pretty-printed TOML (`ffaik config`).
     pub fn to_string_pretty(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(self)
     }
@@ -178,19 +178,19 @@ impl TileConfig {
 
 // ── ConfigLoader ───────────────────────────────────────────────────────────
 
-/// Loads [`TileConfig`] from the layered sources described in the module doc.
+/// Loads [`FFAIConfig`] from the layered sources described in the module doc.
 pub struct ConfigLoader;
 
 impl ConfigLoader {
-    /// Walk parent directories from CWD looking for `tile.toml`.
+    /// Walk parent directories from CWD looking for `ffai.toml`.
     ///
     /// Returns the first path found, or `None` if the file doesn't exist
     /// anywhere in the ancestor chain (stops at filesystem root).
-    pub fn find_tile_toml() -> Option<PathBuf> {
+    pub fn find_ffai_toml() -> Option<PathBuf> {
         let cwd = std::env::current_dir().ok()?;
         let mut dir: &Path = cwd.as_path();
         loop {
-            let candidate = dir.join("tile.toml");
+            let candidate = dir.join("ffai.toml");
             if candidate.exists() {
                 return Some(candidate);
             }
@@ -201,35 +201,35 @@ impl ConfigLoader {
     /// Build and extract the merged configuration using the default profile.
     ///
     /// Returns `Err` only when figment itself fails (malformed TOML, type
-    /// mismatch in an env var, etc.).  A missing `tile.toml` is silently
+    /// mismatch in an env var, etc.).  A missing `ffai.toml` is silently
     /// ignored.
-    pub fn load() -> Result<TileConfig, Box<figment::Error>> { Self::load_with_profile(None) }
+    pub fn load() -> Result<FFAIConfig, Box<figment::Error>> { Self::load_with_profile(None) }
 
     /// Build and extract the merged configuration, selecting an optional named
     /// profile.
     ///
     /// Profile resolution:
     ///   1. `profile` argument (from `--profile` CLI flag)
-    ///   2. `TILE_PROFILE` environment variable
+    ///   2. `FFAI_PROFILE` environment variable
     ///   3. No profile (flat config only)
-    pub fn load_with_profile(profile: Option<&str>) -> Result<TileConfig, Box<figment::Error>> {
-        let toml_path = Self::find_tile_toml().unwrap_or_else(|| PathBuf::from("tile.toml"));
+    pub fn load_with_profile(profile: Option<&str>) -> Result<FFAIConfig, Box<figment::Error>> {
+        let toml_path = Self::find_ffai_toml().unwrap_or_else(|| PathBuf::from("ffai.toml"));
 
         // Determine effective profile (arg > env > none).
-        let env_profile = std::env::var("TILE_PROFILE").ok().filter(|s| !s.is_empty());
+        let env_profile = std::env::var("FFAI_PROFILE").ok().filter(|s| !s.is_empty());
         let selected = profile.or(env_profile.as_deref());
 
         // Resolve `extends = "..."` base file.
         let extends_base = Self::resolve_extends(&toml_path);
 
-        let mut figment = Figment::from(Serialized::defaults(TileConfig::default()));
+        let mut figment = Figment::from(Serialized::defaults(FFAIConfig::default()));
 
         // Layer 1: extends base file (lowest priority above defaults).
         if let Some(base) = &extends_base {
             figment = figment.merge(Toml::file(base));
         }
 
-        // Layer 2: tile.toml flat keys.
+        // Layer 2: ffai.toml flat keys.
         figment = figment.merge(Toml::file(&toml_path));
 
         // Layer 3: profile-specific overrides from `[profiles.<name>]`.
@@ -239,10 +239,10 @@ impl ConfigLoader {
             figment = figment.merge(Toml::string(&profile_toml));
         }
 
-        // Layer 4: TILE_* env vars.
-        figment = figment.merge(Env::prefixed("TILE_"));
+        // Layer 4: FFAI_* env vars.
+        figment = figment.merge(Env::prefixed("FFAI_"));
 
-        let mut config: TileConfig = figment.extract().map_err(Box::new)?;
+        let mut config: FFAIConfig = figment.extract().map_err(Box::new)?;
 
         // Post-load passes.
         interpolate_config(&mut config);
@@ -251,7 +251,7 @@ impl ConfigLoader {
         Ok(config)
     }
 
-    /// Look for `extends = "path"` at the top level of a tile.toml and
+    /// Look for `extends = "path"` at the top level of a ffai.toml and
     /// return the resolved `PathBuf` if the file exists.
     fn resolve_extends(toml_path: &Path) -> Option<PathBuf> {
         let content = std::fs::read_to_string(toml_path).ok()?;
@@ -266,7 +266,7 @@ impl ConfigLoader {
         base.exists().then_some(base)
     }
 
-    /// Extract a `[profiles.<name>]` section from a tile.toml and return it
+    /// Extract a `[profiles.<name>]` section from a ffai.toml and return it
     /// as a serialized TOML string so it can be fed to figment as a flat
     /// override layer (sub-table keys like `[profiles.ci.bench]` are
     /// serialized back to `[bench]` since the nesting is stripped).
@@ -305,7 +305,7 @@ fn shell_tilde_expand(s: &str) -> String {
     s.to_owned()
 }
 
-fn interpolate_config(cfg: &mut TileConfig) {
+fn interpolate_config(cfg: &mut FFAIConfig) {
     cfg.runner_binary = interpolate_str(&cfg.runner_binary);
     if let Some(p) = &cfg.project_path.clone() {
         cfg.project_path = Some(interpolate_str(p));
@@ -348,7 +348,7 @@ fn collect_warnings(toml_path: &Path) -> Vec<String> {
 
     for key in table.keys() {
         if !KNOWN_KEYS.contains(&key.as_str()) {
-            warnings.push(format!("unknown config key `{key}` in tile.toml"));
+            warnings.push(format!("unknown config key `{key}` in ffai.toml"));
         }
     }
 
@@ -357,14 +357,14 @@ fn collect_warnings(toml_path: &Path) -> Vec<String> {
     let has_runner = table.contains_key("runner");
     if has_bench && (table.contains_key("runs") || table.contains_key("warmup_runs")) {
         warnings.push(
-            "tile.toml: top-level `runs`/`warmup_runs` are ignored when `[bench]` is present; \
+            "ffai.toml: top-level `runs`/`warmup_runs` are ignored when `[bench]` is present; \
              remove the top-level fields"
                 .into(),
         );
     }
     if has_runner && table.contains_key("runner_binary") {
         warnings.push(
-            "tile.toml: top-level `runner_binary` is ignored when `[runner]` is present; \
+            "ffai.toml: top-level `runner_binary` is ignored when `[runner]` is present; \
              remove the top-level field"
                 .into(),
         );
@@ -383,21 +383,21 @@ mod tests {
 
     #[test]
     fn defaults_are_sensible() {
-        let cfg = TileConfig::default();
-        assert_eq!(cfg.runner_binary, "__tile_runner");
+        let cfg = FFAIConfig::default();
+        assert_eq!(cfg.runner_binary, "__ffai_runner");
         assert_eq!(cfg.verbose, 0);
         assert!(cfg.project_path.is_none());
         assert_eq!(cfg.runs, 3);
         assert_eq!(cfg.warmup_runs, 1);
         assert_eq!(cfg.effective_runs(), 3);
         assert_eq!(cfg.effective_warmup_runs(), 1);
-        assert_eq!(cfg.effective_runner_binary(), "__tile_runner");
+        assert_eq!(cfg.effective_runner_binary(), "__ffai_runner");
         assert_eq!(cfg.effective_sdk(), "macosx");
     }
 
     #[test]
     fn sub_table_bench_overrides_flat() {
-        let mut cfg = TileConfig::default();
+        let mut cfg = FFAIConfig::default();
         cfg.bench.runs = Some(10);
         cfg.bench.warmup_runs = Some(5);
         assert_eq!(cfg.effective_runs(), 10);
@@ -408,30 +408,30 @@ mod tests {
 
     #[test]
     fn sub_table_runner_overrides_flat() {
-        let mut cfg = TileConfig::default();
+        let mut cfg = FFAIConfig::default();
         cfg.runner.binary = Some("/usr/local/bin/custom_runner".into());
         assert_eq!(cfg.effective_runner_binary(), "/usr/local/bin/custom_runner");
-        assert_eq!(cfg.runner_binary, "__tile_runner"); // flat unchanged
+        assert_eq!(cfg.runner_binary, "__ffai_runner"); // flat unchanged
     }
 
     #[test]
     fn interpolate_str_replaces_env_var() {
         // SAFETY: single-threaded test, no concurrent reads.
-        unsafe { std::env::set_var("_TILE_TEST_INTERP", "hello") };
-        assert_eq!(interpolate_str("${_TILE_TEST_INTERP}/world"), "hello/world");
-        unsafe { std::env::remove_var("_TILE_TEST_INTERP") };
+        unsafe { std::env::set_var("_FFAI_TEST_INTERP", "hello") };
+        assert_eq!(interpolate_str("${_FFAI_TEST_INTERP}/world"), "hello/world");
+        unsafe { std::env::remove_var("_FFAI_TEST_INTERP") };
     }
 
     #[test]
     fn interpolate_str_uses_default_when_unset() {
-        unsafe { std::env::remove_var("_TILE_DEFINITELY_MISSING") };
-        assert_eq!(interpolate_str("${_TILE_DEFINITELY_MISSING:-fallback}"), "fallback");
+        unsafe { std::env::remove_var("_FFAI_DEFINITELY_MISSING") };
+        assert_eq!(interpolate_str("${_FFAI_DEFINITELY_MISSING:-fallback}"), "fallback");
     }
 
     #[test]
     fn interpolate_str_empty_when_unset_no_default() {
-        unsafe { std::env::remove_var("_TILE_DEFINITELY_MISSING") };
-        assert_eq!(interpolate_str("before_${_TILE_DEFINITELY_MISSING}_after"), "before__after");
+        unsafe { std::env::remove_var("_FFAI_DEFINITELY_MISSING") };
+        assert_eq!(interpolate_str("before_${_FFAI_DEFINITELY_MISSING}_after"), "before__after");
     }
 
     #[test]
@@ -443,11 +443,11 @@ mod tests {
 
     #[test]
     fn load_returns_defaults_without_tile_toml() {
-        let cfg: TileConfig = Figment::from(Serialized::defaults(TileConfig::default()))
-            .merge(Toml::file("/nonexistent/tile.toml"))
+        let cfg: FFAIConfig = Figment::from(Serialized::defaults(FFAIConfig::default()))
+            .merge(Toml::file("/nonexistent/ffai.toml"))
             .extract()
             .expect("should succeed with all-defaults");
-        assert_eq!(cfg.runner_binary, "__tile_runner");
+        assert_eq!(cfg.runner_binary, "__ffai_runner");
         assert_eq!(cfg.verbose, 0);
         assert_eq!(cfg.runs, 3);
         assert_eq!(cfg.warmup_runs, 1);
@@ -455,25 +455,25 @@ mod tests {
 
     #[test]
     fn find_tile_toml_returns_some_from_workspace_root() {
-        let found = ConfigLoader::find_tile_toml();
+        let found = ConfigLoader::find_ffai_toml();
         if let Some(p) = found {
-            assert!(p.ends_with("tile.toml"), "unexpected path: {p:?}");
+            assert!(p.ends_with("ffai.toml"), "unexpected path: {p:?}");
         }
     }
 
     #[test]
     fn to_string_pretty_is_valid_toml() {
-        let cfg = TileConfig::default();
+        let cfg = FFAIConfig::default();
         let s = cfg.to_string_pretty().expect("serialize");
         let _: toml::Value = toml::from_str(&s).expect("round-trip");
     }
 
     #[test]
     fn collect_warnings_empty_for_known_keys() {
-        // Build a valid tile.toml string in a temp dir and verify no warnings.
+        // Build a valid ffai.toml string in a temp dir and verify no warnings.
         let dir = std::env::temp_dir().join("tile_config_test_known");
         let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("tile.toml");
+        let path = dir.join("ffai.toml");
         std::fs::write(&path, "verbose = 1\nruns = 5\n").unwrap();
         let ws = collect_warnings(&path);
         assert!(ws.is_empty(), "unexpected warnings: {ws:?}");
@@ -484,7 +484,7 @@ mod tests {
     fn collect_warnings_flags_unknown_key() {
         let dir = std::env::temp_dir().join("tile_config_test_unknown");
         let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("tile.toml");
+        let path = dir.join("ffai.toml");
         std::fs::write(&path, "unknown_key_xyz = true\n").unwrap();
         let ws = collect_warnings(&path);
         assert!(ws.iter().any(|w| w.contains("unknown_key_xyz")), "warning missing: {ws:?}");

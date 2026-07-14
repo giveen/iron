@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Create a report to help us improve MetalTile
+about: Create a report to help us improve FFAI Kernels
 title: 'fix: '
 labels: bug
 assignees: ''

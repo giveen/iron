@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Bench and test inventory registries for the harness runner.
 //!
@@ -39,6 +39,6 @@ pub fn all_tests() -> impl Iterator<Item = &'static KernelTestEntry> {
 
 /// Iterate all registered kernel IR builders.
 ///
-/// Re-exported from `ffai_kernels_codegen::kernel_registry`. The `tile` CLI
-/// never calls this — it only runs in the `__tile_runner` subprocess.
+/// Re-exported from `ffai_kernels_codegen::kernel_registry`. The `ffaik` CLI
+/// never calls this — it only runs in the `__ffai_runner` subprocess.
 pub use ffai_kernels_codegen::{KernelEntry, all_kernels};

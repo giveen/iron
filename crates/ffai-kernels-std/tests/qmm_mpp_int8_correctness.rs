@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for `mt_qmm_mma_mpp_int8` — the int8
 //! quantized matmul backed by `mpp::tensor_ops::matmul2d` (MPP path).

@@ -1,9 +1,9 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Harness infrastructure for `#[bench]` and `#[test_kernel]` kernels.
 //!
 //! This module is the home of the bench/test setup types and the in-process
-//! registries consumed by the `__tile_runner` subprocess.
+//! registries consumed by the `__ffai_runner` subprocess.
 //!
 //! # Structure
 //!

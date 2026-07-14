@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_moe_bgemm_q2k_view` — the ZERO-COPY Q2_K
 //! grouped BGEMM that reads raw 84-byte Q2_K blocks straight from a no-copy

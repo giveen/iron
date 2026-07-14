@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Fused gated-RMSNorm + 4-bit quantized GEMV for the Qwen3.5 / Qwen3.6
 //! Gated-DeltaNet (GDN) decode tail.

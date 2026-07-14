@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_moe_gemv_ws_q2k` — the WEIGHT-STATIONARY
 //! prefill MoE Q2_K gemv (down projection). It dequants each expert's weight

@@ -11,7 +11,7 @@ relevant issue with `#<issue-number>`.
 - [ ] `ffai-kernels-codegen` (MSL lowering, passes)
 - [ ] `ffai-kernels-runtime` (Metal dispatch)
 - [ ] `ffai-kernels-std` (kernel stdlib, op files)
-- [ ] `ffai-kernels-cli` (`tile` binary)
+- [ ] `ffai-kernels-cli` (`ffaik` binary)
 
 ## Testing
 

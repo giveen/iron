@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Single-query decode SDPA with a **per-head learned attention sink read
 //! from a buffer** — the GPT-OSS-20B variant of [`super::sdpa_decode`].

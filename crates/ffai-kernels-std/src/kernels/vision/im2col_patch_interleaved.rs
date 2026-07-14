@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Patch im2col with **channel-interleaved** columns + an affine re-map +
 //! a zero-padded row width — the Gemma 4 vision patch-unfold.

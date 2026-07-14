@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Dense Q4 GEMM via cooperative-tensor MMA — the tensor-core projection GEMM
 //! for Nemotron prefill. The MMA twin of `mt_gemm_q8_mpp`, but reading the

@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_grouped_gemm_q8` — the GROUPED multi-row
 //! Q8_0 tiled GEMM (O-LoRA-A prefill). Oracle: triple loop with the SAME Q8

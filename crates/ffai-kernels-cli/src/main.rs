@@ -1,17 +1,17 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! MetalTile CLI — `tile` binary.
+//! FFAI Kernels CLI — `ffaik` binary.
 //!
 //! Subcommands:
-//!   bench         Benchmark MetalTile kernels (--mlx adds the MLX A/B)
+//!   bench         Benchmark FFAI Kernels kernels (--mlx adds the MLX A/B)
 //!   test          Run #[test_kernel] correctness tests
 //!   build         Compile kernels to MSL; emit metallib/Swift/manifest
 //!   inspect       Print IR and/or MSL for registered kernels
 //!   device        Show GPU device info and feature flags
 //!   snap          Save bench results as a regression baseline
 //!   diff          Compare bench results against a saved baseline
-//!   update        Install the latest tile binary
-//!   init          Scaffold a new MetalTile kernel project
+//!   update        Install the latest ffaik binary
+//!   init          Scaffold a new FFAI Kernels kernel project
 //!   clean         Remove build artifacts and cached snapshots
 //!   config        Display effective merged configuration
 //!   completions   Generate shell completion scripts
@@ -27,8 +27,8 @@ pub mod suite_printer;
 pub mod term;
 use anstyle::AnsiColor;
 use clap::{CommandFactory, Parser, builder::Styles};
-use cmd::TileCommand as _;
-pub use error::{CliError, TileExitCode};
+use cmd::FFAICommand as _;
+pub use error::{CliError, FFAIExitCode};
 use regex::Regex;
 
 const CLAP_STYLES: Styles = Styles::styled()
@@ -74,7 +74,7 @@ fn apply_color_choice(choice: ColorChoice) {
 
 // ── Global flags ──────────────────────────────────────────────────────────
 
-/// Global flags available to every `tile` subcommand.
+/// Global flags available to every `ffaik` subcommand.
 ///
 /// All fields carry `global = true` so clap propagates them through
 /// subcommand boundaries automatically.
@@ -113,14 +113,14 @@ pub struct GlobalArgs {
     )]
     pub verbose: u8,
 
-    /// Select a named config profile from `[profiles.<name>]` in tile.toml.
+    /// Select a named config profile from `[profiles.<name>]` in ffai.toml.
     ///
-    /// Can also be set via the `TILE_PROFILE` environment variable.
+    /// Can also be set via the `FFAI_PROFILE` environment variable.
     #[arg(
         long,
         global = true,
         value_name = "NAME",
-        env = "TILE_PROFILE",
+        env = "FFAI_PROFILE",
         help_heading = "Global options"
     )]
     pub profile: Option<String>,
@@ -128,11 +128,11 @@ pub struct GlobalArgs {
 
 // ── CLI root ──────────────────────────────────────────────────────────────
 
-/// MetalTile CLI — benchmark and inspect GPU kernels on Apple Silicon.
+/// FFAI Kernels CLI — benchmark and inspect GPU kernels on Apple Silicon.
 ///
-/// Run `tile <COMMAND> --help` for per-command documentation.
+/// Run `ffaik <COMMAND> --help` for per-command documentation.
 #[derive(Parser)]
-#[command(name = "tile", version, about, long_about = None, styles = CLAP_STYLES)]
+#[command(name = "ffaik", version, about, long_about = None, styles = CLAP_STYLES)]
 struct Cli {
     #[command(flatten)]
     global: GlobalArgs,
@@ -145,7 +145,7 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// Benchmark MetalTile kernels (throughput, GFLOP/s, roofline).
+    /// Benchmark FFAI Kernels kernels (throughput, GFLOP/s, roofline).
     ///
     /// Measures throughput (GB/s) for every registered `#[bench_kernel]` entry.
     /// By default it benches only the ffai-kernels kernels; pass `--mlx` to also run
@@ -189,11 +189,11 @@ enum Command {
     /// run bench live and compare against the baseline.
     Diff(DiffArgs),
 
-    /// Install the latest `tile` binary, or build from a PR / commit.
+    /// Install the latest `ffaik` binary, or build from a PR / commit.
     #[command(visible_alias = "u")]
     Update(UpdateArgs),
 
-    /// Scaffold a new MetalTile kernel project in a new directory.
+    /// Scaffold a new FFAI Kernels kernel project in a new directory.
     ///
     /// Creates a minimal Cargo workspace with an example `#[bench_kernel]`.
     Init(InitArgs),
@@ -201,14 +201,14 @@ enum Command {
     /// Remove build artifacts (`*.air`, `*.metallib`) and optionally snapshots.
     ///
     /// By default only removes generated build outputs. Pass `--snapshots` to
-    /// also wipe `.tile-snapshots/`, or `--all` to remove everything.
+    /// also wipe `.ffaik-snapshots/`, or `--all` to remove everything.
     #[command(visible_alias = "cl")]
     Clean(CleanArgs),
 
     /// Display the effective merged configuration.
     ///
     /// Prints the config as TOML (or JSON with `--json`), showing the result
-    /// of merging defaults → extends base → tile.toml → profile → env vars.
+    /// of merging defaults → extends base → ffai.toml → profile → env vars.
     /// Useful for debugging why a setting is not taking effect.
     #[command(visible_alias = "co")]
     Config(ConfigArgs),
@@ -216,15 +216,15 @@ enum Command {
     /// Generate shell completion script and print it to stdout.
     ///
     /// Pipe into your shell's completion directory, e.g.:
-    ///   tile completions zsh > ~/.zfunc/_tile
-    ///   tile completions bash > /etc/bash_completion.d/tile
+    ///   ffaik completions zsh > ~/.zfunc/_tile
+    ///   ffaik completions bash > /etc/bash_completion.d/ffaik
     #[command(visible_alias = "com")]
     Completions(CompletionsArgs),
 }
 
 // ── Shared filter flags ───────────────────────────────────────────────────
 
-/// Filter flags shared across all `tile` subcommands.
+/// Filter flags shared across all `ffaik` subcommands.
 ///
 /// All predicates must pass (AND semantics).  Flatten into any `*Args`
 /// struct with `#[command(flatten)]`.
@@ -272,7 +272,7 @@ impl FilterSpec {
         fn re(s: Option<&str>, flag: &str) -> Option<Regex> {
             s.map(|p| {
                 Regex::new(&format!("(?i){p}")).unwrap_or_else(|e| {
-                    eprintln!("tile: invalid regex for {flag}: {e}");
+                    eprintln!("ffaik: invalid regex for {flag}: {e}");
                     std::process::exit(2);
                 })
             })
@@ -280,7 +280,7 @@ impl FilterSpec {
         fn gl(s: Option<&str>, flag: &str) -> Option<glob::Pattern> {
             s.map(|p| {
                 glob::Pattern::new(p).unwrap_or_else(|e| {
-                    eprintln!("tile: invalid glob for {flag}: {e}");
+                    eprintln!("ffaik: invalid glob for {flag}: {e}");
                     std::process::exit(2);
                 })
             })
@@ -328,7 +328,7 @@ impl FilterSpec {
         let group = ffai_kernels_core::protocol::op_group(name);
         if let Some(re) = &self.match_group
             && !re.is_match(group)
-            && !(!family.is_empty() && re.is_match(family))
+            && (family.is_empty() || !re.is_match(family))
         {
             return false;
         }
@@ -373,7 +373,7 @@ impl FilterSpec {
 
 #[derive(clap::Args, Debug)]
 #[command(
-    after_help = "EXAMPLES:\n  tile bench                      # run all benchmarks\n  tile bench softmax              # run benchmarks matching 'softmax'\n  tile bench -f gemv --vv         # gemv with timing stats\n  tile bench --diff               # bench + auto-diff vs target branch baseline"
+    after_help = "EXAMPLES:\n  ffaik bench                      # run all benchmarks\n  ffaik bench softmax              # run benchmarks matching 'softmax'\n  ffaik bench -f gemv --vv         # gemv with timing stats\n  ffaik bench --diff               # bench + auto-diff vs target branch baseline"
 )]
 struct BenchArgs {
     /// Kernel name filter (shorthand for --filter; if it contains '/' it is
@@ -390,11 +390,11 @@ struct BenchArgs {
     #[arg(long, value_name = "BACKEND", help_heading = "Bench options")]
     backend: Option<BackendChoice>,
 
-    /// Override the number of timed iterations (default: from tile.toml or 3).
+    /// Override the number of timed iterations (default: from ffai.toml or 3).
     #[arg(long, value_name = "N", help_heading = "Bench options")]
     runs: Option<usize>,
 
-    /// Override the number of warmup iterations (default: from tile.toml or 1).
+    /// Override the number of warmup iterations (default: from ffai.toml or 1).
     #[arg(long, value_name = "N", help_heading = "Bench options")]
     warmup: Option<usize>,
 
@@ -421,7 +421,7 @@ struct BenchArgs {
     /// output-equivalence check — for kernels that have one.
     ///
     /// Off by default: the ffai-kernels kernels have superseded the MLX references,
-    /// per-kernel correctness is covered by `tile test`, and running the MLX side
+    /// per-kernel correctness is covered by `ffaik test`, and running the MLX side
     /// roughly doubles bench time. Pass `--mlx` when you specifically want the
     /// side-by-side comparison.
     #[arg(long, visible_alias = "reference", help_heading = "Bench options")]
@@ -432,7 +432,7 @@ struct BenchArgs {
 
 #[derive(clap::Args, Debug)]
 #[command(
-    after_help = "EXAMPLES:\n  tile test                   # run all tests\n  tile test softmax           # tests matching 'softmax'\n  tile test -f rms_norm       # tests matching 'rms_norm'"
+    after_help = "EXAMPLES:\n  ffaik test                   # run all tests\n  ffaik test softmax           # tests matching 'softmax'\n  ffaik test -f rms_norm       # tests matching 'rms_norm'"
 )]
 struct TestArgs {
     /// Kernel name filter (shorthand for --filter; if it contains '/' treated
@@ -470,7 +470,7 @@ struct TestArgs {
     filter_args: FilterArgs,
 }
 
-/// GPU backend selector shared by `tile bench` / `tile test`.
+/// GPU backend selector shared by `ffaik bench` / `ffaik test`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum BackendChoice {
     /// Apple Metal (macOS default).
@@ -498,7 +498,7 @@ impl BackendChoice {
 
 #[derive(clap::Args, Debug)]
 #[command(
-    after_help = "EXAMPLES:\n  tile build                       # compile-check all kernels\n  tile build -f softmax            # compile-check softmax kernels\n  tile build --emit msl --out out/ # emit MSL source files\n  tile build --emit all --out out/ # emit MSL + metallib + Swift + IR"
+    after_help = "EXAMPLES:\n  ffaik build                       # compile-check all kernels\n  ffaik build -f softmax            # compile-check softmax kernels\n  ffaik build --emit msl --out out/ # emit MSL source files\n  ffaik build --emit all --out out/ # emit MSL + metallib + Swift + IR"
 )]
 struct BuildArgs {
     #[command(flatten)]
@@ -516,7 +516,7 @@ struct BuildArgs {
     #[arg(long, short = 'o', value_name = "DIR", help_heading = "Output options")]
     out: Option<String>,
 
-    /// xcrun SDK to use for Metal compilation (default: from tile.toml or macosx).
+    /// xcrun SDK to use for Metal compilation (default: from ffai.toml or macosx).
     #[arg(long, value_name = "SDK", help_heading = "Build options")]
     sdk: Option<String>,
 
@@ -533,7 +533,7 @@ struct BuildArgs {
 
 #[derive(clap::Args, Debug)]
 #[command(
-    after_help = "EXAMPLES:\n  tile inspect                     # list all kernels\n  tile inspect mt_softmax_f32      # print final MSL\n  tile inspect mt_softmax_f32 --ir # print raw IR\n  tile inspect --all -o /tmp/out   # dump all kernels to disk"
+    after_help = "EXAMPLES:\n  ffaik inspect                     # list all kernels\n  ffaik inspect mt_softmax_f32      # print final MSL\n  ffaik inspect mt_softmax_f32 --ir # print raw IR\n  ffaik inspect --all -o /tmp/out   # dump all kernels to disk"
 )]
 struct InspectArgs {
     /// Kernel name to inspect (lists all registered kernels when omitted).
@@ -580,7 +580,7 @@ struct DeviceArgs {
 
 #[derive(clap::Args, Debug)]
 struct SnapArgs {
-    /// Write snapshot to this file (default: `.tile-snapshots/<sha>.json`).
+    /// Write snapshot to this file (default: `.ffaik-snapshots/<sha>.json`).
     #[arg(long, short = 'o', value_name = "FILE")]
     out: Option<String>,
 
@@ -630,8 +630,8 @@ struct DiffArgs {
 
 #[derive(clap::Args, Debug)]
 struct InitArgs {
-    /// Name for the new project directory (default: my-tile-kernels).
-    #[arg(default_value = "my-tile-kernels")]
+    /// Name for the new project directory (default: my-ffaik-kernels).
+    #[arg(default_value = "my-ffaik-kernels")]
     name: String,
 
     /// Overwrite an existing directory if it already exists.
@@ -643,7 +643,7 @@ struct InitArgs {
 
 #[derive(clap::Args, Debug)]
 struct CleanArgs {
-    /// Also remove regression baselines in `.tile-snapshots/`.
+    /// Also remove regression baselines in `.ffaik-snapshots/`.
     #[arg(long)]
     snapshots: bool,
 
@@ -690,8 +690,8 @@ struct UpdateArgs {
 // ── Dispatch ─────────────────────────────────────────────────────────────
 
 fn main() {
-    // Initialise tracing. METALTILE_DEBUG=1 → debug level; =trace → trace.
-    let debug_level = std::env::var("METALTILE_DEBUG").ok();
+    // Initialise tracing. FFAI_DEBUG=1 → debug level; =trace → trace.
+    let debug_level = std::env::var("FFAI_DEBUG").ok();
     let filter = match debug_level.as_deref() {
         Some("1") | Some("debug") => "ffai_kernels=debug",
         Some("trace") => "ffai_kernels=trace",
@@ -714,7 +714,7 @@ fn main() {
     // Apply --color choice before any paint calls (sets NO_COLOR / CLICOLOR_FORCE).
     apply_color_choice(cli.global.color);
 
-    let _span = tracing::info_span!("tile", command = ?cli.command).entered();
+    let _span = tracing::info_span!("ffaik", command = ?cli.command).entered();
 
     let h = harness::Harness::new(cli.global);
 
@@ -734,7 +734,7 @@ fn main() {
             clap_complete::generate(
                 args.shell,
                 &mut Cli::command(),
-                "tile",
+                "ffaik",
                 &mut std::io::stdout(),
             );
             Ok(())

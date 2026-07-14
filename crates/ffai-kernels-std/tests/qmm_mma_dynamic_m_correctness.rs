@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for the dynamic-M qmm path
 //! (`ffai_kernels_std::kernels::gemm::quantized_mma_dynamic_m`). This is the

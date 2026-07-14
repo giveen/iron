@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MoE router pre-score (sigmoid + correction-bias), kept on-device so the
 //! whole router (pre-score -> top-k -> gather) avoids a host round-trip.

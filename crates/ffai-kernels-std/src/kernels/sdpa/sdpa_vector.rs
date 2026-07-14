@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Decode-form scaled dot-product attention — `mt_sdpa_vector` family.
 //!
@@ -25,7 +25,7 @@
 //! reduction shape but extra FFAI-specific surface
 //! (`kv_stride`, `heads_per_group`, `sink_end`, `window_start`). The
 //! split is deliberate: this file's charter is a 1:1 MLX port for the
-//! `tile bench` head-to-head, so additions that diverge from MLX's
+//! `ffaik bench` head-to-head, so additions that diverge from MLX's
 //! `sdpa_vector` template live in `ffai/`. Bandwidth fixes that apply
 //! to both should be ported across — see the `tg_out` occupancy fix
 //! in PR #43 for the precedent.

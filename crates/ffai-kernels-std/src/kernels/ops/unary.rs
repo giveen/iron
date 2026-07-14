@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Unary elementwise benchmark — #[kernel] DSL vs MLX metal/unary.metal
 
@@ -416,7 +416,7 @@ pub mod kernel_benches {
     /// (`unary_v`, 1 element/thread) for an A/B perf + correctness comparison.
     ///
     /// `tol_floor` lifts the equivalence tolerance above the per-dtype default
-    /// for ops where MetalTile and MLX legitimately diverge by more than 1 ULP —
+    /// for ops where FFAI Kernels and MLX legitimately diverge by more than 1 ULP —
     /// e.g. `expm1`, where MT computes `exp(x) − 1` (catastrophic cancellation
     /// near 0) while MLX uses an accurate `expm1`.
     fn ub_ref(
@@ -469,7 +469,7 @@ pub mod kernel_benches {
         };
     }
     // MT-specific / no MLX unary counterpart (exp2, recip, relu, trunc, silu,
-    // gelu, softplus) bench MetalTile-only; the rest carry an MLX A/B reference.
+    // gelu, softplus) bench FFAI-only; the rest carry an MLX A/B reference.
     ubench_ref!(bench_exp, mt_exp, "Exp", InputDomain::Signed);
     ubench!(bench_exp2, mt_exp2);
     // expm1: MT `exp(x)-1` cancels catastrophically near 0 vs MLX's accurate

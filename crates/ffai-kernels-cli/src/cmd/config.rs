@@ -1,10 +1,10 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile config` — display the effective merged configuration.
+//! `ffaik config` — display the effective merged configuration.
 //!
-//! Prints the fully-resolved `TileConfig` as TOML (default) or JSON
+//! Prints the fully-resolved `FFAIConfig` as TOML (default) or JSON
 //! (`--json` / global `--json`), showing the result of merging:
-//!   defaults → extends base → tile.toml → `[profiles.<name>]` → env vars
+//!   defaults → extends base → ffai.toml → `[profiles.<name>]` → env vars
 
 use crate::{
     CliError,
@@ -26,12 +26,12 @@ pub fn run(args: &ConfigArgs, harness: &Harness) -> Result<(), CliError> {
         }
     }
 
-    // Show where tile.toml was found (helpful for debugging parent-dir walk).
-    if let Some(path) = crate::config::ConfigLoader::find_tile_toml() {
+    // Show where ffai.toml was found (helpful for debugging parent-dir walk).
+    if let Some(path) = crate::config::ConfigLoader::find_ffai_toml() {
         if !harness.is_quiet() && !json_out {
             eprintln!(
                 "\n{}  {}",
-                paint_stderr("tile.toml found at", Style::new().fg(Color::BrightBlack)),
+                paint_stderr("ffai.toml found at", Style::new().fg(Color::BrightBlack)),
                 paint_stderr(path.display().to_string(), Style::new().fg(Color::BrightWhite)),
             );
             if let Some(p) = &harness.global.profile {
@@ -46,7 +46,7 @@ pub fn run(args: &ConfigArgs, harness: &Harness) -> Result<(), CliError> {
         eprintln!(
             "{}",
             paint_stderr(
-                "note: no tile.toml found; showing built-in defaults",
+                "note: no ffai.toml found; showing built-in defaults",
                 Style::new().fg(Color::BrightBlack),
             ),
         );

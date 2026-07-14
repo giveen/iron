@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile bench` — Benchmark MetalTile kernels (latency / GB/s / GFLOP·s /
+//! `ffaik bench` — Benchmark FFAI Kernels kernels (latency / GB/s / GFLOP·s /
 //! roofline). The MLX reference A/B (speed + output-equivalence) is opt-in via
 //! `--mlx`; by default only the ffai-kernels kernels are benched.
 
@@ -78,7 +78,7 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
         return Err(crate::CliError::Other("uncommitted changes".into()));
     }
 
-    // Spawn __tile_runner bench and stream protocol results. Name/group
+    // Spawn __ffai_runner bench and stream protocol results. Name/group
     // filters are forwarded so the runner skips non-matching kernels
     // *before* GPU work — keeping them CLI-side meant a `--match-name` run
     // benched the entire corpus while printing nothing (#279).
@@ -110,7 +110,7 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
                 if device_name.is_empty() { String::new() } else { format!("· {} ", device_name) };
             println!(
                 "{} {}{}",
-                paint_stdout("tile bench", Style::new().fg(Color::Cyan).bold()),
+                paint_stdout("ffaik bench", Style::new().fg(Color::Cyan).bold()),
                 paint_stdout(&dev_part, Style::new().fg(Color::BrightBlack)),
                 paint_stdout(
                     format!("warmup={warmup_runs} runs={runs}  ({total} items)"),
@@ -138,7 +138,7 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
     });
 
     if !runner_ok && all.is_empty() {
-        return Err(crate::CliError::Other("__tile_runner failed".into()));
+        return Err(crate::CliError::Other("__ffai_runner failed".into()));
     }
 
     if all.is_empty() {
@@ -304,7 +304,7 @@ fn try_auto_diff(
     let current_rows: Vec<Value> = results.iter().map(result_to_value).collect();
 
     let short_sha: String = sha.chars().take(7).collect();
-    let heading = format!("tile bench · diff vs {reference} @ {short_sha} ({baseline_path})");
+    let heading = format!("ffaik bench · diff vs {reference} @ {short_sha} ({baseline_path})");
     let opts = diff_cmd::RenderOpts {
         heading: Some(&heading),
         sort: "regression",
@@ -469,11 +469,11 @@ fn pct_style(pct: f64) -> Style {
     }
 }
 
-// ── TileCommand impl ──────────────────────────────────────────────────────
+// ── FFAICommand impl ──────────────────────────────────────────────────────
 
 pub struct BenchCommand<'a>(pub &'a BenchArgs);
 
-impl<'a> super::TileCommand for BenchCommand<'a> {
+impl<'a> super::FFAICommand for BenchCommand<'a> {
     fn run(&self, harness: &crate::harness::Harness) -> Result<(), crate::CliError> {
         run(self.0, harness)
     }

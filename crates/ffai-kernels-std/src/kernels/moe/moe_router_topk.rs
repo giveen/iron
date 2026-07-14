@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MoE router top-k expert selection — `mt_moe_router_topk` picks the top-k
 //! experts per token by logit and emits the normalised routing weights
@@ -31,7 +31,7 @@ use ffai_kernels::kernel;
 // previously-chosen indices stored in TG memory.  After k passes,
 // softmax over the chosen k values in-place on lane 0..k-1.
 //
-// Bench spec uses BenchDispatch::Generic + shapes: &[] so `tile bench`
+// Bench spec uses BenchDispatch::Generic + shapes: &[] so `ffaik bench`
 // skips it; correctness lives in unit tests + downstream MoE
 // integration. Same convention as other ffai/ kernels (gather, sampling).
 #[kernel]

@@ -10,7 +10,7 @@ The crate re-exports the compiler, runtime, and macro crates under one namespace
 you never need to depend on `ffai-kernels-core`, `ffai-kernels-codegen`, or the others
 directly unless you are writing tooling or compiler extensions. Beyond the
 re-exports it hosts `harness/` (the `#[kernel]` / `#[bench]` / `#[test_kernel]`
-registries) and `runner/` (the `__tile_runner` engine — `tile` runs GPU work in a
+registries) and `runner/` (the `__ffai_runner` engine — `ffaik` runs GPU work in a
 spawned subprocess that streams results back as `ProtocolMessage` JSON lines).
 
 ## Position in the pipeline
@@ -97,8 +97,8 @@ println!("{msl}");
 | Macro | Kind | What it does |
 |---|---|---|
 | `#[kernel]` | attribute | Transforms a Rust function into IR + host-side `LaunchBuilder` |
-| `#[bench]` | attribute | Registers a `BenchSetup`-returning fn for `tile bench` via `inventory::submit!` (separate attribute; the bench name is the function name) |
-| `#[test_kernel]` | attribute | Registers a `TestSetup`-returning fn for `tile test` |
+| `#[bench]` | attribute | Registers a `BenchSetup`-returning fn for `ffaik bench` via `inventory::submit!` (separate attribute; the bench name is the function name) |
+| `#[test_kernel]` | attribute | Registers a `TestSetup`-returning fn for `ffaik test` |
 | `#[constexpr]` | attribute | Marks a kernel parameter as a compile-time constant |
 | `#[scalar]` | attribute | Marks a `Tensor` parameter for `constant T&` lowering in MSL |
 | `#[strided]` | attribute | Marks a `Tensor` parameter for strided lowering (shape + stride arrays emitted) |
@@ -148,7 +148,7 @@ println!("{msl}");
 | `DispatchResult` | Output buffers after a kernel run |
 | `DispatchSpec` | Input buffer spec for the dispatch pipeline |
 | `ResidentBuffer` | A Metal buffer managed by the context |
-| `MetalTileError` | Top-level runtime error |
+| `FFAIError` | Top-level runtime error |
 
 | Function | Purpose |
 |---|---|
@@ -197,7 +197,7 @@ Directly accessible from `ffai-kernels::`:
 | `ffai-kernels::core` | `ffai_kernels_core` crate (IR, DType, Shape) |
 | `ffai-kernels::Context` | `ffai_kernels_runtime::Context` — GPU device + command queue |
 | `ffai-kernels::DispatchResult` | `ffai_kernels_runtime::DispatchResult` — output buffers after a kernel run |
-| `ffai-kernels::MetalTileError` | `ffai_kernels_runtime::MetalTileError` — top-level runtime error |
+| `ffai-kernels::FFAIError` | `ffai_kernels_runtime::FFAIError` — top-level runtime error |
 | `ffai-kernels::Tensor` | `prelude::Tensor` — placeholder tensor type |
 | `ffai-kernels::VERSION` | Crate version string constant |
 | `ffai-kernels::version()` | Returns `VERSION` |
@@ -211,7 +211,7 @@ Directly accessible from `ffai-kernels::`:
 | `ffai-kernels-core` | Re-exported as `ffai-kernels::core`; provides IR types and DType for the prelude |
 | `ffai-kernels-macros` | Re-exported as individual proc macros (`kernel`, `constexpr`, `scalar`, `strided`, `shape`, `tile`) |
 | `ffai-kernels-codegen` | Re-exported as `ffai-kernels::codegen`; provides MSL generation for inspection |
-| `ffai-kernels-runtime` | Re-exported as `Context`, `DispatchResult`, `MetalTileError`; provides GPU dispatch |
+| `ffai-kernels-runtime` | Re-exported as `Context`, `DispatchResult`, `FFAIError`; provides GPU dispatch |
 
 ### External
 

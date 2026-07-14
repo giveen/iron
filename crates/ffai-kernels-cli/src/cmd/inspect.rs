@@ -1,18 +1,18 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile inspect` — Print IR and/or MSL for kernels.
+//! `ffaik inspect` — Print IR and/or MSL for kernels.
 //!
-//! Spawns `__tile_runner inspect` as a subprocess. All kernel discovery and
+//! Spawns `__ffai_runner inspect` as a subprocess. All kernel discovery and
 //! MSL/IR generation happens in the runner process where `ffai-kernels-std` is
 //! linked.
 //!
 //! Usage:
-//!   tile inspect                           # list all registered kernels
-//!   tile inspect <kernel>                  # print final MSL (default)
-//!   tile inspect <kernel> --ir             # print raw IR
-//!   tile inspect <kernel> --stats          # print per-pass op-count table
-//!   tile inspect -o /tmp/out               # write .metal file
-//!   tile inspect --all -o /tmp/out         # dump every kernel to disk
+//!   ffaik inspect                           # list all registered kernels
+//!   ffaik inspect <kernel>                  # print final MSL (default)
+//!   ffaik inspect <kernel> --ir             # print raw IR
+//!   ffaik inspect <kernel> --stats          # print per-pass op-count table
+//!   ffaik inspect -o /tmp/out               # write .metal file
+//!   ffaik inspect --all -o /tmp/out         # dump every kernel to disk
 
 use ffai_kernels_core::protocol::{InspectKind, ProtocolMessage};
 
@@ -23,10 +23,10 @@ use crate::{
     term::{Color, Style, paint_stdout},
 };
 
-/// `TileCommand` wrapper for `tile inspect`.
+/// `FFAICommand` wrapper for `ffaik inspect`.
 pub struct InspectCommand<'a>(pub &'a InspectArgs);
 
-impl<'a> super::TileCommand for InspectCommand<'a> {
+impl<'a> super::FFAICommand for InspectCommand<'a> {
     fn run(&self, harness: &crate::harness::Harness) -> Result<(), crate::CliError> {
         run(self.0, harness)
     }
@@ -45,7 +45,7 @@ pub fn run(args: &InspectArgs, harness: &crate::harness::Harness) -> Result<(), 
     if args.pass.is_some() {
         eprintln!(
             "{} --pass requires the kernel registry to be linked in-process. \
-             Use `tile inspect --ir` to view the final IR, or file a feature request.",
+             Use `ffaik inspect --ir` to view the final IR, or file a feature request.",
             paint_stdout("error:", Style::new().fg(Color::Red).bold()),
         );
         return Err(CliError::Other("--pass not supported in project mode".into()));
@@ -81,7 +81,7 @@ pub fn run(args: &InspectArgs, harness: &crate::harness::Harness) -> Result<(), 
                 if !printed_list_header {
                     println!(
                         "{}",
-                        paint_stdout("tile inspect", Style::new().fg(Color::Cyan).bold())
+                        paint_stdout("ffaik inspect", Style::new().fg(Color::Cyan).bold())
                     );
                     println!();
                     printed_list_header = true;

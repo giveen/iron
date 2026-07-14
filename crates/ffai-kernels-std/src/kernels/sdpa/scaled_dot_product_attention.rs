@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Scaled dot-product attention benchmark — #[kernel] DSL vs MLX metal/scaled_dot_product_attention.metal
 
@@ -103,7 +103,7 @@ pub fn mt_sdpa<T>(
 /// (head_dim hardcoded 128, one KV head per Q head, constexprs `n_kv` +
 /// `scale`). Reuses the triple-loop `softmax(Q·Kᵀ·scale)·V` oracle from
 /// `sdpa_vector` (gqa=1). Pre-this migration `mt_sdpa` had no CPU-oracle test
-/// — validation flowed only through the `tile bench` head-to-head against MLX.
+/// — validation flowed only through the `ffaik bench` head-to-head against MLX.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 

@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Q2_K view-bm64 (raw 84-byte blocks) must match the validated pool q2k_bm64
 //! on the SAME source. Multi-expert grouped indices + absolute zeroRows check

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! **Windowed** (block-diagonal) bidirectional SDPA — each query attends
 //! only the keys in *its own window*, a contiguous `[seg_start, seg_start +

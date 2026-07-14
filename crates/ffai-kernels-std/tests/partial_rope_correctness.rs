@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched partial RoPE (mt_partial_rope) must equal the per-token
 //! reference (token t roped at position t). NO model load.

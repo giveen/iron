@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MoE router — sqrt(softplus(·)) + bias-correction scoring.
 //!
@@ -43,7 +43,7 @@ use ffai_kernels::kernel;
 
 // Bare `#[kernel]` — non-generic, all-f32 kernel doesn't fit the
 // legacy `bench(...)` shape; declarative `#[bench]` below registers
-// for `tile bench`.
+// for `ffaik bench`.
 #[kernel]
 pub fn mt_moe_router_sqrtsoftplus(
     logits: Tensor<f32>,

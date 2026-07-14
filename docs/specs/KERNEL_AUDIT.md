@@ -4,7 +4,7 @@ Snapshot of the kernels shipped by `ffai-kernels-std` as of `dev` `c017c94`. Com
 
 ## Summary
 
-- **Total kernels (`tile build`): 651** — all compiled unconditionally; the 7 NAX kernels are runtime-gated to Apple10+ (M4 family and newer). See [§ NAX kernels](#nax-kernels) for what NAX is, which M-series chips activate it, and how it interacts with CI. (The jump from 374 is the PR #2 block-scaled precision matrix — see [§ Quantization precision coverage](#quantization-precision-coverage).)
+- **Total kernels (`ffaik build`): 651** — all compiled unconditionally; the 7 NAX kernels are runtime-gated to Apple10+ (M4 family and newer). See [§ NAX kernels](#nax-kernels) for what NAX is, which M-series chips activate it, and how it interacts with CI. (The jump from 374 is the PR #2 block-scaled precision matrix — see [§ Quantization precision coverage](#quantization-precision-coverage).)
 - **89 / 90 kernel-op rows ported** — 89 ✓, 0 partial, 1 intentionally out of scope (`fence`; see [§ Fence ops](#fence-ops--intentionally-out-of-scope)).
 - **Every floating-point kernel exposes f32 / f16 / bf16.** bf16 coverage was completed in PR #152, which also migrated every cooperative-tensor (NAX) kernel from hand-built `Op::InlineMsl` IR to the `#[kernel]` DSL via the `coop_tile_*` intrinsics + `coop_stage(T)` (bf16 → `half` staging because Apple's `matmul2d` mishandles `bfloat` cooperative tensors).
 - **int4 and int8 quantized perf paths are at parity.** PR #154 built out int8 dense GEMM (`qmv`/`qmm`/`qmm_mma`/`qmm_mpp`/`qmm_nax`) and int8 MoE BGEMM (`mma`/`bm{8,16,64}_mpp`) plus int4 polish (`rms_norm_qgemv_fast`, `batched_qkv_qgemv_fast`, `mt_dequant_gemv_int4_fast`, `qvm_int4_fast`).
@@ -30,7 +30,7 @@ The runtime gate lives in `crates/ffai-kernels-runtime/src/context.rs::Context::
 
 ### Build-time gating
 
-None. NAX kernels compile unconditionally and register their `inventory::submit!` BenchSpecs alongside every other kernel. `tile build` reports the full 374-kernel count on every host that can compile `ffai-kernels-std`. The decision to dispatch them is made at runtime through `Context::chip_family()` (see [§ CI coverage](#ci-coverage) for the macOS Paravirtual-GPU caveat) and `skip_unless_apple10` guards in the GPU-correctness tests.
+None. NAX kernels compile unconditionally and register their `inventory::submit!` BenchSpecs alongside every other kernel. `ffaik build` reports the full 374-kernel count on every host that can compile `ffai-kernels-std`. The decision to dispatch them is made at runtime through `Context::chip_family()` (see [§ CI coverage](#ci-coverage) for the macOS Paravirtual-GPU caveat) and `skip_unless_apple10` guards in the GPU-correctness tests.
 
 The previous `ffai-kernels-std/nax` Cargo feature was removed — there's no longer a way to opt out at build time. Dispatching a NAX kernel on pre-M4 hardware will fail at pipeline-creation time when the device rejects the `mpp::tensor_ops::matmul2d` symbol; callers should consult `chip_family()` before selecting the NAX path.
 
@@ -52,7 +52,7 @@ The `quantized_mpp` family (`mt_qmm_mma_mpp`, `mt_qmm_mma_mpp_int8`, the four Mo
 
 ### CI coverage
 
-GitHub's macOS runners expose an Apple Paravirtual GPU that doesn't claim Apple10+, so the NAX kernels and their tests are skipped at runtime via `skip_unless_apple10`. The Tile workflow's `tile build` step still compiles them — if `MetalPerformancePrimitives` headers are unavailable on the runner's Xcode, the build will surface that breakage immediately rather than silently dropping coverage.
+GitHub's macOS runners expose an Apple Paravirtual GPU that doesn't claim Apple10+, so the NAX kernels and their tests are skipped at runtime via `skip_unless_apple10`. The Tile workflow's `ffaik build` step still compiles them — if `MetalPerformancePrimitives` headers are unavailable on the runner's Xcode, the build will surface that breakage immediately rather than silently dropping coverage.
 
 Local verification of NAX kernels is the developer's responsibility on M4+ hardware. The `make test` target runs the full suite; tests behind `skip_unless_apple10` execute on real Apple10+ chips and auto-skip elsewhere.
 

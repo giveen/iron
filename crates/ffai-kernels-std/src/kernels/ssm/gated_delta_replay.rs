@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GatedDeltaNet innovation-tape capture + replay — port of
 //! `gated_delta_replay.metal` (spec 020 phase 2). Companion to

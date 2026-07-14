@@ -59,7 +59,7 @@ The CUDA emitter, the CUDA runtime, and the Metal path are **unchanged**.
    wave size from the gfx family instead: gfx9* → 64, otherwise 32.
 4. **gfx target detection.** Windows `hipDeviceGetName` returns the
    marketing name ("AMD Radeon RX 9070 XT"), not the gfx code. Phase 1
-   reads `METALTILE_HIP_GFX` if set; default `gfx1201` matches the user's
+   reads `FFAI_HIP_GFX` if set; default `gfx1201` matches the user's
    RX 9070 XT. Override for RDNA 3 (`gfx1100`), MI300 (`gfx942`), MI350
    (`gfx950`).
 5. **Wave32 + the 32-lane shuffle table = free port.** Beyond the mask
@@ -105,7 +105,7 @@ cargo test -p ffai-kernels-runtime --features hip --test hip_smoke -- --nocaptur
 cargo test -p ffai-kernels-runtime --features vulkan --test vulkan_smoke -- --nocapture
 ```
 
-Override `gfx` (e.g. for RDNA 3 / MI300): `$env:METALTILE_HIP_GFX = "gfx1100"`.
+Override `gfx` (e.g. for RDNA 3 / MI300): `$env:FFAI_HIP_GFX = "gfx1100"`.
 
 ## What's next (Phase 2 outline)
 
@@ -118,5 +118,5 @@ Override `gfx` (e.g. for RDNA 3 / MI300): `$env:METALTILE_HIP_GFX = "gfx1100"`.
   shared barrier-tree (subgroup-width agnostic; the §4.1 hazard mitigation).
   This unlocks `row_reduce_sum`, `rms_norm`, `qgemv`. The subgroup-op fast
   path lives behind a feature query.
-- **Both:** wire `--target hip` / `--target vulkan` into `tile build` and
-  `tile bench`. Add device-spec rows for the roofline view.
+- **Both:** wire `--target hip` / `--target vulkan` into `ffaik build` and
+  `ffaik bench`. Add device-spec rows for the roofline view.

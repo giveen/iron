@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Two-pass SDPA decode — pass 1 emits per-block (max, sum, partial_o)
 //! into staging buffers; pass 2 merges across blocks to produce the
@@ -1143,7 +1143,7 @@ pub fn mt_sdpa_decode_2pass_pass2_d256<T>(
     }
 }
 
-// Bagel 2 / ITER 53: standalone registration for pass2 so `tile build
+// Bagel 2 / ITER 53: standalone registration for pass2 so `ffaik build
 // --emit swift` produces a Swift wrapper. The combined registration
 // further up in the file (the `SdpaVector2Pass` dispatch variant)
 // carries pass2 alongside pass1 — useful for the bench harness but

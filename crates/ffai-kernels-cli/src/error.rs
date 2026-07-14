@@ -1,22 +1,22 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 use thiserror::Error;
 
-/// Canonical exit codes for the `tile` binary.
+/// Canonical exit codes for the `ffaik` binary.
 ///
 /// Mirrors the pattern from `foundry_cli::ExitCode` so CI pipelines can
 /// distinguish test failures from build failures from regressions.
 #[repr(i32)]
-pub enum TileExitCode {
+pub enum FFAIExitCode {
     /// All kernels passed / command succeeded.
     Success = 0,
     /// One or more `#[test_kernel]` checks failed.
     TestFailure = 1,
     /// Compilation or build step failed.
     BuildFailure = 2,
-    /// `tile diff` detected a performance regression beyond the threshold.
+    /// `ffaik diff` detected a performance regression beyond the threshold.
     Regression = 3,
-    /// `tile.toml` parsing or configuration error.
+    /// `ffai.toml` parsing or configuration error.
     ConfigError = 10,
 }
 
@@ -54,9 +54,9 @@ impl CliError {
     /// Map this error to its canonical process exit code.
     pub fn exit_code(&self) -> i32 {
         match self {
-            CliError::TestFailure => TileExitCode::TestFailure as i32,
-            CliError::BuildFailure | CliError::MetalCompile(_) => TileExitCode::BuildFailure as i32,
-            CliError::Regression => TileExitCode::Regression as i32,
+            CliError::TestFailure => FFAIExitCode::TestFailure as i32,
+            CliError::BuildFailure | CliError::MetalCompile(_) => FFAIExitCode::BuildFailure as i32,
+            CliError::Regression => FFAIExitCode::Regression as i32,
             _ => 1,
         }
     }

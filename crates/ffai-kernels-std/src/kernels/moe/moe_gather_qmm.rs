@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MoE grouped-gather quantized matmul — the per-expert weight×activation
 //! cell that runs inside each routed expert call. CSR-routed scalar forms

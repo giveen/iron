@@ -1,9 +1,9 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! JSON Lines protocol types for the MetalTile runner ↔ CLI communication.
+//! JSON Lines protocol types for the FFAI Kernels runner ↔ CLI communication.
 //!
-//! The `__tile_runner` subprocess writes newline-delimited JSON to stdout.
-//! The `tile` CLI reads this stream and renders it. This module defines the
+//! The `__ffai_runner` subprocess writes newline-delimited JSON to stdout.
+//! The `ffaik` CLI reads this stream and renders it. This module defines the
 //! full set of serialisable message types that form the wire contract.
 //!
 //! # Wire format
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 // Supporting types
 // ---------------------------------------------------------------------------
 
-/// The kind of compiled artifact produced by `tile build`.
+/// The kind of compiled artifact produced by `ffaik build`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ArtifactKind {
@@ -38,17 +38,17 @@ pub enum ArtifactKind {
     Metallib,
     /// Swift wrapper source.
     Swift,
-    /// MetalTile IR dump.
+    /// FFAI Kernels IR dump.
     Ir,
 }
 
-/// The kind of content produced by `tile inspect`.
+/// The kind of content produced by `ffaik inspect`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InspectKind {
     /// Metal Shading Language source.
     Msl,
-    /// MetalTile IR dump.
+    /// FFAI Kernels IR dump.
     Ir,
     /// Kernel statistics (register count, occupancy estimate, etc.).
     Stats,
@@ -56,7 +56,7 @@ pub enum InspectKind {
     Listing,
 }
 
-/// A compile error for one dtype inside a `tile build` run.
+/// A compile error for one dtype inside a `ffaik build` run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildError {
     /// The dtype that failed to compile (e.g. `"f16"`).
@@ -158,7 +158,7 @@ pub enum ProtocolMessage {
     #[serde(rename = "build")]
     BuildResult(BuildResult),
 
-    /// A compiled artifact path emitted by `tile build --emit`.
+    /// A compiled artifact path emitted by `ffaik build --emit`.
     #[serde(rename = "artifact")]
     Artifact {
         /// The kind of artifact written to disk.
@@ -167,7 +167,7 @@ pub enum ProtocolMessage {
         path: String,
     },
 
-    /// Content produced by `tile inspect` for a single kernel.
+    /// Content produced by `ffaik inspect` for a single kernel.
     #[serde(rename = "inspect")]
     Inspect {
         /// Kernel name (e.g. `"unary/exp"`).
@@ -213,13 +213,13 @@ pub struct BenchResult {
     /// Human-readable shape label (e.g. `"N=1M f32"`). Empty string if not set.
     #[serde(default)]
     pub shape: String,
-    /// Throughput in GB/s for the MetalTile kernel.
+    /// Throughput in GB/s for the FFAI Kernels kernel.
     #[serde(default)]
     pub mt_gbps: f64,
     /// Throughput in GB/s for the reference kernel, if one was configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_gbps: Option<f64>,
-    /// MetalTile speed relative to reference (%), if reference exists.
+    /// FFAI Kernels speed relative to reference (%), if reference exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mt_pct: Option<f64>,
     /// Whether the kernel produced correct results.

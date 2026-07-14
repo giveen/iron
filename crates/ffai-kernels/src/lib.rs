@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! MetalTile facade crate.
+//! FFAI Kernels facade crate.
 //!
 //! `ffai-kernels` re-exports the DSL macros, compile-time placeholder types, IR/codegen crates,
 //! and runtime entry points used to define and launch `#[kernel]` functions.
@@ -75,7 +75,7 @@
 
 pub mod harness;
 pub mod prelude;
-/// GPU runner infrastructure for the `__tile_runner` subprocess.
+/// GPU runner infrastructure for the `__ffai_runner` subprocess.
 pub mod runner;
 /// Author-facing re-exports for `#[bench]` / `#[test_kernel]` setups.
 pub mod test;
@@ -115,13 +115,7 @@ pub use ffai_kernels_runtime::{
     compile_glsl_to_spv,
 };
 /// Runtime context, dispatch result, and top-level runtime error.
-pub use ffai_kernels_runtime::{
-    Context,
-    DispatchResult,
-    DispatchSpec,
-    MetalTileError,
-    ResidentBuffer,
-};
+pub use ffai_kernels_runtime::{Context, DispatchResult, DispatchSpec, FFAIError, ResidentBuffer};
 /// CUDA / NVIDIA device runtime entry points (feature `cuda`).
 #[cfg(feature = "cuda")]
 pub use ffai_kernels_runtime::{CudaDevice, CudaFunction, CudaModule, DeviceBuffer};

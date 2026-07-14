@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_gemm_q8` — the multi-row Q8_0 tiled GEMM
 //! used by DSv4 prefill. Oracle: triple-loop with the same Q8 dequant.

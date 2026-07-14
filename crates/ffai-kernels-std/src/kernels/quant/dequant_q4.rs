@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! FFAI Q4 block dequant — expand a resident Q4 weight back to a dense
 //! `[m, k]` f16/f32 slab for the compute-bound prefill GEMM path.

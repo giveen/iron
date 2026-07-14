@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `kernels::moe::moe_gather_down_q2k` — fused 6-expert
 //! Q2_K inline-dequant down-projection + router-weighted sum. Validates

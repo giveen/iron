@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>MetalTile</h1>
+  <h1>FFAI Kernels</h1>
 
   [![Backends][backends-badge]][backends-url]
   [![Rust][rust-badge]][rust-url]
@@ -18,9 +18,9 @@
 
 ---
 
-A Rust-embedded DSL for writing GPU kernels once and running them everywhere. Write tile-level algorithms in Rust with `#[kernel]`, and the same kernel source lowers to **four GPU backends** — Apple Metal (MSL), NVIDIA (CUDA), AMD (HIP/ROCm), and any Vulkan-class GPU (SPIR-V) — verified against, and frequently faster than, hand-tuned MLX.
+A Rust-embedded DSL for writing GPU kernels once and running them everywhere. Write tile-level GPU kernel algorithms in Rust with `#[kernel]`, and the same kernel source lowers to **four GPU backends** — Apple Metal (MSL), NVIDIA (CUDA), AMD (HIP/ROCm), and any Vulkan-class GPU (SPIR-V) — verified against, and frequently faster than, hand-tuned kernels.
 
-Write once, run on Apple, NVIDIA, AMD, and Vulkan-class GPUs — no per-backend kernel rewrite. ffai-kernels is the kernel layer beneath an LLM inference engine that runs a 30B-parameter hybrid model (Mamba2 SSM + 128-expert MoE + GQA attention) resident-decode on a single Grace-Blackwell (GB10) box; the same kernels also run on Apple GPUs.
+Write once, run on Apple, NVIDIA, AMD, and Vulkan-class GPUs — no per-backend kernel rewrite. ffai-kernels is the kernel layer beneath the [FFAI](https://ffai.dev) AI inference engine. Please open a PR if you are also using the kernels in your engine so we can list it here.
 
 ## Installation
 
@@ -28,13 +28,13 @@ Write once, run on Apple, NVIDIA, AMD, and Vulkan-class GPUs — no per-backend 
 curl -fsSL https://github.com/thewafflehaus/ffai-kernels/releases/latest/download/install.sh | sh
 ```
 
-Run `tile update` at any time to upgrade to the latest release.
+Run `ffaik update` at any time to upgrade to the latest release.
 
 For contributors building from source, see [Getting Started](docs/getting-started.md).
 
 ## Getting Started
 
-**1. Write a kernel.** Annotate a generic Rust function with `#[kernel(bench(...))]` — MetalTile generates `f32`, `f16`, and `bfloat16` variants from a single definition, lowers them to each enabled GPU backend (MSL by default; CUDA / HIP / Vulkan opt-in), and registers it against its MLX reference:
+**1. Write a kernel.** Annotate a generic Rust function with `#[kernel(bench(...))]` — FFAI Kernels generates `f32`, `f16`, and `bfloat16` variants from a single definition, lowers them to each enabled GPU backend (MSL by default; CUDA / HIP / Vulkan opt-in), and optionally registers it against its MLX reference if there is one in the primary [MLX repo](https://github.com/ml-explore/mlx):
 
 <table>
 <tr>
@@ -86,11 +86,11 @@ kernel void mt_exp(
 
 ```sh
 cargo install --path crates/ffai-kernels-cli
-tile bench --filter mlx/gemv
+ffaik bench --filter mlx/gemv
 ```
 
 ```
-tile bench · Apple M1 Max
+ffaik bench · Apple M1 Max
   mlx/gemv
   Shape                                │   MT(µs) │  Ref(GB/s) │  MT(GB/s) │   MT% │  GFLOP/s │  ok
   ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ The non-Metal backends are opt-in Cargo features so the macOS Metal path stays z
 
 The CUDA runtime (`crates/ffai-kernels-runtime/src/device/cuda/`) adds NVRTC runtime kernel compile, a dedicated capturable non-blocking stream, CUDA-graph capture hooks (`begin_capture` / `end_capture` / `graph_launch`), a buffer pool, pinned async host-to-device copies, and an optional `--fmad` codegen gate (`MT_FMAD=1`). See `specs/CUDA_BACKEND_SPEC.md`.
 
-> Today `tile bench` / `tile test` dispatch through the in-process `GpuRunner` on the Metal path; moving the runner into a dedicated subprocess (for isolation and parallelism) and wiring the CLI harness across all backends (Phase 6) is planned.
+> Today `ffaik bench` / `ffaik test` dispatch through the in-process `GpuRunner` on the Metal path; moving the runner into a dedicated subprocess (for isolation and parallelism) and wiring the CLI harness across all backends (Phase 6) is planned.
 
 ## Scope & naming
 
@@ -136,14 +136,14 @@ ffai-kernels began as a Metal-only (MSL) kernel/code generator. It now emits MSL
 
 | Command | What it does |
 |---|---|
-| `tile build` | Compile every `#[kernel]` in the workspace to MSL and (optionally) a `metallib`. |
-| `tile bench` | Run every `#[bench]`, report MetalTile GB/s vs the MLX reference + correctness. |
-| `tile test` | Run every `#[test_kernel]` against its CPU oracle within tolerance. |
-| `tile inspect` | Dump IR / per-pass IR / MSL for one kernel. |
-| `tile device` | Print GPU device info and supported feature flags. |
-| `tile snap` | Save bench results as a regression baseline. |
-| `tile diff` | Compare bench results to a saved baseline. |
-| `tile update` | Install the latest release (or build from a PR / commit). |
+| `ffaik build` | Compile every `#[kernel]` in the workspace to MSL and (optionally) a `metallib`. |
+| `ffaik bench` | Run every `#[bench]`, report FFAI Kernels GB/s vs the MLX reference + correctness. |
+| `ffaik test` | Run every `#[test_kernel]` against its CPU oracle within tolerance. |
+| `ffaik inspect` | Dump IR / per-pass IR / MSL for one kernel. |
+| `ffaik device` | Print GPU device info and supported feature flags. |
+| `ffaik snap` | Save bench results as a regression baseline. |
+| `ffaik diff` | Compare bench results to a saved baseline. |
+| `ffaik update` | Install the latest release (or build from a PR / commit). |
 
 See [`docs/cli.md`](docs/cli.md) for the full flag surface.
 
@@ -157,9 +157,9 @@ See [`docs/cli.md`](docs/cli.md) for the full flag surface.
 | `ffai-kernels-runtime` | Host runtime + per-backend device modules (`device/{metal,cuda,hip,vulkan}/`); CUDA/HIP/Vulkan behind the `cuda`/`hip`/`vulkan` features. |
 | `ffai-kernels-std` | Kernel standard library — bench/test metadata and shared type definitions. |
 | `ffai-kernels` | Umbrella crate re-exporting the public DSL surface. |
-| `ffai-kernels-cli` | The `tile` CLI — build, bench, test, inspect. |
+| `ffai-kernels-cli` | The `ffaik` CLI — build, bench, test, inspect. |
 
-The Swift host (`MetalTileSwift`, Metal/Apple, App Store) is a separate peer consumer of the same kernels and lives outside this workspace.
+The Swift host (`FFAIKernelsSwift`, Metal/Apple, App Store) is a separate peer consumer of the same kernels and lives outside this workspace.
 
 ## Contributing
 
@@ -167,14 +167,15 @@ Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for the iss
 
 ## Acknowledgements
 
-MetalTile's benchmark suite and kernel library stand on the shoulders of the MLX ecosystem. A large
-portion of the `ffai-kernels-std` kernels are ports or faithful re-implementations of kernels from the following projects:
+FFAI Kernels's benchmark suite and kernel library stand on the shoulders of the MLX ecosystem. A portion of the `ffai-kernels-std` kernels are ports, re-implementations or improvements of kernels from the following projects:
 
 - [**ml-explore/mlx**](https://github.com/ml-explore/mlx) — primary source for reference kernels.
 - [**ekryski/mlx**](https://github.com/ekryski/mlx) (`alpha`) — FFAI extensions: gated-delta, SSM replay, AURA codec.
 - [**ml-explore/mlx-lm**](https://github.com/ml-explore/mlx-lm) — reference for GatedDeltaNet step semantics.
 
-We are grateful to the MLX team at Apple and the broader MLX community, this wouldn't have been possible without you.
+We are grateful to the MLX team at Apple and the broader MLX community for their work in pushing local AI on Apple Silicon forward.
+
+After starting on this project we became aware of [cuda-oxide](https://github.com/NVlabs/cuda-oxide) from NVIDIA's labs. While similar in concept, we started with Metal output and quickly surpassed the breadth and depth of kernels implemented in cuda-oxide. In addition, we feel that our implementation is simpler and has less moving parts. Regardless, we wanted to acknowledge prior art we became aware of and would also like to thank NVIDIA for all they have done to push the AI frontier forward.
 
 See [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md) for the full list of individual contributors and third-party software.
 

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! HIGH-THROUGHPUT amortized MoE IQ2_XXS grouped BGEMM — the bm64 tiling
 //! (64×64×32 tiles, 4 simdgroups / 128 threads, 2×2 warp grid) applied to

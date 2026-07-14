@@ -1,8 +1,8 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Argument struct for the `__tile_runner` subprocess.
+//! Argument struct for the `__ffai_runner` subprocess.
 //!
-//! The `tile` CLI serialises these as `--key value` flags when it spawns the
+//! The `ffaik` CLI serialises these as `--key value` flags when it spawns the
 //! runner.  The runner binary parses them with [`RunnerArgs::from_env_args`].
 
 /// The subcommand the runner should execute.
@@ -18,7 +18,7 @@ pub enum RunnerCommand {
     Inspect,
 }
 
-/// Parsed arguments for the `__tile_runner` subprocess.
+/// Parsed arguments for the `__ffai_runner` subprocess.
 #[derive(Debug, Clone)]
 pub struct RunnerArgs {
     /// Which subcommand to run.
@@ -66,13 +66,13 @@ impl RunnerArgs {
     ///
     /// Expected invocation format (produced by `ProjectRunner` in the CLI):
     /// ```text
-    /// __tile_runner bench [--filter <pat>] [--match-name <re>] [--no-match-name <re>]
+    /// __ffai_runner bench [--filter <pat>] [--match-name <re>] [--no-match-name <re>]
     ///                     [--match-group <re>] [--no-match-group <re>]
     ///                     [--dtype <dt>] [--profile]
     ///                     [--warmup-runs <n>] [--runs <n>]
-    /// __tile_runner test  [--filter <pat>] [--match-name <re>] [--dtype <dt>]
-    /// __tile_runner build [--filter <pat>] [--dtype <dt>]
-    /// __tile_runner inspect [--filter <pat>] [--kind <msl|ir|stats|listing>]
+    /// __ffai_runner test  [--filter <pat>] [--match-name <re>] [--dtype <dt>]
+    /// __ffai_runner build [--filter <pat>] [--dtype <dt>]
+    /// __ffai_runner inspect [--filter <pat>] [--kind <msl|ir|stats|listing>]
     /// ```
     pub fn from_env_args() -> Result<Self, String> {
         Self::parse(std::env::args().skip(1).collect())

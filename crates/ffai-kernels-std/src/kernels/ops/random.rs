@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Random benchmark — #[kernel] DSL vs MLX metal/random.metal
 
@@ -48,7 +48,7 @@ pub mod kernel_tests {
 
 /// New-syntax benchmark for `mt_random_hash`.
 ///
-/// MetalTile-only: there is **no A/B reference attached**. MLX's nearest
+/// FFAI-only: there is **no A/B reference attached**. MLX's nearest
 /// `metal/random.metal` kernel is `rbitsc`, a threefry2x32 counter-based PRNG
 /// that emits raw bytes (`device char* out`, `num_keys × bytes_per_key`), while
 /// `mt_random_hash` is a per-element xorshift of `gid + 1` producing a `[n]`
@@ -57,7 +57,7 @@ pub mod kernel_tests {
 /// runner likewise dispatched `rbitsc` perf-only and never compared its bytes.
 /// The bench runner always correctness-checks an attached reference, so wiring
 /// `rbitsc` here would force a guaranteed-fail verdict on every row; this bench
-/// is therefore left MetalTile-only (its xorshift is pinned by the
+/// is therefore left FFAI-only (its xorshift is pinned by the
 /// `#[test_kernel]` oracle above).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};

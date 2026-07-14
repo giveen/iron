@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Flash **block-scaled** SDPA — single-pass online-softmax attention over a
 //! block-scaled-quantized K/V cache, for the spec-conformant formats

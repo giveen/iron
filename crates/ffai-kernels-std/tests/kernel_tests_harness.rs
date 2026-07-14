@@ -1,11 +1,11 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Cargo bridge for new-syntax (`#[test_kernel]`) correctness tests.
 //!
 //! Iterates the `KernelTest` inventory and runs every registered test on the
 //! GPU through the shared in-process runner, asserting each passes within its
 //! tolerance. This makes the new test path part of `cargo test --workspace`
-//! (the commit gate) without requiring `tile test` — this harness is the
+//! (the commit gate) without requiring `ffaik test` — this harness is the
 //! replacement for the former `tests/*_gpu_correctness.rs` files (removed in
 //! #240; per-kernel coverage now lives in in-source `#[test_kernel]`s).
 //!
@@ -32,7 +32,7 @@ fn all_registered_kernel_tests_pass() {
     // submissions with it — so `all_tests()` would iterate zero entries and
     // this test would pass *vacuously*. Touching the kernel-IR registry (the
     // same anchor `kernel_registry_consistency` relies on) keeps the TUs
-    // alive. The `tile` runner avoids this because it dispatches kernels
+    // alive. The `ffaik` runner avoids this because it dispatches kernels
     // directly; this cargo bridge has no such reference of its own.
     let n_kernels = ffai_kernels_std::all_kernels().count();
     assert!(

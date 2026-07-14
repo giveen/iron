@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! `#[kernel]` proc-macro implementation.
 //!
@@ -247,7 +247,7 @@ impl KernelMacroBuilder {
                         self,
                     ) -> std::result::Result<
                         ffai_kernels::DispatchResult,
-                        ffai_kernels::MetalTileError,
+                        ffai_kernels::FFAIError,
                     > {
                         let kernel = kernel_ir();
                         self.ctx.dispatch_with_buffers(&kernel, &self.buffers)

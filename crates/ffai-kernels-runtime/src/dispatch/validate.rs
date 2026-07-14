@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Dispatch-geometry validation — reject GPU-pinning dispatches before they
 //! reach the (non-preemptive) Metal GPU.
@@ -19,7 +19,7 @@
 
 use ffai_kernels_core::ir::Kernel;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 /// The Apple-Silicon simdgroup width. `simd_*` intrinsics reduce across exactly
 /// this many lanes, so any kernel that strides a loop by `n_simd = tpg / 32`
@@ -35,7 +35,7 @@ const SIMD_WIDTH: usize = 32;
 /// the per-thread `mt_hadamard_m*` matvecs are Reduction-mode but dispatch
 /// safely at TPG < 32 because they never compute `n_simd`.)
 ///
-/// Rejects, with a [`MetalTileError::Dispatch`] describing the violation:
+/// Rejects, with a [`FFAIError::Dispatch`] describing the violation:
 /// - any zero grid/threadgroup dimension (dispatches nothing, or is malformed);
 /// - a threadgroup larger than the device's `max_threads_per_threadgroup`;
 /// - when `uses_n_simd`, a threadgroup that is **not a positive multiple of 32**
@@ -48,9 +48,9 @@ pub fn validate_dispatch_geometry(
     tpg: [usize; 3],
     max_threads_per_threadgroup: usize,
     uses_n_simd: bool,
-) -> Result<(), MetalTileError> {
+) -> Result<(), FFAIError> {
     if grid.iter().chain(tpg.iter()).any(|&d| d == 0) {
-        return Err(MetalTileError::Dispatch(format!(
+        return Err(FFAIError::Dispatch(format!(
             "kernel '{}': degenerate dispatch — a grid/threadgroup dimension is 0 \
              (grid={grid:?}, tpg={tpg:?})",
             kernel.name
@@ -59,7 +59,7 @@ pub fn validate_dispatch_geometry(
 
     let total = tpg[0].saturating_mul(tpg[1]).saturating_mul(tpg[2]);
     if total > max_threads_per_threadgroup {
-        return Err(MetalTileError::Dispatch(format!(
+        return Err(FFAIError::Dispatch(format!(
             "kernel '{}': {total} threads/threadgroup exceeds the device maximum of \
              {max_threads_per_threadgroup} (tpg={tpg:?})",
             kernel.name
@@ -67,7 +67,7 @@ pub fn validate_dispatch_geometry(
     }
 
     if uses_n_simd && (total < SIMD_WIDTH || !total.is_multiple_of(SIMD_WIDTH)) {
-        return Err(MetalTileError::Dispatch(format!(
+        return Err(FFAIError::Dispatch(format!(
             "kernel '{}' strides a reduction by n_simd = tpg / {SIMD_WIDTH}: \
              threads/threadgroup must be a positive multiple of {SIMD_WIDTH}, got {total} \
              (tpg={tpg:?}) — fewer than {SIMD_WIDTH}, or a non-multiple, would pin the GPU \
@@ -111,7 +111,7 @@ mod tests {
         for t in [1usize, 4, 16, 31] {
             let err = validate_dispatch_geometry(&kernel(), [4, 1, 1], [t, 1, 1], MAX_TPG, true)
                 .unwrap_err();
-            assert!(matches!(err, MetalTileError::Dispatch(_)), "tpg {t} must be rejected");
+            assert!(matches!(err, FFAIError::Dispatch(_)), "tpg {t} must be rejected");
         }
     }
 

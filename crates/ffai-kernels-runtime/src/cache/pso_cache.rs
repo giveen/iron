@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Compute pipeline‑state cache.
@@ -41,7 +41,7 @@ use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 
 #[cfg(target_os = "macos")]
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 // ---------------------------------------------------------------------------
 // Hashing helpers (shared with msl_cache)
@@ -135,9 +135,9 @@ impl PsoCache {
         msl_provider: F,
         kernel_name: &str,
         fn_consts: &BTreeMap<String, u32>,
-    ) -> Result<Pso, MetalTileError>
+    ) -> Result<Pso, FFAIError>
     where
-        F: FnOnce() -> Result<String, MetalTileError>,
+        F: FnOnce() -> Result<String, FFAIError>,
     {
         use std::ptr::NonNull;
 
@@ -151,11 +151,11 @@ impl PsoCache {
         let msl_source = msl_provider()?;
         let lib = dev
             .newLibraryWithSource_options_error(&NSString::from_str(&msl_source), None)
-            .map_err(|e| MetalTileError::MslCompilation(format!("{e:?}")))?;
+            .map_err(|e| FFAIError::MslCompilation(format!("{e:?}")))?;
 
         let fun = if fn_consts.is_empty() {
             lib.newFunctionWithName(&NSString::from_str(kernel_name))
-                .ok_or_else(|| MetalTileError::FunctionNotFound { name: kernel_name.to_string() })?
+                .ok_or_else(|| FFAIError::FunctionNotFound { name: kernel_name.to_string() })?
         } else {
             use objc2_metal::{MTLDataType, MTLFunctionConstantValues};
             let fcv = MTLFunctionConstantValues::new();
@@ -176,7 +176,7 @@ impl PsoCache {
                 }
             }
             lib.newFunctionWithName_constantValues_error(&NSString::from_str(kernel_name), &fcv)
-                .map_err(|e| MetalTileError::FunctionNotFound {
+                .map_err(|e| FFAIError::FunctionNotFound {
                     name: format!("{kernel_name} (with constants): {e:?}"),
                 })?
         };
@@ -189,7 +189,7 @@ impl PsoCache {
                 MTLPipelineOption(0),
                 None,
             )
-            .map_err(|e| MetalTileError::PipelineCreation {
+            .map_err(|e| FFAIError::PipelineCreation {
                 name: kernel_name.to_string(),
                 reason: format!("{e:?}"),
             })?;

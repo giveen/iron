@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MoE permute / unpermute — `mt_moe_permute` gathers token rows into
 //! expert-sorted order ahead of the grouped expert matmul; `mt_moe_unpermute`

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GGUF Q8_0 block dequant — `out[i] = qs[i] * d[i/32]`.
 //!
@@ -51,7 +51,7 @@ use ffai_kernels::kernel;
 // with a generic `Tensor<T>` output, which doesn't fit the legacy
 // `bench(...)` registration's `GenericEmpty` dispatch shape. The new
 // declarative `#[bench]` attribute on the `kernel_benches::bench_q8_0`
-// fn below registers this kernel for `tile bench` without the legacy
+// fn below registers this kernel for `ffaik bench` without the legacy
 // path.
 #[kernel]
 pub fn mt_gguf_dequant_q8_0<T>(

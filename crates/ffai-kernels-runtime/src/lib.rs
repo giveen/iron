@@ -1,9 +1,9 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
-//! MetalTile runtime: GPU dispatch and buffer management.
+//! FFAI Kernels runtime: GPU dispatch and buffer management.
 //!
-//! This crate handles the runtime execution of compiled MetalTile kernels:
+//! This crate handles the runtime execution of compiled FFAI Kernels kernels:
 //! - Metal device and command queue management
 //! - Pipeline state compilation and caching
 //! - Buffer allocation and transfer
@@ -30,4 +30,4 @@ pub use device::vulkan::{
     VulkanRawBuffer,
     compile_glsl_to_spv,
 };
-pub use error::MetalTileError;
+pub use error::FFAIError;

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 use std::{
     collections::HashSet,
@@ -10,7 +10,7 @@ use std::{
 ///
 /// Points at ekryski/mlx's `alpha` branch — a superset of upstream MLX that
 /// carries the custom Metal kernels FFAI ports from (turbo / aura, gated-delta,
-/// ssm, ssm_replay, etc.). Stock upstream is missing those, so `tile bench`
+/// ssm, ssm_replay, etc.). Stock upstream is missing those, so `ffaik bench`
 /// would have no side-by-side reference for them.
 const MLX_COMMIT: &str = "4919270e03f0bc5116db67c99c5d8907dce589a8";
 const MLX_URL: &str = "https://github.com/ekryski/mlx.git";
@@ -43,7 +43,7 @@ fn main() {
 /// we use a file-based advisory lock to serialise the fetch.
 ///
 /// Progress visibility: when the cache is hot this is a 1 ms noop and prints
-/// nothing. When stale/missing (first `tile bench` after `cargo clean`, or
+/// nothing. When stale/missing (first `ffaik bench` after `cargo clean`, or
 /// after the pinned `MLX_COMMIT` changes — e.g. PR #94 repointed to
 /// `ekryski/mlx@alpha`), prints status to stderr in real time so the build
 /// doesn't look hung during the 30-60 s git fetch.

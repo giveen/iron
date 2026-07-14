@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Thin wrappers around the `git` CLI used by `tile bench` and `tile diff`.
+//! Thin wrappers around the `git` CLI used by `ffaik bench` and `ffaik diff`.
 //!
 //! Each helper returns `None`/empty when git is unavailable, the cwd
 //! isn't a git repo, or the requested ref/path doesn't exist — callers

@@ -3,7 +3,7 @@ name = "ffai-kernels-std"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "MetalTile kernel standard library — benchmark metadata and type definitions"
+description = "FFAI Kernels kernel standard library — benchmark metadata and type definitions"
 publish = true
 
 build = "bin/build.rs"
@@ -23,7 +23,7 @@ hip = ["ffai-kernels/hip"]
 vulkan = ["ffai-kernels/vulkan"]
 
 [[bin]]
-name = "__tile_runner"
+name = "__ffai_runner"
 path = "bin/runner.rs"
 
 [dependencies]

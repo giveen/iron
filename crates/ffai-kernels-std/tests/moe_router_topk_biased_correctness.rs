@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `kernels::moe::mt_moe_router_topk_biased` — top-K by biased
 //! score, weights = unbiased[chosen] renormalised to sum 1.

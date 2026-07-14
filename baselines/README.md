@@ -1,23 +1,23 @@
 # Cross-developer bench baselines
 
-Per-machine snapshots of `tile bench` results, captured against a known
+Per-machine snapshots of `ffaik bench` results, captured against a known
 upstream SHA, that the project keeps in version control as a regression
-reference. Distinct from `.tile-snapshots/` (per-developer, gitignored
-output directory used by `tile snap`).
+reference. Distinct from `.ffaik-snapshots/` (per-developer, gitignored
+output directory used by `ffaik snap`).
 
 Workflow when adding a new baseline:
 
 1. Sync to the SHA you want to capture (typically `dev` HEAD).
 2. `cargo build --release -p ffai-kernels-cli`
-3. `tile bench --json /tmp/bench-raw.json`
-4. `tile snap --from /tmp/bench-raw.json -o baselines/<chip-slug>.json
+3. `ffaik bench --json /tmp/bench-raw.json`
+4. `ffaik snap --from /tmp/bench-raw.json -o baselines/<chip-slug>.json
    --note "<context, e.g. compiler flags, env vars>"`
 5. Skim the JSON for regressions vs the prior baseline for the same
    chip (or for a related chip family) and append the headline findings
    to this file.
 6. Open a PR.
 
-Each baseline JSON is a `Snapshot` envelope (`tile snap` format):
+Each baseline JSON is a `Snapshot` envelope (`ffaik snap` format):
 `{ device, gpu_family?, git_sha?, timestamp, note?, results[...] }`.
 Per-row schema is documented in `cmd::bench::save_json`. Captured with
 default codegen flags unless the `note` says otherwise.
@@ -25,12 +25,12 @@ default codegen flags unless the `note` says otherwise.
 Naming: `baselines/<chip-slug>.json`. One canonical file per chip;
 overwrite on update (the file metadata carries the SHA + timestamp,
 git history preserves the older snapshots). The slug is derived from
-`tile device`'s reported name — lowercase, non-alphanumeric runs
+`ffaik device`'s reported name — lowercase, non-alphanumeric runs
 collapsed to a single dash — so `Apple M5 Max` ↔ `apple-m5-max.json`.
 
 ## Dirty-tree guard and auto-diff
 
-`tile bench` refuses to run when `git diff HEAD` is non-empty: bench
+`ffaik bench` refuses to run when `git diff HEAD` is non-empty: bench
 numbers from a stale `target/` against a modified source tree don't
 tie back to any commit. Override with `--allow-dirty` when you're
 intentionally measuring uncommitted work.
@@ -51,7 +51,7 @@ that step is informational only — it never gates the job.
 
 | File | Chip | Captured @ | Headline |
 |---|---|---|---|
-| [`apple-m1-max.json`](apple-m1-max.json) | Apple M1 Max | `dd4c2ef` (2026-05-20) | 327/327 implemented + numerically correct; **avg MT% 146%**. Refreshed against current `dev` (post #110/#128/#129/#135); the prior baseline predated those landings so `tile bench`'s auto-diff was comparing against stale numbers. |
+| [`apple-m1-max.json`](apple-m1-max.json) | Apple M1 Max | `dd4c2ef` (2026-05-20) | 327/327 implemented + numerically correct; **avg MT% 146%**. Refreshed against current `dev` (post #110/#128/#129/#135); the prior baseline predated those landings so `ffaik bench`'s auto-diff was comparing against stale numbers. |
 | [`apple-m4-max.json`](apple-m4-max.json) | Apple M4 Max | `adc6816` (2026-05-24) | 496/496 implemented + numerically correct; **avg MT% 141%**. |
 | [`apple-m5-max.json`](apple-m5-max.json) | Apple M5 Max | `0cb0a85` (2026-05-18) | 241/241 implemented + numerically correct; **avg MT% 136%** but masked by an `sdpa` GQA bf16 regression to **31%** of MLX (see below). |
 
@@ -80,7 +80,7 @@ kernels that actually matter for LLM decode regress on M5 Max:
 
 The dominant pattern is **SDPA + GQA + bf16**. MLX's
 `sdpa_vector_2pass` picks a per-shape `blocks` value tuned for the
-target chip; MetalTile's current `mt_sdpa` uses a fixed single-pass
+target chip; FFAI Kernels's current `mt_sdpa` uses a fixed single-pass
 8-simdgroups-per-head layout. The mismatch widens on M5 because the
 optimal block size differs from M3/M4.
 
@@ -106,10 +106,10 @@ optimal block size differs from M3/M4.
 ```sh
 git checkout 0cb0a85           # the SHA this baseline was captured against
 cargo build --release -p ffai-kernels-cli
-./target/release/tile device   # confirm "Apple M5 Max" / "Apple10 (M5)"
+./target/release/ffaik device   # confirm "Apple M5 Max" / "Apple10 (M5)"
 # Auto-diffs against the merge-base baseline on success; emits JSON
 # at /tmp/bench.json for snap/diff round-trips.
-./target/release/tile bench --json /tmp/bench.json
+./target/release/ffaik bench --json /tmp/bench.json
 # Or run the diff explicitly against the committed baseline:
-./target/release/tile diff baselines/apple-m5-max.json /tmp/bench.json
+./target/release/ffaik diff baselines/apple-m5-max.json /tmp/bench.json
 ```

@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Reproduction: bm64 amortized MoE GEMM vs gemv-rows (known-correct) on
 //! RAGGED expert segments that straddle 64-row tile boundaries.

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GGUF block-quant **formats** — the llama.cpp `ggml-quants.c` super-block
 //! family (q8_0, q2_k, …) — host-side packer + dequant oracle, built on the

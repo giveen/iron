@@ -5,13 +5,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "MetalTile CLI — benchmark, test, and inspect GPU kernels"
+description = "FFAI Kernels CLI — benchmark, test, and inspect GPU kernels"
 keywords = ["metal", "gpu", "apple-silicon", "benchmark", "cli"]
 categories = ["hardware-support", "development-tools"]
 publish = false
 
 [[bin]]
-name = "tile"
+name = "ffaik"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Patch im2col — unfold an NCHW image into one row per (non-overlapping)
 //! `patch × patch` block, flattened `(c, py, px)`, ready for the patch-embed

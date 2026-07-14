@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! bm64 Q2_K BGEMM must match the proven 16×32 pool kernel
 //! (mt_moe_gather_bgemm_q2k_mpp). cosine ≥ 0.999. NO 86GB model load.

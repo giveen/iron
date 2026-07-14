@@ -1,7 +1,7 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! `RunnerHarness` — orchestrates bench / test / build / inspect in the
-//! `__tile_runner` subprocess and streams [`ProtocolMessage`]s to stdout.
+//! `__ffai_runner` subprocess and streams [`ProtocolMessage`]s to stdout.
 //!
 //! This is the only place that calls the `inventory` registries. The CLI
 //! process never imports this module — it only reads the JSON lines.
@@ -31,7 +31,7 @@ use crate::{
     },
 };
 
-/// Entry-point for the `__tile_runner` subprocess.
+/// Entry-point for the `__ffai_runner` subprocess.
 ///
 /// Parses the `RunnerArgs`, initialises the GPU runner (if needed), runs the
 /// requested suite, and streams `ProtocolMessage` JSON lines to stdout.
@@ -584,7 +584,7 @@ impl RunnerHarness {
             }
 
             if emit_kinds.contains("swift") {
-                let path = generated_dir.join("MetalTileKernels.swift");
+                let path = generated_dir.join("FFAIKernels.swift");
                 let _ = std::fs::create_dir_all(&generated_dir);
                 match codegen_emit::write_swift_wrappers(&all_emitted_kernels, &path) {
                     Ok(()) => emit_stdout(&ProtocolMessage::Artifact {
@@ -709,7 +709,7 @@ impl RunnerHarness {
 
         let n_kernels = kernels.len() as f64;
         println!(
-            "tile build --time-passes · {} kernels × {} iters ({} warmup)",
+            "ffaik build --time-passes · {} kernels × {} iters ({} warmup)",
             kernels.len(),
             ITERS,
             WARMUP,
@@ -1134,7 +1134,7 @@ pub struct TestOutcome {
 
 /// Run a `TestSetup` in-process via the given runtime context.
 ///
-/// This is the legacy API used by `tile test` and integration test harnesses
+/// This is the legacy API used by `ffaik test` and integration test harnesses
 /// before the subprocess migration. It dispatches the kernel, then compares
 /// each expected output buffer against the GPU result within `tol` (absolute).
 pub fn run_kernel_test(
@@ -1347,7 +1347,7 @@ impl NameFilter {
         let group = ffai_kernels_core::protocol::op_group(name);
         if let Some(re) = &self.match_group
             && !re.is_match(group)
-            && !(!family.is_empty() && re.is_match(family))
+            && (family.is_empty() || !re.is_match(family))
         {
             return false;
         }
@@ -1458,7 +1458,7 @@ mod name_filter_tests {
     #[test]
     fn group_filter_also_matches_kernel_family() {
         // The CI bench shards select family groups this way, e.g.
-        // `tile bench --match-group 'gemm|moe|ssm|quant|kv_cache|hyper_connections|sdpa'`.
+        // `ffaik bench --match-group 'gemm|moe|ssm|quant|kv_cache|hyper_connections|sdpa'`.
         let nf = NameFilter::from_args(&args_with(|a| {
             a.match_group = Some("norm|ops|sampling".into());
         }))

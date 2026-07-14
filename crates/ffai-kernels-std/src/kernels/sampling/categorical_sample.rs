@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU sampling kernels — softmax + categorical inverse-CDF walk used
 //! by FFAI's `gpu-categorical` decode path (T > 0, no filters). The

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! POOL-FREE amortized MoE IQ2_XXS bgemm — bm64 MMA tiling reading RAW
 //! resident GGUF blocks directly via aligned u16 (DType::U16), eliminating

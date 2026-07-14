@@ -1,7 +1,7 @@
 # ffai-kernels-core
 
 Core IR types, shape algebra, DType system, and GPU-family detection for the
-MetalTile GPU kernel compiler. This is the foundation crate — every other
+FFAI Kernels GPU kernel compiler. This is the foundation crate — every other
 crate in the workspace depends on it.
 
 Defines the SSA-form intermediate representation that `#[kernel]`
@@ -67,7 +67,7 @@ kernel.body = block;
 | `shape` | `Shape`, `Dim`, `DimExpr`, `tile()` constructor |
 | `constexpr` | `ConstExpr` — symbolic constants resolved at kernel compile time |
 | `error` | `Error` enum and `Result<T>` alias |
-| `protocol` | The `runner ↔ CLI` wire types (`ProtocolMessage`, `ProfileInfo`, bench/test/build results) for the `__tile_runner` subprocess, plus `GpuFamily` Apple-GPU generation detection (M1–M5) |
+| `protocol` | The `runner ↔ CLI` wire types (`ProtocolMessage`, `ProfileInfo`, bench/test/build results) for the `__ffai_runner` subprocess, plus `GpuFamily` Apple-GPU generation detection (M1–M5) |
 | `kernel_registry` | `KernelEntry` — registry for kernel discovery via `inventory` |
 | `utils` | Internal helpers (bit manipulation, alignment) |
 
@@ -98,7 +98,7 @@ kernel.body = block;
 | `DimExpr` | Symbolic dimension expression (Scale, Const, Var, Add, Range) | `src/shape.rs` | ✅ |
 | `ConstExpr` | Named compile-time constant used in shapes and kernel configs | `src/constexpr.rs` | ✅ |
 | `GpuFamily` | Apple GPU family level (7=M1, 8=M2, 9=M3/M4, 10=M5) | `src/protocol.rs` | ✅ |
-| `ProtocolMessage` | JSON-line wire format for the `__tile_runner` subprocess (bench/test/build/inspect results, `ProfileInfo`) | `src/protocol.rs` | ✅ |
+| `ProtocolMessage` | JSON-line wire format for the `__ffai_runner` subprocess (bench/test/build/inspect results, `ProfileInfo`) | `src/protocol.rs` | ✅ |
 | `KernelEntry` | Inventory-registered kernel metadata | `src/kernel_registry.rs` | ✅ |
 | `Error` / `Result<T>` | Error enum and result alias | `src/error.rs` | ✅ |
 

@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea or enhancement for MetalTile
+about: Suggest an idea or enhancement for FFAI Kernels
 title: 'feat: '
 labels: feature
 assignees: ''

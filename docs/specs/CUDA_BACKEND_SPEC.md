@@ -1,16 +1,16 @@
 # CUDA / NVIDIA Backend Spec
 
 **Status:** 📋 Proposed (design only; no implementation yet)
-**Scope:** Add a second code-generation + runtime backend so MetalTile's existing
+**Scope:** Add a second code-generation + runtime backend so FFAI Kernels's existing
 `#[kernel]` DSL / IR lowers to **CUDA** (NVIDIA GPUs) in addition to Metal/MSL.
 **Out of scope:** model loading, graph execution, tokenization, checkpoint
-readers — MetalTile is an optimized-kernel generator, not an inference engine.
+readers — FFAI Kernels is an optimized-kernel generator, not an inference engine.
 
 ---
 
 ## 1. Motivation
 
-MetalTile today is a single-target toolchain: the IR in `ffai-kernels-core` lowers
+FFAI Kernels today is a single-target toolchain: the IR in `ffai-kernels-core` lowers
 through `ffai-kernels-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
 *"lowers the algorithm IR to Metal Shading Language"*), and `ffai-kernels-runtime`
 dispatches exclusively through Metal (`metal_device.rs`). The algorithm IR and
@@ -36,7 +36,7 @@ eventually tuned) code for both Apple GPUs and NVIDIA GPUs.
   NVRTC at runtime, or offline `nvcc` → PTX/cubin) for every kernel expressible
   in the pure `#[kernel]` DSL.
 - A `cuda` runtime backend (device, buffers, dispatch) behind a shared trait, so
-  `ffai-kernels-std` kernels and the `tile` CLI (`build`/`test`/`bench`) work against
+  `ffai-kernels-std` kernels and the `ffaik` CLI (`build`/`test`/`bench`) work against
   either backend.
 - Reuse the IR, the `#[kernel]` macro, and the **entire `quant::{codec,format}`
   layer unchanged**.
@@ -78,7 +78,7 @@ Introduce a backend abstraction at two layers:
   `dispatch(grid, block, args)`, `readback`. `MetalDevice` is one impl; add
   `CudaDevice` (CUDA Driver API + NVRTC).
 
-`tile build --target {metal,cuda}` and `tile bench --target cuda` select the
+`ffaik build --target {metal,cuda}` and `ffaik bench --target cuda` select the
 backend; default stays `metal`.
 
 ### 4.2 DSL → CUDA op mapping
@@ -122,7 +122,7 @@ that makes the reduction and lane-shuffle kernels port cleanly.
 ### 4.4 Compilation & dispatch
 
 - **Runtime compile:** NVRTC (`nvrtcCompileProgram`) → PTX → `cuModuleLoadData` →
-  `cuLaunchKernel`. Mirrors Metal's `newLibraryWithSource` flow, so `tile build`'s
+  `cuLaunchKernel`. Mirrors Metal's `newLibraryWithSource` flow, so `ffaik build`'s
   emit-and-compile loop and the codegen-consistency tests carry over.
 - **Offline option:** emit `.cu`, compile with `nvcc` to cubin, for AOT use.
 - **Correctness harness:** the `#[test_kernel]` CPU-oracle model is
@@ -146,7 +146,7 @@ stack worth evaluating for two distinct parts of this backend:
 
   | | **§4.2 path: IR → CUDA C++ → NVRTC → PTX** | **cuda-oxide path: IR → Rust device code → PTX** |
   |---|---|---|
-  | Fits MetalTile's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
+  | Fits FFAI Kernels's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
   | Blackwell tensor cores | We must emit PTX / inline-asm or use CUTLASS for `tcgen05`/WGMMA | **Built-in intrinsics** (`tcgen05`, WGMMA, MMA, TMEM, TMA, `cta_group::2`, sm_100a) |
   | Toolchain weight | CUDA Toolkit + NVRTC | CUDA 12.x **+ Clang/libclang + nightly `rust-src`/`rustc-dev`/`llvm-tools` + LLVM 21+** for the advanced intrinsics |
   | Maturity | NVRTC is stable, shipping | **Alpha / experimental, active dev, Linux-only** (Ubuntu 24.04 tested) |

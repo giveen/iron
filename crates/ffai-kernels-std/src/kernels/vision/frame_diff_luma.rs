@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Luma down-scale + frame-difference (SAD) — the motion-gating primitive
 //! for the real-time video loop (multi-modal-support.md §7c / K7).

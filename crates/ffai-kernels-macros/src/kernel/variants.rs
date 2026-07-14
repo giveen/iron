@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Compile-time kernel variant generation for `#[kernel(variants(...))]`.
 //!
@@ -445,7 +445,7 @@ fn parse_single_value(
     Ok(VariantValue::Type(quote::quote! { #ty }))
 }
 
-/// Primitive Rust types and MetalTile dtype aliases that should be parsed as
+/// Primitive Rust types and FFAI Kernels dtype aliases that should be parsed as
 /// `VariantValue::Type` rather than `VariantValue::Named`.
 fn is_primitive_type(s: &str) -> bool {
     matches!(
@@ -914,7 +914,7 @@ fn condition_is_param_only(stream: &TokenStream, params: &HashMap<String, Varian
                 // Only integer variant params are evaluable in boolean expressions.
                 // Type params (e.g. `WT = u32`) cannot be compared arithmetically,
                 // so their presence makes the condition a runtime expression.
-                if !params.get(&s).is_some_and(|v| v.as_int().is_some()) {
+                if params.get(&s).is_none_or(|v| v.as_int().is_none()) {
                     return false;
                 }
             },

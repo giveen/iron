@@ -1,31 +1,31 @@
 # CLI
 
-`tile` is the command-line driver for benchmarking, building, and inspecting kernels. Install it, or run it through `cargo` from a checkout.
+`ffaik` is the command-line driver for benchmarking, building, and inspecting kernels. Install it, or run it through `cargo` from a checkout.
 
 ```bash
-cargo install --path crates/ffai-kernels-cli      # installs the `tile` binary
+cargo install --path crates/ffai-kernels-cli      # installs the `ffaik` binary
 # or, from a checkout, without installing:
 cargo run -p ffai-kernels-cli -- <command> …
 ```
 
-`make bench` wraps `tile bench`; for the other subcommands run `tile` (or the `cargo run` form) directly.
+`make bench` wraps `ffaik bench`; for the other subcommands run `ffaik` (or the `cargo run` form) directly.
 
-## `tile bench` — benchmark MetalTile kernels
+## `ffaik bench` — benchmark FFAI Kernels kernels
 
-Benchmarks the MetalTile kernels and reports wall-clock latency, throughput
+Benchmarks the FFAI Kernels kernels and reports wall-clock latency, throughput
 (GB/s), compute throughput (GFLOP/s), and roofline figures. By default it
-benches **only the MetalTile kernels**; pass `--mlx` to also run each kernel's
+benches **only the FFAI Kernels kernels**; pass `--mlx` to also run each kernel's
 MLX reference for a side-by-side speed A/B plus an output-equivalence check.
 
 ```
-tile bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
+ffaik bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
            [--diff] [--baseline-ref <git-ref>]
 ```
 
 | Flag | Effect |
 |---|---|
 | `-f, --filter <substr>` | only run kernels whose name contains `<substr>` |
-| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `MT%` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `tile test`); roughly doubles bench time |
+| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `MT%` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `ffaik test`); roughly doubles bench time |
 | `-v` / `-vv` | `-v` adds the roofline (`%BW` / `%FLOP` / arithmetic intensity), occupancy/registers, and a bottleneck verdict (plus the reference latency when `--mlx` is set); `-vv` adds the GPU timing distribution (`p95` / `p99` / `cv%`) |
 | `-o, --json <file>` | also write results as JSON |
 | `--allow-dirty` | run on a dirty working tree (default: refuses, so numbers tie to a clean SHA) |
@@ -38,7 +38,7 @@ The default table shows, per kernel/dtype: `MT(µs)` (wall-clock latency, the
 `min` sample — the metric that makes "which precision is fastest" directly
 readable), `MT` (GB/s bandwidth), `GFLOP/s` (compute throughput, blank for
 memory-bound kernels), and `ok` (correctness). With `--mlx` it also fills the
-`Ref` (MLX GB/s) and `MT%` (MetalTile-vs-MLX ratio) columns; without it those
+`Ref` (MLX GB/s) and `MT%` (FFAI-vs-MLX ratio) columns; without it those
 stay blank.
 
 `-v` adds the roofline view: `%BW` (achieved ÷ the device's peak DRAM bandwidth),
@@ -57,12 +57,12 @@ JSON (`-o`) is **additive**: it keeps the `ref`/`mt` (GB/s) keys baseline diffin
 consumes and adds `latency_us`, `gflops`, `pct_peak_bw`, `pct_peak_flops`, and
 `arith_intensity`.
 
-## `tile build` — compile kernels to MSL
+## `ffaik build` — compile kernels to MSL
 
 Compiles every kernel and reports errors; with `--emit`, writes artifacts.
 
 ```
-tile build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
+ffaik build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
            [--emit msl,metallib,swift,ir,all] [-o <dir>] [--sdk <sdk>] [-t]
 ```
 
@@ -76,7 +76,7 @@ tile build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
 | `--sdk <sdk>` | `xcrun` SDK for the Metal toolchain (default: `macosx`) |
 | `-t, --time-passes` | run the pass pipeline 25× per kernel, print per-pass median wall time instead of emitting |
 
-Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `tile build --emit all -o /tmp/mt-smoke`.
+Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `ffaik build --emit all -o /tmp/mt-smoke`.
 
 The output layout matches a SwiftPM `Sources/<Target>/` convention so `--out` can point directly at a target directory:
 
@@ -84,13 +84,13 @@ The output layout matches a SwiftPM `Sources/<Target>/` convention so `--out` ca
 <out>/Resources/kernels/<name>.metal
 <out>/Resources/kernels.metallib
 <out>/Resources/manifest.json
-<out>/Generated/MetalTileKernels.swift
+<out>/Generated/FFAIKernels.swift
 ```
 
-## `tile inspect` — IR and MSL for one kernel
+## `ffaik inspect` — IR and MSL for one kernel
 
 ```
-tile inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
+ffaik inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
              [--pass <name>] [--dtype <f32|f16|bf16|i32|u32>] [-o <dir>]
 ```
 
@@ -106,14 +106,14 @@ tile inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
 
 Omit the kernel name to list every registered kernel. See [Developing → debugging a kernel](developing.md#debugging-a-kernel).
 
-## `tile device` — GPU info
+## `ffaik device` — GPU info
 
 Prints the Metal device name, Metal version, Apple GPU family, and the supported feature flags (native `bfloat`, simdgroup matrix, etc.). Add `--json` for machine-readable output.
 
-## `tile snap` — save a perf regression baseline
+## `ffaik snap` — save a perf regression baseline
 
 ```
-tile snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
+ffaik snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
 ```
 
 | Flag | Effect |
@@ -123,10 +123,10 @@ tile snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
 | `--note <text>` | attach a note to the snapshot |
 | `-f, --filter <substr>` | only include kernels whose name contains `<substr>` |
 
-## `tile diff` — compare against a baseline
+## `ffaik diff` — compare against a baseline
 
 ```
-tile diff <baseline> [<current>] [-f <substr>] [--threshold <pct>]
+ffaik diff <baseline> [<current>] [-f <substr>] [--threshold <pct>]
           [--sort name|delta|pct] [--only-regressions] [--only-improvements]
 ```
 

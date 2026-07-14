@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Block-scaled quantized-weight variants of the cooperative (simdgroup-matrix
 //! MMA) 2D convolution. These are the M≥32 ALU-throughput conv path for the

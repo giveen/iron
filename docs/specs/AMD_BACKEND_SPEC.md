@@ -1,9 +1,9 @@
 # AMD / ROCm Backend Spec
 
 **Status:** 📋 Proposed (design only; no implementation yet)
-**Scope:** Add an AMD GPU backend so MetalTile's `#[kernel]` DSL / IR lowers to
+**Scope:** Add an AMD GPU backend so FFAI Kernels's `#[kernel]` DSL / IR lowers to
 **HIP / ROCm** (AMD GPUs), reusing as much of the CUDA backend as possible.
-**Out of scope:** model loading, graph execution, checkpoint readers — MetalTile
+**Out of scope:** model loading, graph execution, checkpoint readers — FFAI Kernels
 is an optimized-kernel generator, not an inference engine.
 
 > **Read `CUDA_BACKEND_SPEC.md` first.** This spec is deliberately a *delta* on
@@ -18,7 +18,7 @@ is an optimized-kernel generator, not an inference engine.
 AMD GPUs are custom-kernel-programmable (HIP C++ → GCN/RDNA/CDNA ISA via the LLVM
 AMDGPU backend, or SPIR-V), so the same per-kernel model as CUDA applies. The
 *insight that makes this cheap*: **HIP is a CUDA-portable C++ dialect** — AMD ships
-`HIPIFY` precisely to mechanically convert CUDA → HIP, and the constructs MetalTile
+`HIPIFY` precisely to mechanically convert CUDA → HIP, and the constructs FFAI Kernels
 emits (`__global__`, `blockIdx`/`threadIdx`, `__shared__`, warp shuffles, math
 intrinsics) are near-identical between the two. So:
 
@@ -73,7 +73,7 @@ Hip, … }`; only the small dialect deltas above differ.
 
 ### 4.1 Wavefront size 32 **or** 64 — the main hazard
 
-MetalTile kernels assume a **32-lane simdgroup** (Metal) ≙ 32-lane warp (NVIDIA).
+FFAI Kernels kernels assume a **32-lane simdgroup** (Metal) ≙ 32-lane warp (NVIDIA).
 On AMD this is **not fixed**:
 - **RDNA (gfx10/11/12, consumer + some pro)** runs **wave32** for compute — maps
   cleanly to the existing 32-lane reductions/shuffles.
@@ -167,7 +167,7 @@ Because HIP is CUDA-portable, the AMD backend reuses the CUDA backend's emitter 
 runtime *structure* almost wholesale — the genuinely new work is the **wavefront
 32/64 parameterization**, the **MFMA/WMMA tiling**, and the **HIP runtime glue**.
 And the same `mx*`/`mxint*` formats that target Blackwell also target CDNA4
-microscaling, so MetalTile's quant matrix already spans Apple GPU (today) +
+microscaling, so FFAI Kernels's quant matrix already spans Apple GPU (today) +
 NVIDIA + AMD hardware.
 
 ## 8. References

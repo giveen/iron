@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Phase-1 Vulkan smoke test (`VULKAN_BACKEND_SPEC.md`): prove the pipeline
 //! end-to-end on a real Vulkan device —

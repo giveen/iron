@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! MSL source‑generation cache.
@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 #[cfg(target_os = "macos")]
 use rustc_hash::FxHashMap;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 // ---------------------------------------------------------------------------
 // MSL cache type
@@ -60,11 +60,7 @@ impl MslCache {
     /// acceptable — `MslGenerator::default().generate(kernel)` is
     /// pure, the second writer overwrites with an identical string.
     #[cfg(target_os = "macos")]
-    pub(crate) fn get_or_generate(
-        &self,
-        kernel: &Kernel,
-        key: u64,
-    ) -> Result<String, MetalTileError> {
+    pub(crate) fn get_or_generate(&self, kernel: &Kernel, key: u64) -> Result<String, FFAIError> {
         if let Some(cached) = self.cache.lock().get(&key).cloned() {
             return Ok(cached);
         }
@@ -253,7 +249,7 @@ mod perf_clone {
             // Simulate the PSO-cache-hit fast path: a noop closure
             // that's never invoked because the cache hit returned
             // before reaching it.
-            let _provider = || -> Result<String, MetalTileError> {
+            let _provider = || -> Result<String, FFAIError> {
                 Ok(cache.get_or_generate(&kernel, key).unwrap())
             };
             std::hint::black_box(&_provider);

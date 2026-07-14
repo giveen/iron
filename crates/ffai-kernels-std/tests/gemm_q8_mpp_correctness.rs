@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_gemm_q8_mpp` and `mt_grouped_gemm_q8_mpp`
 //! — the cooperative-tensor MMA Q8_0 GEMMs (dense + grouped). Oracle: triple

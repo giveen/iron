@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Inline-dequant GEMV — `out[r] = Σ_k dequant(W[r,k]) · x[k]` — for Q8_0 (1
 //! byte/weight) and Q4 (½ byte/weight) weights read straight from their split

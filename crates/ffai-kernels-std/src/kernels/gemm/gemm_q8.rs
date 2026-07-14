@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Q8_0 multi-row GEMM — `out[r, :] = dequant(weight) · input[r, :]` for a
 //! block of `n_rows` rows in one dispatch. The prefill counterpart of

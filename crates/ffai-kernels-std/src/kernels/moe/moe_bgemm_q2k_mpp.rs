@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MPP MoE Q2_K grouped BGEMM — prefill counterpart of
 //! `moe_gather_down_q2k` (the down projection). Multi-token grouped matmul;

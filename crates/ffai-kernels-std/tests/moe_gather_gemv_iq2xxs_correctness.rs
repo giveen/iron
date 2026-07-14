@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `kernels::moe::moe_gather_gemv_iq2xxs` — the fused
 //! 6-expert IQ2_XXS inline-dequant gather GEMV used by the DSv4 decode

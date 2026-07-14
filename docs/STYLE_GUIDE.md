@@ -1,4 +1,4 @@
-# MetalTile Kernel Style Guide
+# FFAI Kernels Kernel Style Guide
 
 The authority on **how to write one kernel** in `ffai-kernels-std` — file shape,
 naming, the `#[kernel(variants(...))]` axis, shared primitives, the CPU oracle,
@@ -70,7 +70,7 @@ test-side and is not a kernel.
 Every kernel file has the same four-section shape, in this order:
 
 ```rust
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! One-line description — what this kernel computes and which upstream it ports.
 //!
@@ -543,7 +543,7 @@ Additional constraints:
 A complete, minimal kernel that multiplies every element of a tensor by a scalar constant. This is the "hello world" for the DSL.
 
 ```rust
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Elementwise scale — multiplies every input element by a scalar `alpha`.
 

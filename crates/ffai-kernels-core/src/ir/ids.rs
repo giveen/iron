@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
+//! SPDX-License-Identifier: Apache-2.0
 //! SSA identifier types: [`ValueId`], [`BlockId`], [`VarId`].
 
 /// Unique identifier for a value in the IR.

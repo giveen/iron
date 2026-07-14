@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Fused **RMSNorm + block-scaled dequantizing GEMV** for decode (single-token),
 //! for the spec-conformant float formats (mxfp4 / nvfp4 / mxfp8 e4m3+e5m2 /

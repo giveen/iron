@@ -105,6 +105,6 @@ jobs:
           REPO: ${{ github.repository }}
         run: python3 scripts/commit_hygiene.py
 
-# The Kernels (macOS `tile build` + `tile bench`) job lives in
+# The Kernels (macOS `ffaik build` + `ffaik bench`) job lives in
 # `.github/workflows/kernels.yml` so it can be path-filtered to skip
 # docs-only PRs without affecting the fast Ubuntu jobs above.

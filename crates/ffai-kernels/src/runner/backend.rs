@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Non-Metal backend dispatch for `__tile_runner` — `--backend cuda|hip|vulkan`.
+//! Non-Metal backend dispatch for `__ffai_runner` — `--backend cuda|hip|vulkan`.
 //!
 //! Routes the same `#[test_kernel]` / `#[bench]` inventories the Metal
 //! harness uses through the device runtimes' generic `run_kernel` /
@@ -27,7 +27,7 @@ fn unavailable_message(backend: &str) -> String {
     match backend {
         "cuda" | "hip" | "vulkan" => format!(
             "runner was built without the `{backend}` feature — rebuild the \
-             __tile_runner binary with `--features {backend}`"
+             __ffai_runner binary with `--features {backend}`"
         ),
         other => format!("unknown backend '{other}' (expected metal, cuda, hip, or vulkan)"),
     }
@@ -82,7 +82,7 @@ mod enabled {
         ir::Kernel,
         protocol::{BenchResult, ProtocolMessage, TestResult},
     };
-    use ffai_kernels_runtime::MetalTileError;
+    use ffai_kernels_runtime::FFAIError;
 
     use super::{emit_backend_error, unavailable_message};
     use crate::{
@@ -181,7 +181,7 @@ mod enabled {
             buffers: &BTreeMap<String, Vec<u8>>,
             grid: [u32; 3],
             block: [u32; 3],
-        ) -> Result<BTreeMap<String, Vec<u8>>, MetalTileError> {
+        ) -> Result<BTreeMap<String, Vec<u8>>, FFAIError> {
             match self {
                 #[cfg(feature = "cuda")]
                 BackendDevice::Cuda(d) => d.run_kernel(kernel, buffers, grid, block),
@@ -202,7 +202,7 @@ mod enabled {
             block: [u32; 3],
             warmup: u32,
             iters: u32,
-        ) -> Result<Vec<f64>, MetalTileError> {
+        ) -> Result<Vec<f64>, FFAIError> {
             match self {
                 #[cfg(feature = "cuda")]
                 BackendDevice::Cuda(d) =>
@@ -223,12 +223,11 @@ mod enabled {
     /// kernels the codegen emits but the arch physically cannot run. Both
     /// become protocol skips — anything else on a kernel we claim to
     /// support stays a hard error.
-    fn is_unsupported(e: &MetalTileError) -> bool {
+    fn is_unsupported(e: &FFAIError) -> bool {
         use ffai_kernels_codegen::error::Error as CodegenError;
         matches!(
             e,
-            MetalTileError::Codegen(CodegenError::UnsupportedOp(_))
-                | MetalTileError::DeviceCapability(_)
+            FFAIError::Codegen(CodegenError::UnsupportedOp(_)) | FFAIError::DeviceCapability(_)
         )
     }
 
@@ -250,7 +249,7 @@ mod enabled {
             .fold(0.0f32, f32::max)
     }
 
-    /// `tile test --backend <name>` — run the `#[test_kernel]` corpus on a
+    /// `ffaik test --backend <name>` — run the `#[test_kernel]` corpus on a
     /// non-Metal device via its generic `run_kernel`, comparing against the
     /// same CPU oracles the Metal harness uses.
     pub(crate) fn run_test(args: &RunnerArgs, backend: &str) -> bool {
@@ -422,9 +421,9 @@ mod enabled {
         failed == 0
     }
 
-    /// `tile bench --backend <name>` — event-timed kernel throughput on a
+    /// `ffaik bench --backend <name>` — event-timed kernel throughput on a
     /// non-Metal device. No reference A/B (the MSL reference kernels are
-    /// Metal-only); correctness stays `tile test`'s job.
+    /// Metal-only); correctness stays `ffaik test`'s job.
     pub(crate) fn run_bench(args: &RunnerArgs, backend: &str) -> bool {
         let warmup = args.warmup.unwrap_or(BENCH_WARMUP) as u32;
         let iters = args.iters.unwrap_or(BENCH_ITERS) as u32;

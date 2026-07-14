@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Batched Q/K/V 4-bit quantized QMM (M>1) — fuses the three independent
 //! Q, K, V projection matmuls of a *prefill* step into one dispatch.
 //!

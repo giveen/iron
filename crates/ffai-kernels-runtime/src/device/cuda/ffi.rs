@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Minimal hand-rolled FFI to the CUDA Driver API (`libcuda`) and NVRTC
 //! (`libnvrtc`) — only the symbols the Phase-1 NVRTC-compile + launch path

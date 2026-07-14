@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! DSv4 partial RoPE — rotates only the tail `n_rot` dims of each
 //! head, leaving the leading `n_nope = head_dim - n_rot` dims

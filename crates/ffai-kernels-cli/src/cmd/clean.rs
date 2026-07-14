@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile clean` — remove build artifacts and cached snapshots.
+//! `ffaik clean` — remove build artifacts and cached snapshots.
 //!
 //! By default only removes generated build outputs (`*.air`, `*.metallib`,
 //! any directory written by `--emit`).  Pass `--snapshots` to also wipe
@@ -19,15 +19,15 @@ pub fn run(args: &CleanArgs) -> Result<(), CliError> {
 
     let mut removed = 0usize;
 
-    // Locate project root (where tile.toml lives, or CWD as fallback).
-    let root = crate::config::ConfigLoader::find_tile_toml()
+    // Locate project root (where ffai.toml lives, or CWD as fallback).
+    let root = crate::config::ConfigLoader::find_ffai_toml()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
 
     // ── Build artifacts ────────────────────────────────────────────────────
 
-    // Remove tile build output directory (air intermediates).
-    removed += remove_dir_if_exists(&root.join("target").join("tile-build-air"));
+    // Remove ffaik build output directory (air intermediates).
+    removed += remove_dir_if_exists(&root.join("target").join("ffaik-build-air"));
 
     // Remove any *.metallib / *.air files emitted into a user `--out` dir
     // (best-effort; we don't know the exact path the user chose, so sweep
@@ -38,7 +38,7 @@ pub fn run(args: &CleanArgs) -> Result<(), CliError> {
     // ── Snapshots ─────────────────────────────────────────────────────────
 
     if args.snapshots || args.all {
-        removed += remove_dir_if_exists(&root.join(".tile-snapshots"));
+        removed += remove_dir_if_exists(&root.join(".ffaik-snapshots"));
     }
 
     // ── Summary ───────────────────────────────────────────────────────────
@@ -46,12 +46,12 @@ pub fn run(args: &CleanArgs) -> Result<(), CliError> {
     if removed == 0 {
         eprintln!(
             "{}  nothing to clean",
-            paint_stderr("tile clean ·", Style::new().fg(Color::Cyan).bold()),
+            paint_stderr("ffaik clean ·", Style::new().fg(Color::Cyan).bold()),
         );
     } else {
         eprintln!(
             "{}  removed {removed} item(s)",
-            paint_stderr("tile clean ·", Style::new().fg(Color::Cyan).bold()),
+            paint_stderr("ffaik clean ·", Style::new().fg(Color::Cyan).bold()),
         );
     }
 

@@ -1,9 +1,9 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Runner infrastructure for the `__tile_runner` subprocess.
+//! Runner infrastructure for the `__ffai_runner` subprocess.
 //!
 //! This module is the GPU-side half of the subprocess architecture.  The
-//! `tile` CLI never imports anything from here — it only reads the
+//! `ffaik` CLI never imports anything from here — it only reads the
 //! JSON Lines produced by the runner binary.
 //!
 //! # Sub-modules

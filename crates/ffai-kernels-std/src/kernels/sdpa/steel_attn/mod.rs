@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 pub mod steel_attention;
 pub mod steel_attention_mma;
@@ -25,7 +25,7 @@ use ffai_kernels::core::{dtype::DType, ir::Kernel};
 /// which has the broadest perf profile).
 ///
 /// Composite numbers via this selector — **median of 5 reruns, clean
-/// shell sessions, M2 mini canonical per `feedback_metaltile_bench_on_m2_mini`**:
+/// shell sessions, M2 mini canonical per `feedback_ffai_kernels_bench_on_m2_mini`**:
 ///
 /// | Machine | dtype | Selected | kv_ld=132 | kv_ld=136 | Δ |
 /// |---------|-------|----------|----------:|----------:|---:|

@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Fused image resize (bilinear) + per-channel normalize + interleaved→NCHW.
 //!
 //! The single GPU op every VL preprocess needs: take an interleaved

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Fused per-expert (gate gemv + up gemv + SwiGLU): `inner[r] =
 //! silu(gate_w[r] · x) * (up_w[r] · x)`. Single dispatch replaces

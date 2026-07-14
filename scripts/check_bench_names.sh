@@ -2,7 +2,7 @@
 # check_bench_names.sh
 # Verify that every #[bench(name = "...")] in the kernel crates uses one of the
 # CI-sharded group prefixes (ffai/ or mlx/).  Kernels that don't will be silently
-# skipped when CI runs `tile bench --match-group ffai` and `--match-group mlx`.
+# skipped when CI runs `ffaik bench --match-group ffai` and `--match-group mlx`.
 #
 # Usage: ./check_bench_names.sh [repo-root]
 
@@ -47,7 +47,7 @@ if [[ ${#bad_lines[@]} -eq 0 ]]; then
 fi
 
 echo "✗ ${bad} #[bench] name(s) will be SKIPPED by CI sharding."
-echo "  CI runs: tile bench --match-group ffai  and  tile bench --match-group mlx"
+echo "  CI runs: ffaik bench --match-group ffai  and  ffaik bench --match-group mlx"
 echo "  Names that don't start with one of: ${KNOWN_GROUPS[*]}"
 echo
 for l in "${bad_lines[@]}"; do
@@ -56,5 +56,5 @@ done
 echo
 echo "Fix: rename the kernel to start with one of the known group prefixes,"
 echo "     or add its group to the KNOWN_GROUPS list in this script and the"
-echo "     CI matrix in .github/workflows/tile.yml."
+echo "     CI matrix in .github/workflows/ffai.yml."
 exit 1

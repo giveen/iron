@@ -1,12 +1,12 @@
 # ffai-kernels-cli
 
-MetalTile CLI — benchmark, test, and inspect GPU kernels.
-The `tile` binary is the primary developer tool for the MetalTile project:
+FFAI Kernels CLI — benchmark, test, and inspect GPU kernels.
+The `ffaik` binary is the primary developer tool for the FFAI Kernels project:
 run performance benchmarks against MLX, compile kernels to inspect generated
-MSL, emit kernel packages via `tile build --emit`, and manage regression baselines.
+MSL, emit kernel packages via `ffaik build --emit`, and manage regression baselines.
 
 This is a binary crate only — it has no library API. All functionality is
-exposed through subcommands of the `tile` binary.
+exposed through subcommands of the `ffaik` binary.
 
 ## Position in the pipeline
 
@@ -14,7 +14,7 @@ exposed through subcommands of the `tile` binary.
 ffai-kernels (facade) ──┐
 ffai-kernels-core       │
 ffai-kernels-codegen    ├──► ffai-kernels-cli (this crate) ──► terminal / JSON / files
-ffai-kernels-runtime    │         tile binary
+ffai-kernels-runtime    │         ffaik binary
 ffai-kernels-std ───────┘
 ```
 
@@ -25,37 +25,37 @@ compile→dispatch→measure loop end-to-end.
 ## Quick start
 
 ```sh
-# Install the tile binary
+# Install the ffaik binary
 cargo install --path crates/ffai-kernels-cli
 
 # Run the full benchmark suite (requires macOS + Metal)
-tile bench
+ffaik bench
 
 # Compile all kernels and report errors
-tile build
+ffaik build
 
 # Emit kernel package (metallib + sources + Swift wrappers)
-tile build --emit all -o /tmp/kernel-pkg
+ffaik build --emit all -o /tmp/kernel-pkg
 
 # Inspect one kernel's IR and generated MSL
-tile inspect --kernel mt_rms_norm
+ffaik inspect --kernel mt_rms_norm
 
 # Show GPU device info
-tile device
+ffaik device
 
 # Save current bench results as a baseline
-tile snap -o baseline.json
+ffaik snap -o baseline.json
 
 # Compare current bench results to a saved baseline
-tile diff baseline.json
+ffaik diff baseline.json
 ```
 
 Subcommand-specific help:
 
 ```sh
-tile bench --help
-tile build --help
-tile inspect --help
+ffaik bench --help
+ffaik build --help
+ffaik inspect --help
 ```
 
 ## Crate contents
@@ -63,7 +63,7 @@ tile inspect --help
 | Module | Purpose |
 |---|---|
 | `cmd` | Subcommand dispatch: `bench`, `build`, `inspect`, `device`, `snap`, `diff` |
-| `cmd::bench` | Full benchmark suite: MetalTile vs MLX reference kernels |
+| `cmd::bench` | Full benchmark suite: FFAI Kernels vs MLX reference kernels |
 | `cmd::build` | Compile all kernels to MSL, report errors, and emit artifacts (`--emit msl,metallib,swift,ir,all`) |
 | `cmd::inspect` | Print IR and/or MSL for a single kernel |
 | `cmd::device` | Show GPU device info and supported Metal features |
@@ -80,18 +80,18 @@ tile inspect --help
 
 | Command | Purpose |
 |---|---|
-| `tile bench` | Run the benchmark suite (latency, GFLOP/s, %-peak, bottleneck). `--filter <op>` to narrow; `--backend metal\|cuda\|hip\|vulkan` to pick a device; an optional metal reference runs side-by-side where a bench defines one. |
-| `tile test` | Run the `#[test_kernel]` GPU correctness suite — each kernel's output vs its CPU oracle within tolerance. `--filter` / `--backend` as above. |
-| `tile build` | Compile all registered kernels and report errors. Use `--emit msl,metallib,swift,ir,all -o <dir>` to write artifacts: `.metal` sources, `kernels.metallib`, `MetalTileKernels.swift` wrappers, and `manifest.json`. |
-| `tile inspect --kernel <name>` | Print the IR (SSA-form) and/or generated MSL for one kernel. Use `--ir` for IR only, `--msl` for MSL only. |
-| `tile device` | Show GPU device info: name, feature set, supported language version, max threadgroup size. |
-| `tile snap -o <file>` | Save current bench results as a JSON regression baseline file. |
-| `tile diff <file>` | Compare current bench results to a saved baseline. Reports regressions. |
-| `tile clean` | Remove build artifacts and cached baselines. |
-| `tile config` | Print the effective merged config (defaults → `tile.toml` → `TILE_*` env → flags). |
-| `tile init` | Scaffold a new MetalTile kernel project. |
-| `tile update` | Self-update the `tile` binary. |
-| `tile completions <shell>` | Generate shell completion scripts (bash / zsh / fish). |
+| `ffaik bench` | Run the benchmark suite (latency, GFLOP/s, %-peak, bottleneck). `--filter <op>` to narrow; `--backend metal\|cuda\|hip\|vulkan` to pick a device; an optional metal reference runs side-by-side where a bench defines one. |
+| `ffaik test` | Run the `#[test_kernel]` GPU correctness suite — each kernel's output vs its CPU oracle within tolerance. `--filter` / `--backend` as above. |
+| `ffaik build` | Compile all registered kernels and report errors. Use `--emit msl,metallib,swift,ir,all -o <dir>` to write artifacts: `.metal` sources, `kernels.metallib`, `FFAIKernels.swift` wrappers, and `manifest.json`. |
+| `ffaik inspect --kernel <name>` | Print the IR (SSA-form) and/or generated MSL for one kernel. Use `--ir` for IR only, `--msl` for MSL only. |
+| `ffaik device` | Show GPU device info: name, feature set, supported language version, max threadgroup size. |
+| `ffaik snap -o <file>` | Save current bench results as a JSON regression baseline file. |
+| `ffaik diff <file>` | Compare current bench results to a saved baseline. Reports regressions. |
+| `ffaik clean` | Remove build artifacts and cached baselines. |
+| `ffaik config` | Print the effective merged config (defaults → `ffai.toml` → `FFAI_*` env → flags). |
+| `ffaik init` | Scaffold a new FFAI Kernels kernel project. |
+| `ffaik update` | Self-update the `ffaik` binary. |
+| `ffaik completions <shell>` | Generate shell completion scripts (bash / zsh / fish). |
 
 ### Installation
 
@@ -99,7 +99,7 @@ tile inspect --help
 cargo install --path crates/ffai-kernels-cli
 ```
 
-The binary is named `tile`. After installation it's available on your `$PATH`.
+The binary is named `ffaik`. After installation it's available on your `$PATH`.
 
 This crate is not published to crates.io (`publish = false`). It's a
 project-internal developer tool, not a library.
@@ -146,7 +146,7 @@ Rust: nightly (workspace-wide, edition 2024).
 - **New benchmark output format:** `src/cmd/bench.rs` — extend the output
   rendering or add a `--format` flag.
 
-- **Tests to update:** Integration tests in `src/cmd/`. Run `tile bench`
+- **Tests to update:** Integration tests in `src/cmd/`. Run `ffaik bench`
   on macOS to verify no regressions.
 
 ## Related documentation

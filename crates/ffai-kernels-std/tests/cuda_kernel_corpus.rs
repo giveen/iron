@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Run the registered `#[test_kernel]` corpus on the CUDA backend.
 //!
@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use ffai_kernels::{CodegenError, CudaDevice, MetalTileError, core::dtype::DType};
+use ffai_kernels::{CodegenError, CudaDevice, FFAIError, core::dtype::DType};
 
 fn read_raw_f32(bytes: &[u8], dt: DType, n: usize) -> Vec<f32> {
     match dt {
@@ -104,12 +104,8 @@ fn known_hard(name: &str) -> bool { KNOWN_HARD.iter().any(|(k, _)| name.contains
 ///
 /// Anything else (NVRTC compile failure, launch error, missing buffer) on a
 /// kernel we claim to support stays a hard ERROR.
-fn is_unsupported(e: &MetalTileError) -> bool {
-    matches!(
-        e,
-        MetalTileError::Codegen(CodegenError::UnsupportedOp(_))
-            | MetalTileError::DeviceCapability(_)
-    )
+fn is_unsupported(e: &FFAIError) -> bool {
+    matches!(e, FFAIError::Codegen(CodegenError::UnsupportedOp(_)) | FFAIError::DeviceCapability(_))
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Ternary select benchmark — #[kernel] DSL vs MLX metal/ternary.metal
 //!
@@ -8,7 +8,7 @@
 //!   Grid: [ceil(N/TPG), 1, 1] × [TPG, 1, 1]
 //!   Algorithm: dst[i] = cond[i] != 0 ? a[i] : b[i]  (one thread per element)
 //!
-//! MetalTile: mt_select — same algorithm via #[kernel] DSL.
+//! FFAI Kernels: mt_select — same algorithm via #[kernel] DSL.
 //!   KernelMode::Elementwise
 
 use ffai_kernels::kernel;

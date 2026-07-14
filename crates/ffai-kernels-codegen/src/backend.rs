@@ -1,13 +1,13 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Backend abstraction seam (CUDA_BACKEND_SPEC §4.1 / SCOPE Phase 0).
 //!
-//! Today MetalTile lowers IR → MSL only. This module introduces the
+//! Today FFAI Kernels lowers IR → MSL only. This module introduces the
 //! *codegen* half of the backend seam so the same IR can target a second
 //! backend (CUDA) without forking the IR, the `#[kernel]` macro, or the
 //! `quant::{codec,format}` layer.
 //!
-//! - [`Target`] selects the backend (`tile build --target {metal,cuda}`).
+//! - [`Target`] selects the backend (`ffaik build --target {metal,cuda}`).
 //! - [`CodegenBackend`] is the per-backend "IR → target-language text"
 //!   trait. `MslGenerator` is the `Metal` impl (see `msl/mod.rs`); the
 //!   CUDA impl lives in `cuda/mod.rs`.
@@ -132,7 +132,7 @@ pub struct TargetProfile {
     /// wave32**; **64 on CDNA wave64**; **variable on Vulkan subgroup**
     /// (queried at runtime via `VK_EXT_subgroup_size_control`). The
     /// reduction/shuffle lowering reads this; 32 is the lucky structural
-    /// match that lets MetalTile's existing kernels port.
+    /// match that lets FFAI Kernels's existing kernels port.
     pub lane_width: u32,
     /// Threadgroup/shared-memory address-space keyword.
     /// Metal: `threadgroup`; CUDA/HIP: `__shared__`; GLSL: `shared`.

@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_moe_gather_bgemm_iq2xxs_mpp` — the
 //! prefill IQ2_XXS grouped BGEMM. Oracle: per-row IQ2_XXS dequant gemv

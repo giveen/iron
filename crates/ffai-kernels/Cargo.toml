@@ -16,13 +16,13 @@ workspace = true
 
 [features]
 # CUDA / NVIDIA device runtime (`CudaDevice` and friends). Forwards to
-# ffai-kernels-runtime/cuda so downstream tile projects only name the facade.
+# ffai-kernels-runtime/cuda so downstream ffaik projects only name the facade.
 cuda = ["ffai-kernels-runtime/cuda"]
 # HIP / ROCm device runtime (`HipDevice` and friends). Forwards to
-# ffai-kernels-runtime/hip so downstream tile projects only name the facade.
+# ffai-kernels-runtime/hip so downstream ffaik projects only name the facade.
 hip = ["ffai-kernels-runtime/hip"]
 # Vulkan device runtime (`VulkanDevice` and friends). Forwards to
-# ffai-kernels-runtime/vulkan so downstream tile projects only name the facade.
+# ffai-kernels-runtime/vulkan so downstream ffaik projects only name the facade.
 vulkan = ["ffai-kernels-runtime/vulkan"]
 
 [dependencies]

@@ -1,12 +1,12 @@
 # ffai-kernels-runtime
 
-GPU runtime dispatch for MetalTile kernels across backends. Compiles generated
+GPU runtime dispatch for FFAI Kernels kernels across backends. Compiles generated
 target source into pipeline state objects / modules, dispatches compute kernels,
 and returns output buffers to the host. **Metal (Apple) is the default**;
 `device/{cuda,hip,vulkan}/` add NVIDIA / AMD / portable devices behind the
 `cuda` / `hip` / `vulkan` Cargo features.
 
-This crate is the bottom of the MetalTile stack. It owns the device abstraction
+This crate is the bottom of the FFAI Kernels stack. It owns the device abstraction
 (`device/` — `metal_device.rs` plus the feature-gated cuda/hip/vulkan devices),
 the dispatch strategies (`dispatch/` — single, chained, buffer-plan, validate),
 and the compilation / PSO caches (`cache/`). Kernel execution flows through its
@@ -59,7 +59,7 @@ Most users don't call `ffai-kernels-runtime` directly — they use the facade's
 | `autotune` | Persistent autotuner: `TuneConfig`, `ShapeBucket`, `TuneCache`, on-disk cache at `~/.cache/ffai-kernels/` |
 | `buffer` | Typed buffer descriptors: `GpuBuffer` (GPU-side metadata) and `HostData` (host-side data ready for upload) |
 | `capture` | GPU trace capture via `MTLCaptureManager` — `start_gpu_trace`, `stop_gpu_trace` |
-| `error` | `MetalTileError` enum covering all runtime failure modes |
+| `error` | `FFAIError` enum covering all runtime failure modes |
 
 ## API reference
 
@@ -87,7 +87,7 @@ Context::new() → MslGenerator::generate(kernel) → Metal library compile
 | `DispatchResult` | Timings (`elapsed_us`, `gflops`) and output buffer contents (`outputs: BTreeMap<String, Vec<u8>>`). |
 | `DispatchSpec` | Configuration for a dispatch: buffer bindings, grid size, threadgroup size. |
 | `ResidentBuffer` | Handle for a GPU-side persistent buffer that lives across dispatches. |
-| `MetalTileError` | All error variants: `Metal`, `NoDevice`, `Compilation`, `Buffer`, `Dispatch`, `Autotune`, `Core`, `Codegen`, `UnsupportedPlatform`. |
+| `FFAIError` | All error variants: `Metal`, `NoDevice`, `Compilation`, `Buffer`, `Dispatch`, `Autotune`, `Core`, `Codegen`, `UnsupportedPlatform`. |
 | `GridSpec` | Dispatch grid sizing: `Elementwise`, `Reduction`, `Grid3D`. |
 | `GpuBuffer` | Buffer metadata: dtype, shape, element count, byte size. |
 | `HostData` | Host-side data with dtype and shape, ready for GPU upload. |
@@ -148,7 +148,7 @@ The autotuner searches for the best kernel schedule configuration for each
 | `objc2-metal` | Metal framework bindings: `MTLDevice`, `MTLCommandQueue`, `MTLLibrary`, `MTLComputePipelineState`, `MTLBuffer`, `MTLCaptureManager`, etc. |
 | `objc2-foundation` | Foundation types (`NSString`) for Metal API calls |
 | `serde` / `serde_json` | Serialize/deserialize autotune cache to disk |
-| `thiserror` | Derive `Error` for `MetalTileError` |
+| `thiserror` | Derive `Error` for `FFAIError` |
 | `rustc-hash` | `FxHashMap` for dispatch-cache and autotune internals |
 | `tracing` | Diagnostics and dispatch-level instrumentation |
 
@@ -170,7 +170,7 @@ Rust: nightly (workspace-wide, for edition 2024).
   (e.g., indirect dispatch, tile dispatch).
 - **New buffer type:** `src/buffer.rs` — add a descriptor struct for the
   new allocation pattern.
-- **New error variant:** `src/error.rs` — add to `MetalTileError` enum.
+- **New error variant:** `src/error.rs` — add to `FFAIError` enum.
 - **New GPU trace capture mode:** `src/capture.rs` — extend `start_gpu_trace`
   with additional capture options.
 - **Tests to update:** Integration tests require macOS + Metal. Run

@@ -1,12 +1,12 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile diff` — Compare bench results against a saved baseline.
+//! `ffaik diff` — Compare bench results against a saved baseline.
 //!
 //! Usage:
-//!   tile diff .tile-snapshots/m4max.json                          # run bench then diff
-//!   tile diff .tile-snapshots/m4max.json run.json                 # diff two files
-//!   tile diff .tile-snapshots/m4max.json -f softmax
-//!   tile diff .tile-snapshots/m4max.json --threshold 3
+//!   ffaik diff .ffaik-snapshots/m4max.json                          # run bench then diff
+//!   ffaik diff .ffaik-snapshots/m4max.json run.json                 # diff two files
+//!   ffaik diff .ffaik-snapshots/m4max.json -f softmax
+//!   ffaik diff .ffaik-snapshots/m4max.json --threshold 3
 
 use std::{collections::HashMap, process::Command};
 
@@ -40,17 +40,17 @@ pub fn run(args: &DiffArgs) -> Result<(), CliError> {
             paint_stderr("Running bench suite for current...", Style::new().fg(Color::Cyan).bold()),
         );
         let temp_file =
-            std::env::temp_dir().join(format!(".tile-diff-tmp-{}.json", std::process::id()));
+            std::env::temp_dir().join(format!(".ffaik-diff-tmp-{}.json", std::process::id()));
         let mut child = Command::new(std::env::current_exe().map_err(CliError::Io)?)
             .arg("bench")
             .arg("--json")
             .arg(temp_file.to_str().ok_or_else(|| CliError::Other("non-UTF8 temp path".into()))?)
             .spawn()
-            .map_err(|e| CliError::Subprocess(format!("failed to spawn tile bench: {e}")))?;
+            .map_err(|e| CliError::Subprocess(format!("failed to spawn ffaik bench: {e}")))?;
 
         let status = child
             .wait()
-            .map_err(|e| CliError::Subprocess(format!("tile bench did not start: {e}")))?;
+            .map_err(|e| CliError::Subprocess(format!("ffaik bench did not start: {e}")))?;
         if !status.success() {
             eprintln!(
                 "{} {}",
@@ -81,7 +81,7 @@ pub fn run(args: &DiffArgs) -> Result<(), CliError> {
         sort: &args.sort,
         only_regressions: args.only_regressions,
         only_improvements: args.only_improvements,
-        heading: Some("tile diff"),
+        heading: Some("ffaik diff"),
     };
     let outcome = render(&baseline, &current, &opts);
 
@@ -121,7 +121,7 @@ impl Default for RenderOpts<'_> {
             sort: "name",
             only_regressions: false,
             only_improvements: false,
-            heading: Some("tile diff"),
+            heading: Some("ffaik diff"),
         }
     }
 }
@@ -129,7 +129,7 @@ impl Default for RenderOpts<'_> {
 /// Summary counts returned from [`render`]. `total_rows` is the number
 /// of (op, shape) keys printed after filtering — callers can use it to
 /// decide whether to print a "no matching results" message vs. trust
-/// the table to speak for itself. `regressions` drives the `tile diff`
+/// the table to speak for itself. `regressions` drives the `ffaik diff`
 /// exit code.
 pub struct RenderOutcome {
     pub regressions: usize,
@@ -137,7 +137,7 @@ pub struct RenderOutcome {
 }
 
 /// Compute, sort, and print the diff between two result sets. Pure
-/// w.r.t. the filesystem — callers (both `tile diff` and `tile bench`)
+/// w.r.t. the filesystem — callers (both `ffaik diff` and `ffaik bench`)
 /// load JSON however they like and hand the parsed arrays in here.
 pub fn render(baseline: &[Value], current: &[Value], opts: &RenderOpts) -> RenderOutcome {
     let baseline_map = build_result_map(baseline);

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! ZERO-COPY MoE Q2_K grouped BGEMM — reads raw 84-byte Q2_K blocks straight
 //! from a no-copy mmap VIEW buffer (the down-projection counterpart of

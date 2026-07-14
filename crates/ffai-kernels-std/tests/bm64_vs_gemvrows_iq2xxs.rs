@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Direct comparison: mt_moe_bgemm_iq2xxs_bm64 vs mt_moe_gemv_rows_iq2xxs
 //! on IDENTICAL pool/x/indices. Both claim to compute gateP[row,m] =

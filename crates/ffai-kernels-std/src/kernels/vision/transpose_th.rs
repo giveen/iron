@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Token-major ↔ head-major transpose for vision / audio attention.
 //!
 //! A vision (or audio) tower's attention stage-1 — per-head RMSNorm plus

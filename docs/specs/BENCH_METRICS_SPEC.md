@@ -9,7 +9,7 @@ is tracked separately.
 
 ## 1. Motivation
 
-`tile bench` today reports **GB/s** (each kernel's `bytes_moved ÷ time`) as its headline metric. That is a *bandwidth-efficiency* number, and it is **not sufficient to optimize kernels or to compare precisions**:
+`ffaik bench` today reports **GB/s** (each kernel's `bytes_moved ÷ time`) as its headline metric. That is a *bandwidth-efficiency* number, and it is **not sufficient to optimize kernels or to compare precisions**:
 
 - **No wall-clock latency.** GB/s is bytes÷time; two kernels doing the *same* logical work but moving *different* bytes (e.g. int4 vs int8 vs f16 weights) have non-comparable GB/s. You cannot read "which precision is fastest" off the table.
 - **No compute throughput.** There is no GFLOP/s, so compute-bound kernels (matmul, attention, conv) can't be judged against the hardware's compute ceiling.
@@ -43,7 +43,7 @@ GB/s alone can't tell you the int4 path is *fastest* (¼ the bytes), nor that th
 - **`OpResult`** (`crates/ffai-kernels-std/src/bench_types.rs`) carries `ref_perf`/`mt_perf` (GB/s), `equiv`, and optional `mt_timing`/`ref_timing` (`BenchStats`).
 - **`run_kernel_bench`** (`crates/ffai-kernels-std/src/run_kernel.rs`) computes `gbps` from `bench_gbps(...)` and **discards the `BenchStats`** (`let (gbps, _stats) = ...`). `bytes_moved` comes from `BenchSetup::compute_bytes_moved()` (sum of buffer sizes unless overridden via `.bytes_moved()`).
 - **`-vv` profile** (`compute_profiles` in `crates/ffai-kernels-cli/src/cmd/bench.rs`) already shows `occ%`, `regs`, and a coarse `bottleneck` label (e.g. "register-limited"), plus `p95/p99/cv%`.
-- **JSON** (`tile bench --json`) emits only `{op, shape, metric, ref, mt}` — consumed by baseline diffing; must stay backward-compatible.
+- **JSON** (`ffaik bench --json`) emits only `{op, shape, metric, ref, mt}` — consumed by baseline diffing; must stay backward-compatible.
 
 ## 4. Proposed additions
 

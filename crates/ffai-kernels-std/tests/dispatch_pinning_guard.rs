@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! End-to-end check that the runtime dispatch verifier rejects a GPU-pinning
 //! threadgroup geometry *before* it reaches the (non-preemptive) GPU.

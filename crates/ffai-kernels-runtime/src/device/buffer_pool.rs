@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Thread-local Metal buffer pool.
@@ -26,7 +26,7 @@ use objc2_metal::{MTLDevice, MTLResourceOptions};
 #[cfg(target_os = "macos")]
 use rustc_hash::FxHashMap;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 // ---------------------------------------------------------------------------
 // Platform types
@@ -81,7 +81,7 @@ impl BufferPool {
         dev: &ProtocolObject<dyn MTLDevice>,
         len: usize,
         opts: MTLResourceOptions,
-    ) -> Result<BufRc, MetalTileError> {
+    ) -> Result<BufRc, FFAIError> {
         use objc2_metal::MTLDevice as _;
 
         let bucket = len.max(4).next_power_of_two();
@@ -102,7 +102,7 @@ impl BufferPool {
             }
 
             let new = std::rc::Rc::new(
-                dev.newBufferWithLength_options(bucket, opts).ok_or(MetalTileError::NoDevice)?,
+                dev.newBufferWithLength_options(bucket, opts).ok_or(FFAIError::NoDevice)?,
             );
             slot.push(new.clone());
             Ok(new)

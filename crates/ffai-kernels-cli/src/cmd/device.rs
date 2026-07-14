@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile device` — Show GPU device info and supported feature flags.
+//! `ffaik device` — Show GPU device info and supported feature flags.
 
 use ffai_kernels::runner::{GpuFamily, GpuRunner};
 
@@ -57,7 +57,7 @@ pub fn run(args: &DeviceArgs, harness: &crate::harness::Harness) -> Result<(), c
 
     let label_style = Style::new().fg(Color::BrightBlack).bold();
 
-    eprintln!("{}", paint_stdout("tile device", Style::new().fg(Color::Cyan).bold()),);
+    eprintln!("{}", paint_stdout("ffaik device", Style::new().fg(Color::Cyan).bold()),);
     eprintln!();
     eprintln!(
         "  {}  {}",

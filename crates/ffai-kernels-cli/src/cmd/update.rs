@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile update` — self-update the tile binary.
+//! `ffaik update` — self-update the ffaik binary.
 //!
 //! Default (no flags): fetches the latest GitHub Release for the
 //! `thewafflehaus/ffai-kernels` repository, downloads the pre-built binary, and
@@ -22,7 +22,7 @@ use crate::{
 
 const REPO_SLUG: &str = "thewafflehaus/ffai-kernels";
 const REPO_URL: &str = "https://github.com/thewafflehaus/ffai-kernels.git";
-const ASSET_NAME: &str = "tile-aarch64-apple-darwin.tar.gz";
+const ASSET_NAME: &str = "ffaik-aarch64-apple-darwin.tar.gz";
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ fn install_path() -> Result<PathBuf, crate::CliError> {
 // ── Release update (default) ─────────────────────────────────────────────────
 
 fn update_from_release(check_only: bool) -> Result<(), crate::CliError> {
-    header("tile update");
+    header("ffaik update");
 
     let tag = fetch_latest_release_tag()?;
     let current = env!("CARGO_PKG_VERSION");
@@ -113,7 +113,7 @@ fn update_from_release(check_only: bool) -> Result<(), crate::CliError> {
 
     eprintln!();
     eprintln!(
-        "{}  tile {} installed.",
+        "{}  ffaik {} installed.",
         paint_stderr("ok", Style::new().fg(Color::Green).bold()),
         tag,
     );
@@ -149,7 +149,7 @@ fn curl_latest_tag() -> Result<String, crate::CliError> {
             "--header",
             "Accept: application/vnd.github+json",
             "--header",
-            "User-Agent: tile-update/1",
+            "User-Agent: ffaik-update/1",
             &url,
         ])
         .output()
@@ -189,8 +189,8 @@ fn curl_latest_tag() -> Result<String, crate::CliError> {
 fn download_release_binary(tag: &str, dest: &PathBuf) -> Result<(), crate::CliError> {
     let asset_url = format!("https://github.com/{REPO_SLUG}/releases/download/{tag}/{ASSET_NAME}");
 
-    let tar_path = std::env::temp_dir().join("tile-update.tar.gz");
-    let extract_dir = std::env::temp_dir().join("tile-update-extract");
+    let tar_path = std::env::temp_dir().join("ffaik-update.tar.gz");
+    let extract_dir = std::env::temp_dir().join("ffaik-update-extract");
 
     // Download.
     let status = Command::new("curl")
@@ -224,7 +224,7 @@ fn download_release_binary(tag: &str, dest: &PathBuf) -> Result<(), crate::CliEr
         return Err(crate::CliError::Other("Failed to extract release archive.".into()));
     }
 
-    install_binary(&extract_dir.join("tile"), dest)?;
+    install_binary(&extract_dir.join("ffaik"), dest)?;
 
     let _ = fs::remove_dir_all(&extract_dir);
     let _ = fs::remove_file(&tar_path);
@@ -234,7 +234,7 @@ fn download_release_binary(tag: &str, dest: &PathBuf) -> Result<(), crate::CliEr
 // ── Source build (--pr / --commit) ───────────────────────────────────────────
 
 fn update_from_source(src: SourceRef, check_only: bool) -> Result<(), crate::CliError> {
-    header("tile update");
+    header("ffaik update");
 
     eprintln!(
         "  {}  {}",
@@ -253,7 +253,7 @@ fn update_from_source(src: SourceRef, check_only: bool) -> Result<(), crate::Cli
     }
 
     let dest = install_path()?;
-    let tmp_dir = std::env::temp_dir().join("tile-update-src");
+    let tmp_dir = std::env::temp_dir().join("ffaik-update-src");
 
     // Remove any stale clone.
     let _ = fs::remove_dir_all(&tmp_dir);
@@ -307,14 +307,14 @@ fn update_from_source(src: SourceRef, check_only: bool) -> Result<(), crate::Cli
 
     // Install.
     eprint!("  installing to {}... ", dest.display());
-    install_binary(&tmp_dir.join("target/release/tile"), &dest)?;
+    install_binary(&tmp_dir.join("target/release/ffaik"), &dest)?;
     eprintln!("done");
 
     let _ = fs::remove_dir_all(&tmp_dir);
 
     eprintln!();
     eprintln!(
-        "{}  tile installed from {}.",
+        "{}  ffaik installed from {}.",
         paint_stderr("ok", Style::new().fg(Color::Green).bold()),
         src.display(),
     );
@@ -345,7 +345,7 @@ fn install_binary(src: &PathBuf, dest: &PathBuf) -> Result<(), crate::CliError> 
         let _ = fs::remove_file(&tmp);
         if e.kind() == std::io::ErrorKind::PermissionDenied {
             crate::CliError::Other(format!(
-                "permission denied writing to {}.\n  Try: sudo tile update",
+                "permission denied writing to {}.\n  Try: sudo ffaik update",
                 dest.display(),
             ))
         } else {

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Dense Q8_0 GEMM via cooperative-tensor MMA — the MMA replacement for the
 //! SCALAR `mt_gemm_q8` (which does `acc += w*x` on the ALUs, ~12× slower

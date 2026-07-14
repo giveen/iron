@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile test` — run `#[test_kernel]` correctness setups against a CPU oracle.
+//! `ffaik test` — run `#[test_kernel]` correctness setups against a CPU oracle.
 //!
 //! ## Output format (forge-style)
 //!
@@ -14,7 +14,7 @@
 //! Ran 2 test suites in 57.46ms: 3 tests passed, 1 failed (4 total tests)
 //! ```
 //!
-//! This command spawns `__tile_runner test` as a subprocess and streams
+//! This command spawns `__ffai_runner test` as a subprocess and streams
 //! `ProtocolMessage` JSON lines. All inventory lookup happens in the runner
 //! process where `ffai-kernels-std` is linked.
 
@@ -28,10 +28,10 @@ use crate::{
     term::{Color, Style, paint_stderr, paint_stdout},
 };
 
-/// `TileCommand` wrapper for `tile test`.
+/// `FFAICommand` wrapper for `ffaik test`.
 pub struct TestCommand<'a>(pub &'a TestArgs);
 
-impl<'a> super::TileCommand for TestCommand<'a> {
+impl<'a> super::FFAICommand for TestCommand<'a> {
     fn run(&self, harness: &crate::harness::Harness) -> Result<(), crate::CliError> {
         run(self.0, harness)
     }
@@ -71,7 +71,7 @@ pub fn run(args: &TestArgs, harness: &crate::harness::Harness) -> Result<(), cra
         ProtocolMessage::Start { total, .. } => {
             println!(
                 "{} {}",
-                paint_stdout("tile test", Style::new().fg(Color::Cyan).bold()),
+                paint_stdout("ffaik test", Style::new().fg(Color::Cyan).bold()),
                 paint_stdout(format!("({total} items)"), Style::new().fg(Color::BrightBlack)),
             );
         },
@@ -85,7 +85,7 @@ pub fn run(args: &TestArgs, harness: &crate::harness::Harness) -> Result<(), cra
     });
 
     if !runner_ok && results.is_empty() && error_msgs.is_empty() {
-        return Err(crate::CliError::Other("__tile_runner failed".into()));
+        return Err(crate::CliError::Other("__ffai_runner failed".into()));
     }
 
     if results.is_empty() && error_msgs.is_empty() {

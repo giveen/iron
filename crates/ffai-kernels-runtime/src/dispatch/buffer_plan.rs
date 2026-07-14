@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Buffer planning for Metal bindings.
@@ -16,7 +16,7 @@ use ffai_kernels_core::{
 };
 use smallvec::SmallVec;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 /// Inline capacity for shape/stride vectors. Covers tensor rank up to 6,
 /// which fits every kernel currently in `ffai-kernels-std` (the tallest is
@@ -42,15 +42,13 @@ pub(crate) fn binding_slots(param: &Param) -> usize {
 
 /// Compute the byte length of a parameter from its static shape, or
 /// `None` when any dimension is unknown.
-fn static_buffer_len(param: &Param) -> Result<Option<usize>, MetalTileError> {
+fn static_buffer_len(param: &Param) -> Result<Option<usize>, FFAIError> {
     let Some(num_elements) = param.shape.num_elements() else {
         return Ok(None);
     };
     num_elements
         .checked_mul(param.dtype.size_bytes())
-        .ok_or_else(|| {
-            MetalTileError::Buffer(format!("buffer '{}' size overflows usize", param.name))
-        })
+        .ok_or_else(|| FFAIError::Buffer(format!("buffer '{}' size overflows usize", param.name)))
         .map(Some)
 }
 
@@ -62,13 +60,13 @@ fn static_buffer_len(param: &Param) -> Result<Option<usize>, MetalTileError> {
 pub(crate) fn planned_data_len(
     param: &Param,
     buffers: &BTreeMap<String, Vec<u8>>,
-) -> Result<usize, MetalTileError> {
+) -> Result<usize, FFAIError> {
     let provided_len = buffers.get(&param.name).map_or(0, Vec::len);
     let static_len = static_buffer_len(param)?;
 
     if let Some(expected_len) = static_len {
         if provided_len > 0 && provided_len < expected_len {
-            return Err(MetalTileError::Buffer(format!(
+            return Err(FFAIError::Buffer(format!(
                 "buffer '{}' has {} bytes, expected at least {}",
                 param.name, provided_len, expected_len
             )));
@@ -85,7 +83,7 @@ pub(crate) fn planned_data_len(
 pub(crate) fn build_param_buffer_plans(
     kernel: &Kernel,
     buffers: &BTreeMap<String, Vec<u8>>,
-) -> Result<Vec<ParamBufferPlan>, MetalTileError> {
+) -> Result<Vec<ParamBufferPlan>, FFAIError> {
     let mut next_binding_index = 0usize;
     let mut plans = Vec::with_capacity(kernel.params.len());
     for param in &kernel.params {
@@ -119,14 +117,14 @@ pub(crate) fn encode_u32s(values: &[u32]) -> Vec<u8> {
 /// Extract the known dimensions of a parameter's shape, or `None` if
 /// any dimension is dynamic. Storage is stack-resident up to rank
 /// [`INLINE_RANK`].
-fn known_shape_dims(param: &Param) -> Result<Option<DimVec>, MetalTileError> {
+fn known_shape_dims(param: &Param) -> Result<Option<DimVec>, FFAIError> {
     let mut dims: DimVec = SmallVec::with_capacity(param.shape.rank());
     for dim in param.shape.iter() {
         let Dim::Known(value) = dim else {
             return Ok(None);
         };
         dims.push(u32::try_from(*value).map_err(|_| {
-            MetalTileError::Buffer(format!(
+            FFAIError::Buffer(format!(
                 "shape dimension for '{}' exceeds u32: {}",
                 param.name, value
             ))
@@ -137,13 +135,13 @@ fn known_shape_dims(param: &Param) -> Result<Option<DimVec>, MetalTileError> {
 
 /// Compute row‑major strides for the given dimensions. Stack-resident
 /// up to rank [`INLINE_RANK`].
-fn row_major_strides(name: &str, dims: &[u32]) -> Result<DimVec, MetalTileError> {
+fn row_major_strides(name: &str, dims: &[u32]) -> Result<DimVec, FFAIError> {
     let mut strides: DimVec = SmallVec::from_elem(1u32, dims.len());
     let mut stride = 1u32;
     for (idx, &dim) in dims.iter().enumerate().rev() {
         strides[idx] = stride;
         stride = stride.checked_mul(dim).ok_or_else(|| {
-            MetalTileError::Buffer(format!("row-major strides for '{}' overflowed u32", name))
+            FFAIError::Buffer(format!("row-major strides for '{}' overflowed u32", name))
         })?;
     }
     Ok(strides)
@@ -158,12 +156,12 @@ fn row_major_strides(name: &str, dims: &[u32]) -> Result<DimVec, MetalTileError>
 pub(crate) fn resolve_strided_metadata<'a>(
     param: &Param,
     buffers: &'a BTreeMap<String, Vec<u8>>,
-) -> Result<StridedMetadata<'a>, MetalTileError> {
+) -> Result<StridedMetadata<'a>, FFAIError> {
     let expected_len = param.shape.rank() * std::mem::size_of::<u32>();
     let defaults = known_shape_dims(param)?
         .map(|dims| {
             let strides = row_major_strides(&param.name, &dims)?;
-            Ok::<(Vec<u8>, Vec<u8>), MetalTileError>((encode_u32s(&dims), encode_u32s(&strides)))
+            Ok::<(Vec<u8>, Vec<u8>), FFAIError>((encode_u32s(&dims), encode_u32s(&strides)))
         })
         .transpose()?;
 
@@ -179,7 +177,7 @@ pub(crate) fn resolve_strided_metadata<'a>(
     let shape_data = match buffers.get(&key) {
         Some(bytes) => {
             if expected_len > 0 && bytes.len() < expected_len {
-                return Err(MetalTileError::Buffer(format!(
+                return Err(FFAIError::Buffer(format!(
                     "buffer '{}' has {} bytes, expected at least {}",
                     key,
                     bytes.len(),
@@ -190,7 +188,7 @@ pub(crate) fn resolve_strided_metadata<'a>(
         },
         None => {
             let Some((shape_bytes, _)) = defaults.as_ref() else {
-                return Err(MetalTileError::Buffer(format!(
+                return Err(FFAIError::Buffer(format!(
                     "missing required strided metadata buffer '{}'",
                     key
                 )));
@@ -205,7 +203,7 @@ pub(crate) fn resolve_strided_metadata<'a>(
     let strides_data = match buffers.get(&key) {
         Some(bytes) => {
             if expected_len > 0 && bytes.len() < expected_len {
-                return Err(MetalTileError::Buffer(format!(
+                return Err(FFAIError::Buffer(format!(
                     "buffer '{}' has {} bytes, expected at least {}",
                     key,
                     bytes.len(),
@@ -216,7 +214,7 @@ pub(crate) fn resolve_strided_metadata<'a>(
         },
         None => {
             let Some((_, strides_bytes)) = defaults.as_ref() else {
-                return Err(MetalTileError::Buffer(format!(
+                return Err(FFAIError::Buffer(format!(
                     "missing required strided metadata buffer '{}'",
                     key
                 )));

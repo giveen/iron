@@ -1,14 +1,14 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `Harness` — owns the `TileConfig` and global CLI flags; passed to every
+//! `Harness` — owns the `FFAIConfig` and global CLI flags; passed to every
 //! subcommand handler so they share a single consistent view of configuration.
 
-use crate::{GlobalArgs, config::TileConfig};
+use crate::{GlobalArgs, config::FFAIConfig};
 
-/// Top-level harness for the `tile` CLI.  Constructed once in `main` and
+/// Top-level harness for the `ffaik` CLI.  Constructed once in `main` and
 /// passed down to each subcommand handler.
 pub struct Harness {
-    pub config: TileConfig,
+    pub config: FFAIConfig,
     /// Global flags parsed from the CLI (`--quiet`, `--json`, `--color`, `-j`, `-v`).
     pub global: GlobalArgs,
 }
@@ -22,13 +22,13 @@ impl Harness {
     pub fn new(global: GlobalArgs) -> Self {
         let profile = global.profile.as_deref();
         let config = crate::config::ConfigLoader::load_with_profile(profile).unwrap_or_else(|e| {
-            tracing::warn!("tile.toml config error: {e}; using defaults");
-            TileConfig::default()
+            tracing::warn!("ffai.toml config error: {e}; using defaults");
+            FFAIConfig::default()
         });
         Self { config, global }
     }
 
-    /// Path to the `__tile_runner` binary (sub-table overrides flat field).
+    /// Path to the `__ffai_runner` binary (sub-table overrides flat field).
     pub fn runner_binary(&self) -> &str { self.config.effective_runner_binary() }
 
     /// True when `--quiet` / `-q` is set.
@@ -37,7 +37,7 @@ impl Harness {
     /// True when the global `--json` flag is set.
     pub fn json_output(&self) -> bool { self.global.json }
 
-    /// Effective verbosity level: global `-v` count wins over `tile.toml verbose`.
+    /// Effective verbosity level: global `-v` count wins over `ffai.toml verbose`.
     pub fn verbosity(&self) -> u8 {
         if self.global.verbose > 0 { self.global.verbose } else { self.config.verbose }
     }
@@ -45,7 +45,7 @@ impl Harness {
     /// Print config-load warnings to stderr (called at end of each command).
     pub fn print_warnings(&self) {
         for w in &self.config.warnings {
-            eprintln!("tile: warning: {w}");
+            eprintln!("ffaik: warning: {w}");
         }
     }
 }

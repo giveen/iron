@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_moe_bgemm_iq2xxs_view` — the ZERO-COPY
 //! prefill IQ2_XXS grouped BGEMM that reads raw 66-byte IQ2_XXS blocks

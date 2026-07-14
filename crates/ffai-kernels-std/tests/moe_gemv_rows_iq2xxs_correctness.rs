@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `ffai::mt_moe_gemv_rows_iq2xxs` — the fast
 //! gemv-over-rows prefill MoE kernel (replaces the slow coop-tile bgemm).

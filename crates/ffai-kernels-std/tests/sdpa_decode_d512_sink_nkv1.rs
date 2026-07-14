@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Isolated check: mt_sdpa_decode_d512_sink with n_kv=1 (single visible
 //! KV — the first decode token), many q heads (MQA), per-head sink. The

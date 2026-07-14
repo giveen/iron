@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
 //! Metal device adapter.
@@ -23,7 +23,7 @@ use objc2_metal::{
 use crate::{
     cache::{msl_cache::MslCache, pso_cache::PsoCache},
     device::buffer_pool::{BufRc, BufferPool},
-    error::MetalTileError,
+    error::FFAIError,
 };
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ pub(crate) type Queue = ProtocolObject<dyn MTLCommandQueue>;
 ///
 /// Creating a `MetalDevice` probes the default system device.  If no
 /// Metal‑capable GPU is found, [`MetalDevice::create`] returns
-/// `Err(MetalTileError::NoDevice)`.
+/// `Err(FFAIError::NoDevice)`.
 ///
 /// `MetalDevice` is **not** `Send` because the `objc2` types it holds
 /// are `!Send`.  Share it within one thread or wrap in an `Arc<Mutex<…>>`
@@ -73,10 +73,10 @@ impl MetalDevice {
     /// Returns `Ok(None)` on non‑macOS platforms (no Metal available).
     /// Returns `Err(…)` on macOS when no GPU is found.
     #[cfg(target_os = "macos")]
-    pub fn create() -> Result<Option<Self>, MetalTileError> {
-        let device = MTLCreateSystemDefaultDevice().ok_or(MetalTileError::DeviceCreation)?;
+    pub fn create() -> Result<Option<Self>, FFAIError> {
+        let device = MTLCreateSystemDefaultDevice().ok_or(FFAIError::DeviceCreation)?;
 
-        let queue = device.newCommandQueue().ok_or(MetalTileError::QueueCreation)?;
+        let queue = device.newCommandQueue().ok_or(FFAIError::QueueCreation)?;
 
         tracing::debug!("metal device created");
 
@@ -91,7 +91,7 @@ impl MetalDevice {
 
     /// Stub for non‑macOS platforms.
     #[cfg(not(target_os = "macos"))]
-    pub fn create() -> Result<Option<Self>, MetalTileError> { Ok(None) }
+    pub fn create() -> Result<Option<Self>, FFAIError> { Ok(None) }
 
     // ── accessors ──────────────────────────────────────────────────
 
@@ -106,8 +106,8 @@ impl MetalDevice {
     /// Convenience: get a command buffer from the queue.
     pub fn command_buffer(
         &self,
-    ) -> Result<Retained<ProtocolObject<dyn objc2_metal::MTLCommandBuffer>>, MetalTileError> {
-        self.queue.commandBuffer().ok_or(MetalTileError::NoDevice)
+    ) -> Result<Retained<ProtocolObject<dyn objc2_metal::MTLCommandBuffer>>, FFAIError> {
+        self.queue.commandBuffer().ok_or(FFAIError::NoDevice)
     }
 
     // ── pipeline compilation ───────────────────────────────────────
@@ -125,7 +125,7 @@ impl MetalDevice {
         kernel: &ffai_kernels_core::ir::Kernel,
         kernel_name: &str,
         fn_consts: &std::collections::BTreeMap<String, u32>,
-    ) -> Result<Pso, MetalTileError> {
+    ) -> Result<Pso, FFAIError> {
         self.pso_cache.get_or_compile(
             &self.device,
             key,
@@ -146,18 +146,14 @@ impl MetalDevice {
         &self,
         kernel: &ffai_kernels_core::ir::Kernel,
         key: u64,
-    ) -> Result<String, MetalTileError> {
+    ) -> Result<String, FFAIError> {
         self.msl_cache.get_or_generate(kernel, key)
     }
 
     // ── buffer pool ────────────────────────────────────────────────
 
     /// Acquire a buffer from the pool (shared storage, with copy).
-    pub fn acquire_shared(
-        &self,
-        bytes: Option<&[u8]>,
-        len: usize,
-    ) -> Result<BufRc, MetalTileError> {
+    pub fn acquire_shared(&self, bytes: Option<&[u8]>, len: usize) -> Result<BufRc, FFAIError> {
         use objc2_metal::MTLBuffer as _;
 
         let opts =
@@ -166,7 +162,7 @@ impl MetalDevice {
 
         if let Some(data) = bytes.filter(|b| !b.is_empty()) {
             if data.len() < len {
-                return Err(MetalTileError::Buffer(format!(
+                return Err(FFAIError::Buffer(format!(
                     "buffer expected {len} bytes, got {}",
                     data.len()
                 )));
@@ -188,7 +184,7 @@ impl MetalDevice {
     /// Private‑storage buffers are **not** host‑readable.  Use this
     /// only for intermediate results that stay on the GPU across
     /// chained passes.
-    pub fn acquire_private(&self, len: usize) -> Result<BufRc, MetalTileError> {
+    pub fn acquire_private(&self, len: usize) -> Result<BufRc, FFAIError> {
         let opts = MTLResourceOptions::StorageModePrivate
             | MTLResourceOptions::HazardTrackingModeUntracked;
         self.buffer_pool.acquire(&self.device, len, opts)

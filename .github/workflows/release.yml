@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: Build tile binary
+    name: Build ffaik binary
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -36,8 +36,8 @@ jobs:
 
       - name: Package binary
         run: |
-          cp target/release/tile tile
-          tar czf tile-aarch64-apple-darwin.tar.gz tile
+          cp target/release/ffaik ffaik
+          tar czf ffaik-aarch64-apple-darwin.tar.gz ffaik
           cp scripts/install.sh install.sh
 
       - name: Create GitHub Release
@@ -51,9 +51,9 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --generate-notes \
-            tile-aarch64-apple-darwin.tar.gz \
+            ffaik-aarch64-apple-darwin.tar.gz \
             install.sh \
             || gh release upload "$TAG" \
-                 tile-aarch64-apple-darwin.tar.gz \
+                 ffaik-aarch64-apple-darwin.tar.gz \
                  install.sh \
                  --clobber

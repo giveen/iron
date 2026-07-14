@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Correctness test for the CUTLASS grouped block-scaled NVFP4 MoE GEMM
 //! (`CudaDevice::moe_grouped_cutlass_fp4`): runs a small grouped problem on a

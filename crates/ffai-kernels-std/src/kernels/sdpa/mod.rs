@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Scaled-dot-product attention — the sdpa family (see
 //! `docs/specs/KERNEL_CONSOLIDATION_PLAN.md`): the bidirectional / decode /

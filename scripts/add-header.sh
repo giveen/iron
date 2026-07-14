@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HEADER_LINE1="//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric"
+HEADER_LINE1="//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)"
 HEADER_LINE2="//! SPDX-License-Identifier: Apache-2.0"
 
 # Count how many files already have the header

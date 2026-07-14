@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MPP-backed MoE grouped BGEMM, BM=16 — `mt_moe_gather_qmm_mma_int{4,8}_bm16_mpp`.
 //!

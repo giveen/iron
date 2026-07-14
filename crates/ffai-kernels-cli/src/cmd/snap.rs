@@ -1,12 +1,12 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile snap` — Save current bench results as a regression baseline.
+//! `ffaik snap` — Save current bench results as a regression baseline.
 //!
 //! Usage:
-//!   tile snap                                                     # run bench then save
-//!   tile snap -o .tile-snapshots/$(git rev-parse --short HEAD).json
-//!   tile snap --from results/run.json                             # promote existing JSON
-//!   tile snap --from results/run.json --note "after fusion fix"
+//!   ffaik snap                                                     # run bench then save
+//!   ffaik snap -o .ffaik-snapshots/$(git rev-parse --short HEAD).json
+//!   ffaik snap --from results/run.json                             # promote existing JSON
+//!   ffaik snap --from results/run.json --note "after fusion fix"
 
 use std::process::Command;
 
@@ -45,7 +45,7 @@ pub fn run(args: &SnapArgs) -> Result<(), CliError> {
         Some(p) => p.to_string(),
         None => {
             let date = chrono_like_now();
-            format!(".tile-snapshots/{}.json", date)
+            format!(".ffaik-snapshots/{}.json", date)
         },
     };
 
@@ -79,17 +79,17 @@ pub fn run(args: &SnapArgs) -> Result<(), CliError> {
             paint_stdout("Running bench suite...", Style::new().fg(Color::Cyan).bold()),
         );
         let temp_file =
-            std::env::temp_dir().join(format!(".tile-snap-tmp-{}.json", std::process::id()));
+            std::env::temp_dir().join(format!(".ffaik-snap-tmp-{}.json", std::process::id()));
         let mut child = Command::new(std::env::current_exe().map_err(CliError::Io)?)
             .arg("bench")
             .arg("--json")
             .arg(temp_file.to_str().ok_or_else(|| CliError::Other("non-UTF8 temp path".into()))?)
             .spawn()
-            .map_err(|e| CliError::Subprocess(format!("failed to spawn tile bench: {e}")))?;
+            .map_err(|e| CliError::Subprocess(format!("failed to spawn ffaik bench: {e}")))?;
 
         let status = child
             .wait()
-            .map_err(|e| CliError::Subprocess(format!("tile bench did not start: {e}")))?;
+            .map_err(|e| CliError::Subprocess(format!("ffaik bench did not start: {e}")))?;
         if !status.success() {
             eprintln!(
                 "{} {}",

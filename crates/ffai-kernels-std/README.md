@@ -1,12 +1,12 @@
 # ffai-kernels-std
 
-MetalTile's **kernel standard library** — every `#[kernel]` the project ships,
+FFAI Kernels's **kernel standard library** — every `#[kernel]` the project ships,
 plus the host-side quantization layer they share. Each kernel is a Rust function
-in the MetalTile DSL, annotated with `#[kernel]` (and optionally
+in the FFAI Kernels DSL, annotated with `#[kernel]` (and optionally
 `#[kernel(variants(...))]`), and carries its own GPU correctness tests
 (`#[test_kernel]`) and throughput benches (`#[bench]`) in the same file. The
-proc-macros register everything into the `inventory` so `tile build` / `tile
-test` / `tile bench` discover it automatically — no manual registration.
+proc-macros register everything into the `inventory` so `ffaik build` / `ffaik
+test` / `ffaik bench` discover it automatically — no manual registration.
 
 This crate depends on the `ffai-kernels` facade for the DSL macros and the harness
 types; it adds no new GPU runtime of its own.

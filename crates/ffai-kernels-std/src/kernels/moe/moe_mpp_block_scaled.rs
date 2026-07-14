@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! MPP-backed MoE grouped block-scaled BGEMM — the block-scaled / legacy-float
 //! / symmetric-int8 counterpart of `moe_mpp` (int4) and `moe_mpp_int8`.

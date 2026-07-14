@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! HIP / ROCm runtime backend (`AMD_BACKEND_SPEC.md §4-§5` — Phase 1).
 //!
@@ -30,7 +30,7 @@ use ffai_kernels_codegen::{CodegenBackend, HipGenerator};
 use ffai_kernels_core::ir::Kernel;
 use ffi::*;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 fn synth_strided_meta(shape: &ffai_kernels_core::shape::Shape, strides: bool) -> Vec<u8> {
     use ffai_kernels_core::shape::Dim;
@@ -52,7 +52,7 @@ fn synth_strided_meta(shape: &ffai_kernels_core::shape::Shape, strides: bool) ->
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
-fn hip_check(res: hipError_t, what: &str) -> Result<(), MetalTileError> {
+fn hip_check(res: hipError_t, what: &str) -> Result<(), FFAIError> {
     if res == HIP_SUCCESS {
         return Ok(());
     }
@@ -64,10 +64,10 @@ fn hip_check(res: hipError_t, what: &str) -> Result<(), MetalTileError> {
             CStr::from_ptr(s).to_string_lossy().into_owned()
         }
     };
-    Err(MetalTileError::Dispatch(format!("{what}: {msg}")))
+    Err(FFAIError::Dispatch(format!("{what}: {msg}")))
 }
 
-fn hiprtc_check(res: hiprtcResult, what: &str) -> Result<(), MetalTileError> {
+fn hiprtc_check(res: hiprtcResult, what: &str) -> Result<(), FFAIError> {
     if res == HIPRTC_SUCCESS {
         return Ok(());
     }
@@ -79,7 +79,7 @@ fn hiprtc_check(res: hiprtcResult, what: &str) -> Result<(), MetalTileError> {
             CStr::from_ptr(s).to_string_lossy().into_owned()
         }
     };
-    Err(MetalTileError::Compilation(format!("{what}: {msg}")))
+    Err(FFAIError::Compilation(format!("{what}: {msg}")))
 }
 
 /// A device-side allocation. Frees on drop.
@@ -109,8 +109,8 @@ pub struct HipModuleHandle {
 }
 
 impl HipModuleHandle {
-    pub fn function(&self, name: &str) -> Result<HipKernel, MetalTileError> {
-        let cname = CString::new(name).map_err(|e| MetalTileError::Dispatch(e.to_string()))?;
+    pub fn function(&self, name: &str) -> Result<HipKernel, FFAIError> {
+        let cname = CString::new(name).map_err(|e| FFAIError::Dispatch(e.to_string()))?;
         let mut func: hipFunction_t = ptr::null_mut();
         hip_check(
             unsafe { hipModuleGetFunction(&mut func, self.module, cname.as_ptr()) },
@@ -178,7 +178,7 @@ unsafe impl Sync for HipDevice {}
 impl HipDevice {
     /// Initialize HIP, grab device 0, create a context. Returns `Ok(None)`
     /// if no HIP device is present (mirrors `CudaDevice::create`).
-    pub fn create() -> Result<Option<Self>, MetalTileError> {
+    pub fn create() -> Result<Option<Self>, FFAIError> {
         unsafe {
             if hipInit(0) != HIP_SUCCESS {
                 return Ok(None);
@@ -202,10 +202,10 @@ impl HipDevice {
             // marketing name, not the gfx code; the most reliable source is
             // hipDeviceProp_t.gcnArchName, but that struct is large and varies
             // by ROCm version. Phase 1 takes the simple route: read
-            // `METALTILE_HIP_GFX` if set, else default to gfx1201 (RDNA 4 /
+            // `FFAI_HIP_GFX` if set, else default to gfx1201 (RDNA 4 /
             // RX 9070 XT — the user's primary target). Override for anything
             // else: gfx1100 RDNA 3, gfx942 MI300, gfx950 MI350.
-            let gfx = std::env::var("METALTILE_HIP_GFX").unwrap_or_else(|_| "gfx1201".to_string());
+            let gfx = std::env::var("FFAI_HIP_GFX").unwrap_or_else(|_| "gfx1201".to_string());
             // Derive wave size from gfx family rather than querying the
             // warp-size attribute — one less FFI round trip and the gfx
             // string is already authoritative here. gfx9xx (CDNA) is
@@ -247,10 +247,9 @@ impl HipDevice {
 
     /// Compile HIP C++ source → AMDGPU code-object → loaded module via
     /// hipRTC + `hipModuleLoadData`.
-    pub fn compile(&self, src: &str, prog_name: &str) -> Result<HipModuleHandle, MetalTileError> {
-        let csrc = CString::new(src).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
-        let cname =
-            CString::new(prog_name).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
+    pub fn compile(&self, src: &str, prog_name: &str) -> Result<HipModuleHandle, FFAIError> {
+        let csrc = CString::new(src).map_err(|e| FFAIError::Compilation(e.to_string()))?;
+        let cname = CString::new(prog_name).map_err(|e| FFAIError::Compilation(e.to_string()))?;
 
         let mut prog: hiprtcProgram = ptr::null_mut();
         hiprtc_check(
@@ -314,7 +313,7 @@ impl HipDevice {
             let msg = unsafe {
                 CStr::from_ptr(hiprtcGetErrorString(compile_res)).to_string_lossy().into_owned()
             };
-            return Err(MetalTileError::Compilation(format!(
+            return Err(FFAIError::Compilation(format!(
                 "hiprtcCompileProgram failed: {msg}\n--- log ---\n{log}"
             )));
         }
@@ -331,7 +330,7 @@ impl HipDevice {
                     hiprtcGetCode(prog, buf.as_mut_ptr() as *mut c_char),
                     "hiprtcGetCode",
                 )?;
-                Ok::<_, MetalTileError>(buf)
+                Ok::<_, FFAIError>(buf)
             })();
             hiprtcDestroyProgram(&mut prog);
             fetch?
@@ -343,16 +342,16 @@ impl HipDevice {
             "hipModuleLoadData",
         )
         .map_err(|e| {
-            MetalTileError::Compilation(format!(
+            FFAIError::Compilation(format!(
                 "{e} — code object was built for `{}`; if the GPU is a \
-                 different arch set METALTILE_HIP_GFX (e.g. gfx1100, gfx942)",
+                 different arch set FFAI_HIP_GFX (e.g. gfx1100, gfx942)",
                 self.gfx
             ))
         })?;
         Ok(HipModuleHandle { module })
     }
 
-    pub fn alloc(&self, len: usize) -> Result<HipBuffer<'_>, MetalTileError> {
+    pub fn alloc(&self, len: usize) -> Result<HipBuffer<'_>, FFAIError> {
         if len == 0 {
             return Ok(HipBuffer { ptr: 0, len: 0, _dev: self });
         }
@@ -361,7 +360,7 @@ impl HipDevice {
         Ok(HipBuffer { ptr, len, _dev: self })
     }
 
-    pub fn upload(&self, data: &[u8]) -> Result<HipBuffer<'_>, MetalTileError> {
+    pub fn upload(&self, data: &[u8]) -> Result<HipBuffer<'_>, FFAIError> {
         let buf = self.alloc(data.len())?;
         if !data.is_empty() {
             hip_check(
@@ -372,7 +371,7 @@ impl HipDevice {
         Ok(buf)
     }
 
-    pub fn download(&self, buf: &HipBuffer, out: &mut [u8]) -> Result<(), MetalTileError> {
+    pub fn download(&self, buf: &HipBuffer, out: &mut [u8]) -> Result<(), FFAIError> {
         let n = out.len().min(buf.len);
         if n == 0 {
             return Ok(());
@@ -389,7 +388,7 @@ impl HipDevice {
         grid_blocks: u32,
         block_threads: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.launch(func, [grid_blocks, 1, 1], [block_threads, 1, 1], 0, args)
     }
 
@@ -400,14 +399,14 @@ impl HipDevice {
         block: [u32; 3],
         shared_bytes: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         // Pre-check: dynamic shared memory exceeding the device's opt-in
         // cap turns into a generic "invalid argument" at launch time and
         // obscures the real cause. Surface it as a clear error with the
         // numbers so the corpus harness can bucket it as a *device-limit*
         // failure (not a codegen ERROR).
         if shared_bytes as i32 > self.max_shared_per_block_optin {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "hipModuleLaunchKernel: shared memory requested ({shared_bytes} bytes) \
                  exceeds device max ({max} bytes) — kernel needs Phase-5 MPP retune \
                  for this hardware",
@@ -429,7 +428,7 @@ impl HipDevice {
                 let msg = unsafe {
                     CStr::from_ptr(hipGetErrorString(attr_res)).to_string_lossy().into_owned()
                 };
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "hipFuncSetAttribute(MaxDynamicSharedMemorySize={shared_bytes}): {msg}"
                 )));
             }
@@ -460,9 +459,9 @@ impl HipDevice {
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
         block: [u32; 3],
-    ) -> Result<Prepared<'d>, MetalTileError> {
+    ) -> Result<Prepared<'d>, FFAIError> {
         let cg = HipGenerator::new();
-        let src = cg.generate(kernel).map_err(MetalTileError::Codegen)?;
+        let src = cg.generate(kernel).map_err(FFAIError::Codegen)?;
         let module = self.compile(&src, &format!("{}.hip", kernel.name))?;
         let func = module.function(&kernel.name)?;
         let shared_bytes = cg.shared_bytes(kernel, block[0]) as u32;
@@ -472,7 +471,7 @@ impl HipDevice {
         let mut out_meta: Vec<Option<(String, usize)>> = Vec::new();
         for p in &kernel.params {
             let bytes = buffers.get(&p.name).ok_or_else(|| {
-                MetalTileError::Dispatch(format!("missing buffer for param '{}'", p.name))
+                FFAIError::Dispatch(format!("missing buffer for param '{}'", p.name))
             })?;
             let buf = self.upload(bytes)?;
             dev_ptrs.push(buf.device_ptr());
@@ -499,7 +498,7 @@ impl HipDevice {
             let name = ce.name.name();
             let bytes = buffers
                 .get(name)
-                .ok_or_else(|| MetalTileError::Dispatch(format!("missing constexpr '{name}'")))?;
+                .ok_or_else(|| FFAIError::Dispatch(format!("missing constexpr '{name}'")))?;
             scalars.push(bytes.clone());
         }
         if kernel.mode == ffai_kernels_core::ir::KernelMode::Elementwise {
@@ -525,7 +524,7 @@ impl HipDevice {
         buffers: &BTreeMap<String, Vec<u8>>,
         grid: [u32; 3],
         block: [u32; 3],
-    ) -> Result<BTreeMap<String, Vec<u8>>, MetalTileError> {
+    ) -> Result<BTreeMap<String, Vec<u8>>, FFAIError> {
         let prep = self.prepare(kernel, buffers, block)?;
 
         let mut args = prep.args();
@@ -557,7 +556,7 @@ impl HipDevice {
         block: [u32; 3],
         warmup: u32,
         iters: u32,
-    ) -> Result<Vec<f64>, MetalTileError> {
+    ) -> Result<Vec<f64>, FFAIError> {
         let prep = self.prepare(kernel, buffers, block)?;
         let mut args = prep.args();
 
@@ -574,7 +573,7 @@ impl HipDevice {
 
         // Closure owns its sample vec (returned on success) so no outer
         // borrow outlives it — lets us unconditionally destroy events after.
-        let mut timed = || -> Result<Vec<f64>, MetalTileError> {
+        let mut timed = || -> Result<Vec<f64>, FFAIError> {
             let mut samples = Vec::with_capacity(iters as usize);
             for _ in 0..iters {
                 hip_check(
@@ -606,7 +605,7 @@ impl HipDevice {
         res
     }
 
-    pub fn synchronize(&self) -> Result<(), MetalTileError> {
+    pub fn synchronize(&self) -> Result<(), FFAIError> {
         hip_check(unsafe { hipDeviceSynchronize() }, "hipDeviceSynchronize")
     }
 }

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! CUDA runtime backend (CUDA_BACKEND_SPEC §4.1 / §4.4 — SCOPE Phase 1).
 //!
@@ -29,7 +29,7 @@ use ffai_kernels_codegen::{CodegenBackend, CudaGenerator};
 use ffai_kernels_core::ir::Kernel;
 use ffi::*;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 /// Synthesize a Strided param's `_shape` or `_strides` (row-major) buffer
 /// from the static shape, as little-endian u32s. Unknown dims default to 1.
@@ -53,7 +53,7 @@ fn synth_strided_meta(shape: &ffai_kernels_core::shape::Shape, strides: bool) ->
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
-fn cu_check(res: CUresult, what: &str) -> Result<(), MetalTileError> {
+fn cu_check(res: CUresult, what: &str) -> Result<(), FFAIError> {
     if res == CUDA_SUCCESS {
         return Ok(());
     }
@@ -65,7 +65,7 @@ fn cu_check(res: CUresult, what: &str) -> Result<(), MetalTileError> {
             format!("CUDA error code {res}")
         }
     };
-    Err(MetalTileError::Dispatch(format!("{what}: {msg}")))
+    Err(FFAIError::Dispatch(format!("{what}: {msg}")))
 }
 
 /// Opt a function into a >48KB dynamic-shared-memory launch.
@@ -76,7 +76,7 @@ fn cu_check(res: CUresult, what: &str) -> Result<(), MetalTileError> {
 /// opt-in is rejected — historically that rejection was ignored and the
 /// subsequent `cuLaunchKernel` surfaced a cryptic `invalid argument`. We now
 /// check the return and fail *before* launch with a clear, typed reason.
-fn ensure_dynamic_smem(func: CUfunction, shared_bytes: u32) -> Result<(), MetalTileError> {
+fn ensure_dynamic_smem(func: CUfunction, shared_bytes: u32) -> Result<(), FFAIError> {
     if shared_bytes == 0 {
         return Ok(());
     }
@@ -92,12 +92,12 @@ fn ensure_dynamic_smem(func: CUfunction, shared_bytes: u32) -> Result<(), MetalT
     }
     // Pre-Volta hard cap: dynamic shared memory cannot exceed 48KB and the
     // opt-in is unavailable, so this kernel cannot run on this arch.
-    Err(MetalTileError::DeviceCapability(format!(
+    Err(FFAIError::DeviceCapability(format!(
         "unsupported on this device: kernel needs {shared_bytes} bytes (>48KB) of dynamic shared memory, but this GPU architecture caps dynamic shared memory at 48KB (cuFuncSetAttribute opt-in rejected, code {res})"
     )))
 }
 
-fn nvrtc_check(res: nvrtcResult, what: &str) -> Result<(), MetalTileError> {
+fn nvrtc_check(res: nvrtcResult, what: &str) -> Result<(), FFAIError> {
     if res == NVRTC_SUCCESS {
         return Ok(());
     }
@@ -109,7 +109,7 @@ fn nvrtc_check(res: nvrtcResult, what: &str) -> Result<(), MetalTileError> {
             CStr::from_ptr(s).to_string_lossy().into_owned()
         }
     };
-    Err(MetalTileError::Compilation(format!("{what}: {msg}")))
+    Err(FFAIError::Compilation(format!("{what}: {msg}")))
 }
 
 /// A device-side allocation. Frees on drop.
@@ -141,8 +141,8 @@ pub struct CudaModule {
 
 impl CudaModule {
     /// Look up a kernel function by its `extern "C"` symbol name.
-    pub fn function(&self, name: &str) -> Result<CudaFunction, MetalTileError> {
-        let cname = CString::new(name).map_err(|e| MetalTileError::Dispatch(e.to_string()))?;
+    pub fn function(&self, name: &str) -> Result<CudaFunction, FFAIError> {
+        let cname = CString::new(name).map_err(|e| FFAIError::Dispatch(e.to_string()))?;
         let mut func: CUfunction = ptr::null_mut();
         cu_check(
             unsafe { cuModuleGetFunction(&mut func, self.module, cname.as_ptr()) },
@@ -208,14 +208,14 @@ impl Prepared<'_> {
 /// retaining freed buffers (and evict on demand) so the pool can't hoard VRAM.
 /// The 4 GiB default gives a forward's transients plenty of headroom while
 /// leaving model weights + KV resident on a unified-memory box (e.g. the
-/// 120 GB GB10); `METALTILE_POOL_CAP_MB=N` overrides it per host/workload.
+/// 120 GB GB10); `FFAI_POOL_CAP_MB=N` overrides it per host/workload.
 #[inline]
 fn pool_cap_bytes() -> usize {
     use std::sync::OnceLock;
     static CAP: OnceLock<usize> = OnceLock::new();
     const DEFAULT: usize = 4 * 1024 * 1024 * 1024;
     *CAP.get_or_init(|| {
-        std::env::var("METALTILE_POOL_CAP_MB")
+        std::env::var("FFAI_POOL_CAP_MB")
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
             .map_or(DEFAULT, |mb| mb * 1024 * 1024)
@@ -272,12 +272,12 @@ pub struct CudaDevice {
     /// Key = bucket size in bytes (NOT the requested len). `pooled_bytes`
     /// tracks the total parked so we can cap the pool ([`pool_cap_bytes`]) and
     /// evict beyond it rather than hoard VRAM. Default-on; set
-    /// `METALTILE_POOL_ALLOC_OFF=1` ([`pool_enabled`]) for direct
+    /// `FFAI_POOL_ALLOC_OFF=1` ([`pool_enabled`]) for direct
     /// `cuMemAlloc`/`cuMemFree` (clean A/B).
     pool: Mutex<HashMap<usize, Vec<CUdeviceptr>>>,
     /// Total bytes currently parked in `pool` (sum of bucket_size × count).
     pooled_bytes: Mutex<usize>,
-    /// Caching allocator active unless `METALTILE_POOL_ALLOC_OFF` is set.
+    /// Caching allocator active unless `FFAI_POOL_ALLOC_OFF` is set.
     /// Cached once at create().
     pool_enabled: bool,
     /// Pinned host-staging buffers for async H2D: free-list by size, plus the
@@ -352,7 +352,7 @@ impl CudaDevice {
 
     /// Initialize CUDA, grab device 0, create a context. Returns `Ok(None)`
     /// if no CUDA device is present (mirrors `MetalDevice::create`).
-    pub fn create() -> Result<Option<Self>, MetalTileError> {
+    pub fn create() -> Result<Option<Self>, FFAIError> {
         unsafe {
             if cuInit(0) != CUDA_SUCCESS {
                 return Ok(None);
@@ -386,10 +386,10 @@ impl CudaDevice {
                 cu_check(sres, "cuStreamCreate")?;
             }
             // Caching allocator DEFAULT-ON (alloc()/Drop route through it): nsys
-            // showed raw cuMemAlloc/cuMemFree at 62% of CUDA API time. METALTILE_POOL_ALLOC_OFF=1
+            // showed raw cuMemAlloc/cuMemFree at 62% of CUDA API time. FFAI_POOL_ALLOC_OFF=1
             // restores direct driver alloc/free (clean A/B). Pool cap defaults
-            // to 4GB; METALTILE_POOL_CAP_MB overrides (pool_cap_bytes()).
-            let pool_enabled = std::env::var("METALTILE_POOL_ALLOC_OFF").is_err();
+            // to 4GB; FFAI_POOL_CAP_MB overrides (pool_cap_bytes()).
+            let pool_enabled = std::env::var("FFAI_POOL_ALLOC_OFF").is_err();
             Ok(Some(CudaDevice {
                 ctx,
                 dev,
@@ -414,13 +414,13 @@ impl CudaDevice {
 
     /// Lazily create + cache the cuBLAS handle, bound to `self.stream` with the
     /// tensor-op math mode. Returns the raw handle ptr.
-    fn cublas_handle(&self) -> Result<cublasHandle_t, MetalTileError> {
+    fn cublas_handle(&self) -> Result<cublasHandle_t, FFAIError> {
         let mut guard = self.cublas.lock().unwrap();
         if *guard == 0 {
             let mut h: cublasHandle_t = ptr::null_mut();
             let st = unsafe { cublasCreate_v2(&mut h) };
             if st != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!("cublasCreate failed: {st}")));
+                return Err(FFAIError::Dispatch(format!("cublasCreate failed: {st}")));
             }
             unsafe {
                 cublasSetStream_v2(h, self.stream);
@@ -430,9 +430,9 @@ impl CudaDevice {
                 // The DEFAULT_TENSOR_OP heuristic otherwise selects split-K
                 // variants for some MoE-prefill shapes that reduce via atomics
                 // → logit jitter + argmax flips. Tensor cores stay active.
-                // METALTILE_GEMM_ATOMICS=1 opts back into the nondeterministic
+                // FFAI_GEMM_ATOMICS=1 opts back into the nondeterministic
                 // heuristic (for A/B perf measurement only).
-                let atomics = std::env::var("METALTILE_GEMM_ATOMICS").ok().as_deref() == Some("1");
+                let atomics = std::env::var("FFAI_GEMM_ATOMICS").ok().as_deref() == Some("1");
                 cublasSetAtomicsMode(
                     h,
                     if atomics { CUBLAS_ATOMICS_ALLOWED } else { CUBLAS_ATOMICS_NOT_ALLOWED },
@@ -459,17 +459,14 @@ impl CudaDevice {
     /// (see `cublas_handle`), which forbids the split-K kernels that reduce via
     /// atomics. With atomics forbidden, the `CUBLAS_GEMM_DEFAULT_TENSOR_OP` (99)
     /// heuristic is free to pick the best *deterministic* tensor-op kernel, so we
-    /// keep DEFAULT here. `METALTILE_GEMM_ALGO=N` (0..=15) lets you pin a specific
+    /// keep DEFAULT here. `FFAI_GEMM_ALGO=N` (0..=15) lets you pin a specific
     /// `CUBLAS_GEMM_ALGO{N}_TENSOR_OP` for experimentation.
     #[inline]
     fn gemm_algo() -> c_int {
         use std::sync::OnceLock;
         static ALGO: OnceLock<c_int> = OnceLock::new();
         *ALGO.get_or_init(|| {
-            match std::env::var("METALTILE_GEMM_ALGO")
-                .ok()
-                .and_then(|s| s.trim().parse::<i32>().ok())
-            {
+            match std::env::var("FFAI_GEMM_ALGO").ok().and_then(|s| s.trim().parse::<i32>().ok()) {
                 Some(n) if (0..=15).contains(&n) => CUBLAS_GEMM_ALGO0_TENSOR_OP + n as c_int,
                 _ => CUBLAS_GEMM_DEFAULT_TENSOR_OP,
             }
@@ -496,15 +493,15 @@ impl CudaDevice {
         n: usize,
         k: usize,
         dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         // DETERMINISTIC by default: route through cublasLt with split-K reductions
         // forbidden (REDUCTION_SCHEME_NONE). The legacy cublasGemmEx heuristic
         // picks split-K atomic-accumulate kernels for some MoE-prefill shapes →
         // run-to-run logit jitter + argmax flips. `cublasSetAtomicsMode` and the
         // legacy algo selector do NOT suppress this on sm_121; cublasLt does.
-        // METALTILE_GEMM_NONDET=1 opts back into the legacy path (A/B perf only).
-        if std::env::var("METALTILE_GEMM_NONDET").ok().as_deref() != Some("1") {
+        // FFAI_GEMM_NONDET=1 opts back into the legacy path (A/B perf only).
+        if std::env::var("FFAI_GEMM_NONDET").ok().as_deref() != Some("1") {
             return self.gemm_cublaslt(x, w, out, m, n, k, dtype, dtype);
         }
         let h = self.cublas_handle()?;
@@ -512,7 +509,7 @@ impl CudaDevice {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublas: unsupported dtype {other:?} (need f16/bf16)"
                 ))),
         };
@@ -546,7 +543,7 @@ impl CudaDevice {
             )
         };
         if st != CUBLAS_STATUS_SUCCESS {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "cublasGemmEx failed: status {st} (m={m} n={n} k={k})"
             )));
         }
@@ -555,13 +552,13 @@ impl CudaDevice {
 
     /// Lazily create the cublasLt handle + fixed device workspace. Returns
     /// `(handle, workspace_ptr)`.
-    fn cublaslt_ctx(&self) -> Result<(cublasLtHandle_t, CUdeviceptr), MetalTileError> {
+    fn cublaslt_ctx(&self) -> Result<(cublasLtHandle_t, CUdeviceptr), FFAIError> {
         let mut guard = self.cublaslt.lock().unwrap();
         if guard.0 == 0 {
             let mut h: cublasLtHandle_t = ptr::null_mut();
             let st = unsafe { cublasLtCreate(&mut h) };
             if st != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!("cublasLtCreate failed: {st}")));
+                return Err(FFAIError::Dispatch(format!("cublasLtCreate failed: {st}")));
             }
             let ws = self.alloc_raw(CUBLASLT_WORKSPACE_BYTES)?;
             *guard = (h as usize, ws as usize);
@@ -585,7 +582,7 @@ impl CudaDevice {
         expert_ids: &[i32],
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -603,7 +600,7 @@ impl CudaDevice {
                 ) -> c_int;
             }
             if group_rows.len() != expert_ids.len() {
-                return Err(MetalTileError::Dispatch(
+                return Err(FFAIError::Dispatch(
                     "moe_grouped_cutlass: group_rows/expert_ids len mismatch".into(),
                 ));
             }
@@ -621,7 +618,7 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "moe_grouped_gemm_cutlass failed: code {r}"
                 )));
             }
@@ -630,7 +627,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (a, w, c, group_rows, expert_ids, n, k);
-            Err(MetalTileError::Dispatch(
+            Err(FFAIError::Dispatch(
                 "moe_grouped_cutlass: runtime built without CUTLASS (set CUTLASS_DIR)".into(),
             ))
         }
@@ -652,7 +649,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         ab_dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         self.gemm_cublaslt(x, w, out, m, n, k, ab_dtype, ffai_kernels_core::DType::F32)
     }
@@ -678,14 +675,14 @@ impl CudaDevice {
         k: usize,
         dtype: ffai_kernels_core::DType,
         out_dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let (lt, workspace) = self.cublaslt_ctx()?;
         let cdt = match dtype {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublaslt: unsupported dtype {other:?} (need f16/bf16)"
                 ))),
         };
@@ -694,7 +691,7 @@ impl CudaDevice {
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             ffai_kernels_core::DType::F32 => CUDA_R_32F,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublaslt: unsupported out_dtype {other:?}"
                 ))),
         };
@@ -707,7 +704,7 @@ impl CudaDevice {
             let mut desc: cublasLtMatmulDesc_t = ptr::null_mut();
             let s = cublasLtMatmulDescCreate(&mut desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
             if s != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
+                return Err(FFAIError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
             }
             let opt = CUBLAS_OP_T;
             let opn = CUBLAS_OP_N;
@@ -774,7 +771,7 @@ impl CudaDevice {
                 cublasLtMatrixLayoutDestroy(b_l);
                 cublasLtMatrixLayoutDestroy(d_l);
                 cublasLtMatmulDescDestroy(desc);
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLt: no deterministic algo (m={m} n={n} k={k} status={hs} returned={returned})"
                 )));
             }
@@ -802,7 +799,7 @@ impl CudaDevice {
             cublasLtMatrixLayoutDestroy(d_l);
             cublasLtMatmulDescDestroy(desc);
             if mm != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLtMatmul failed: status {mm} (m={m} n={n} k={k})"
                 )));
             }
@@ -830,11 +827,11 @@ impl CudaDevice {
         k: usize,
         batch_count: usize,
         dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         // DETERMINISTIC by default via cublasLt (split-K reductions forbidden);
-        // see gemm_cublas. METALTILE_GEMM_NONDET=1 → legacy nondeterministic path.
-        if std::env::var("METALTILE_GEMM_NONDET").ok().as_deref() != Some("1") {
+        // see gemm_cublas. FFAI_GEMM_NONDET=1 → legacy nondeterministic path.
+        if std::env::var("FFAI_GEMM_NONDET").ok().as_deref() != Some("1") {
             return self.gemm_cublaslt_strided_batched(
                 x_base,
                 stride_x,
@@ -854,7 +851,7 @@ impl CudaDevice {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublas_strided_batched: unsupported dtype {other:?}"
                 ))),
         };
@@ -891,7 +888,7 @@ impl CudaDevice {
             )
         };
         if st != CUBLAS_STATUS_SUCCESS {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "cublasGemmStridedBatchedEx failed: {st} (m={m} n={n} k={k} batch={batch_count})"
             )));
         }
@@ -914,14 +911,14 @@ impl CudaDevice {
         k: usize,
         batch_count: usize,
         dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let (lt, workspace) = self.cublaslt_ctx()?;
         let cdt = match dtype {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublaslt_strided_batched: unsupported dtype {other:?}"
                 ))),
         };
@@ -937,9 +934,7 @@ impl CudaDevice {
             let mut desc: cublasLtMatmulDesc_t = ptr::null_mut();
             let s = cublasLtMatmulDescCreate(&mut desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
             if s != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!(
-                    "cublasLtMatmulDescCreate(strided): {s}"
-                )));
+                return Err(FFAIError::Dispatch(format!("cublasLtMatmulDescCreate(strided): {s}")));
             }
             let opt = CUBLAS_OP_T;
             let opn = CUBLAS_OP_N;
@@ -1018,7 +1013,7 @@ impl CudaDevice {
                 cublasLtMatrixLayoutDestroy(b_l);
                 cublasLtMatrixLayoutDestroy(d_l);
                 cublasLtMatmulDescDestroy(desc);
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLt(strided): no deterministic algo (m={m} n={n} k={k} batch={batch_count} status={hs} returned={returned})"
                 )));
             }
@@ -1046,7 +1041,7 @@ impl CudaDevice {
             cublasLtMatrixLayoutDestroy(d_l);
             cublasLtMatmulDescDestroy(desc);
             if mm != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLtMatmul(strided) failed: status {mm} (m={m} n={n} k={k} batch={batch_count})"
                 )));
             }
@@ -1073,7 +1068,7 @@ impl CudaDevice {
         n: usize,            // shared output dim
         k: usize,            // shared input dim
         dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let group_count = x_ptrs.len();
         assert_eq!(w_ptrs.len(), group_count);
@@ -1088,7 +1083,7 @@ impl CudaDevice {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublas_grouped: unsupported dtype {other:?}"
                 ))),
         };
@@ -1189,7 +1184,7 @@ impl CudaDevice {
         // reuse overwrites it (same invariant the caching allocator relies on).
         self.free_raw_pooled(base, triple_bytes);
         if st != CUBLAS_STATUS_SUCCESS {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "cublasGemmGroupedBatchedEx failed: status {st} (groups={group_count} n={n} k={k})"
             )));
         }
@@ -1214,7 +1209,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         dtype: ffai_kernels_core::DType,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let batch_count = x_ptrs.len();
         assert_eq!(w_ptrs.len(), batch_count);
@@ -1227,7 +1222,7 @@ impl CudaDevice {
             ffai_kernels_core::DType::F16 => CUDA_R_16F,
             ffai_kernels_core::DType::BF16 => CUDA_R_16BF,
             other =>
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "gemm_cublas_batched: unsupported dtype {other:?}"
                 ))),
         };
@@ -1295,7 +1290,7 @@ impl CudaDevice {
         };
         self.free_raw_pooled(base, triple_bytes);
         if st != CUBLAS_STATUS_SUCCESS {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "cublasGemmBatchedEx failed: status {st} (m={m} n={n} k={k} batch={batch_count})"
             )));
         }
@@ -1305,11 +1300,10 @@ impl CudaDevice {
     /// Compile CUDA C++ source → PTX → loaded module via NVRTC + the
     /// driver JIT. Targets the device's own virtual arch
     /// (`compute_<major><minor>`); the driver JITs PTX to the live GPU.
-    pub fn compile(&self, src: &str, prog_name: &str) -> Result<CudaModule, MetalTileError> {
+    pub fn compile(&self, src: &str, prog_name: &str) -> Result<CudaModule, FFAIError> {
         self.ensure_current();
-        let csrc = CString::new(src).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
-        let cname =
-            CString::new(prog_name).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
+        let csrc = CString::new(src).map_err(|e| FFAIError::Compilation(e.to_string()))?;
+        let cname = CString::new(prog_name).map_err(|e| FFAIError::Compilation(e.to_string()))?;
 
         let mut prog: nvrtcProgram = ptr::null_mut();
         nvrtc_check(
@@ -1448,7 +1442,7 @@ impl CudaDevice {
 
         if compile_res != NVRTC_SUCCESS {
             unsafe { nvrtcDestroyProgram(&mut prog) };
-            return Err(MetalTileError::Compilation(format!(
+            return Err(FFAIError::Compilation(format!(
                 "nvrtcCompileProgram failed: {}\n--- log ---\n{log}",
                 unsafe { CStr::from_ptr(nvrtcGetErrorString(compile_res)).to_string_lossy() }
             )));
@@ -1474,7 +1468,7 @@ impl CudaDevice {
     }
 
     /// Allocate `len` bytes of device memory.
-    pub fn alloc(&self, len: usize) -> Result<DeviceBuffer<'_>, MetalTileError> {
+    pub fn alloc(&self, len: usize) -> Result<DeviceBuffer<'_>, FFAIError> {
         self.ensure_current();
         if len == 0 {
             return Ok(DeviceBuffer { ptr: 0, len: 0, _dev: self });
@@ -1489,7 +1483,7 @@ impl CudaDevice {
     }
 
     /// Allocate + upload host bytes in one shot.
-    pub fn upload(&self, data: &[u8]) -> Result<DeviceBuffer<'_>, MetalTileError> {
+    pub fn upload(&self, data: &[u8]) -> Result<DeviceBuffer<'_>, FFAIError> {
         self.ensure_current();
         let buf = self.alloc(data.len())?;
         if !data.is_empty() {
@@ -1517,7 +1511,7 @@ impl CudaDevice {
     }
 
     /// Copy device memory back into a host buffer.
-    pub fn download(&self, buf: &DeviceBuffer, out: &mut [u8]) -> Result<(), MetalTileError> {
+    pub fn download(&self, buf: &DeviceBuffer, out: &mut [u8]) -> Result<(), FFAIError> {
         self.ensure_current();
         let n = out.len().min(buf.len);
         if n == 0 {
@@ -1540,7 +1534,7 @@ impl CudaDevice {
     /// `CudaDevice` (hence its context) alive while the pointers are live.
     ///
     /// [`free_raw`]: CudaDevice::free_raw
-    pub fn alloc_raw(&self, len: usize) -> Result<CUdeviceptr, MetalTileError> {
+    pub fn alloc_raw(&self, len: usize) -> Result<CUdeviceptr, FFAIError> {
         self.ensure_current();
         if len == 0 {
             return Ok(0);
@@ -1586,7 +1580,7 @@ impl CudaDevice {
     /// `cuMemFree`/`cuMemAlloc` round-trip (each a device-wide sync) on the next
     /// same-bucket request. `len` MUST be the value passed to [`alloc_raw`] so
     /// the bucket re-derives to the one the buffer was allocated as. With the
-    /// pool disabled (`METALTILE_POOL_ALLOC_OFF`) this releases to the driver
+    /// pool disabled (`FFAI_POOL_ALLOC_OFF`) this releases to the driver
     /// directly (except mid-graph-capture, where the pointer must stay live).
     pub fn free_raw_pooled(&self, ptr: CUdeviceptr, len: usize) {
         self.ensure_current();
@@ -1628,7 +1622,7 @@ impl CudaDevice {
     /// via a pinned staging buffer — enqueues on the (ordered) default stream
     /// without a host-blocking GPU drain. The pinned buffer is reclaimed on the
     /// next `synchronize`/`download` (by then the copy has completed).
-    pub fn htod(&self, ptr: CUdeviceptr, bytes: &[u8]) -> Result<(), MetalTileError> {
+    pub fn htod(&self, ptr: CUdeviceptr, bytes: &[u8]) -> Result<(), FFAIError> {
         self.ensure_current();
         if bytes.is_empty() {
             return Ok(());
@@ -1684,7 +1678,7 @@ impl CudaDevice {
     }
 
     /// Copy device memory back to a host slice (device→host).
-    pub fn dtoh(&self, ptr: CUdeviceptr, out: &mut [u8]) -> Result<(), MetalTileError> {
+    pub fn dtoh(&self, ptr: CUdeviceptr, out: &mut [u8]) -> Result<(), FFAIError> {
         self.ensure_current();
         if out.is_empty() {
             return Ok(());
@@ -1708,7 +1702,7 @@ impl CudaDevice {
         grid_blocks: u32,
         block_threads: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         self.launch(func, [grid_blocks, 1, 1], [block_threads, 1, 1], 0, args)
     }
@@ -1723,7 +1717,7 @@ impl CudaDevice {
         block: [u32; 3],
         shared_bytes: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         // Opt into the requested dynamic shared size (no-op below the default
         // cap, required above 48KB). Fails *before* launch on archs that cap
@@ -1762,7 +1756,7 @@ impl CudaDevice {
         block: [u32; 3],
         shared_bytes: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         ensure_dynamic_smem(func.func, shared_bytes)?;
         cu_check(
@@ -1797,7 +1791,7 @@ impl CudaDevice {
         block: [u32; 3],
         shared_bytes: u32,
         args: &mut [*mut c_void],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         ensure_dynamic_smem(func.func, shared_bytes)?;
         cu_check(
@@ -1827,7 +1821,7 @@ impl CudaDevice {
     /// Begin recording all subsequent stream work into a CUDA graph (phase-1
     /// megakernel). Caller must run a NO-host-sync (all-device) sequence, then
     /// `end_capture`. THREAD_LOCAL mode scopes capture to this thread's stream.
-    pub fn begin_capture(&self) -> Result<(), MetalTileError> {
+    pub fn begin_capture(&self) -> Result<(), FFAIError> {
         self.ensure_current();
         self.capturing.store(true, std::sync::atomic::Ordering::SeqCst);
         cu_check(
@@ -1837,7 +1831,7 @@ impl CudaDevice {
     }
 
     /// Finish capture → instantiate an executable graph. Replay with `graph_launch`.
-    pub fn end_capture(&self) -> Result<CUgraphExec, MetalTileError> {
+    pub fn end_capture(&self) -> Result<CUgraphExec, FFAIError> {
         self.ensure_current();
         let mut graph: CUgraph = ptr::null_mut();
         let res =
@@ -1861,7 +1855,7 @@ impl CudaDevice {
     ///
     /// `exec` must be a live handle returned by [`Self::end_capture`].
     #[allow(clippy::not_unsafe_ptr_arg_deref)] // opaque driver handle, not dereferenced host-side
-    pub fn graph_launch(&self, exec: CUgraphExec) -> Result<(), MetalTileError> {
+    pub fn graph_launch(&self, exec: CUgraphExec) -> Result<(), FFAIError> {
         self.ensure_current();
         cu_check(unsafe { cuGraphLaunch(exec, self.stream) }, "cuGraphLaunch")?;
         self.synchronize()
@@ -1876,7 +1870,7 @@ impl CudaDevice {
     /// (KV cache, SSM state) is overwritten sequentially and not meaningful.
     /// `exec` must be a live handle returned by [`Self::end_capture`].
     #[allow(clippy::not_unsafe_ptr_arg_deref)] // opaque driver handle, not dereferenced host-side
-    pub fn graph_launch_batch(&self, exec: CUgraphExec, n: usize) -> Result<(), MetalTileError> {
+    pub fn graph_launch_batch(&self, exec: CUgraphExec, n: usize) -> Result<(), FFAIError> {
         self.ensure_current();
         for _ in 0..n {
             cu_check(unsafe { cuGraphLaunch(exec, self.stream) }, "cuGraphLaunch(batch)")?;
@@ -1895,7 +1889,7 @@ impl CudaDevice {
     /// zero-fill so tail threads read benign zeros and their stores land in
     /// owned slack. Dispatch/test path only — the engine's `alloc_raw`/
     /// `htod` hot path is unaffected.
-    fn upload_padded(&self, data: &[u8]) -> Result<DeviceBuffer<'_>, MetalTileError> {
+    fn upload_padded(&self, data: &[u8]) -> Result<DeviceBuffer<'_>, FFAIError> {
         const DISPATCH_PAD_BYTES: usize = 4096;
         let buf = self.alloc(data.len() + DISPATCH_PAD_BYTES)?;
         cu_check(
@@ -1937,10 +1931,10 @@ impl CudaDevice {
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
         block: [u32; 3],
-    ) -> Result<Prepared<'d>, MetalTileError> {
+    ) -> Result<Prepared<'d>, FFAIError> {
         // 1. IR → CUDA C++ → module.
         let cg = CudaGenerator::new();
-        let src = cg.generate(kernel).map_err(MetalTileError::Codegen)?;
+        let src = cg.generate(kernel).map_err(FFAIError::Codegen)?;
         // MT_DUMP_CUDA_SRC=<path>: write generated CUDA C++ for every kernel.
         if let Ok(dir) = std::env::var("MT_DUMP_CUDA_SRC") {
             let path = format!("{}/{}.cu", dir, kernel.name);
@@ -1968,7 +1962,7 @@ impl CudaDevice {
         let mut out_meta: Vec<Option<(String, usize)>> = Vec::new();
         for p in &kernel.params {
             let bytes = buffers.get(&p.name).ok_or_else(|| {
-                MetalTileError::Dispatch(format!("missing buffer for param '{}'", p.name))
+                FFAIError::Dispatch(format!("missing buffer for param '{}'", p.name))
             })?;
             if p.kind == ffai_kernels_core::ir::ParamKind::Scalar {
                 scalars.push(bytes.clone());
@@ -2055,7 +2049,7 @@ impl CudaDevice {
         buffers: &BTreeMap<String, Vec<u8>>,
         grid: [u32; 3],
         block: [u32; 3],
-    ) -> Result<BTreeMap<String, Vec<u8>>, MetalTileError> {
+    ) -> Result<BTreeMap<String, Vec<u8>>, FFAIError> {
         self.ensure_current();
         let prep = self.prepare(kernel, buffers, block)?;
 
@@ -2094,7 +2088,7 @@ impl CudaDevice {
         block: [u32; 3],
         warmup: u32,
         iters: u32,
-    ) -> Result<Vec<f64>, MetalTileError> {
+    ) -> Result<Vec<f64>, FFAIError> {
         self.ensure_current();
         let prep = self.prepare(kernel, buffers, block)?;
         let mut args = prep.args();
@@ -2111,7 +2105,7 @@ impl CudaDevice {
 
         // Closure owns its sample vec (returned on success) so no outer
         // borrow outlives it — lets us unconditionally destroy events after.
-        let mut timed = || -> Result<Vec<f64>, MetalTileError> {
+        let mut timed = || -> Result<Vec<f64>, FFAIError> {
             let mut samples = Vec::with_capacity(iters as usize);
             for _ in 0..iters {
                 ensure_dynamic_smem(prep.func.func, prep.shared_bytes)?;
@@ -2157,7 +2151,7 @@ impl CudaDevice {
         res
     }
 
-    pub fn synchronize(&self) -> Result<(), MetalTileError> {
+    pub fn synchronize(&self) -> Result<(), FFAIError> {
         self.ensure_current();
         cu_check(unsafe { cuStreamSynchronize(self.stream) }, "cuStreamSynchronize")?;
         self.reclaim_pinned();

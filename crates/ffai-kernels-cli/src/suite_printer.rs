@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Suite printer: formats OpResult batches and `ProtocolMessage::BenchResult`
 //! JSON-stream entries as terminal tables.
@@ -8,7 +8,7 @@
 //! * **Phase 1 (current)**: `print_batch(&[OpResult])` — in-process bench
 //!   results from `ffai-kernels-std::bench_types`.
 //! * **Phase 2 (subprocess)**: `print_bench_result(&BenchResult)` — parsed
-//!   JSON lines from the `__tile_runner` subprocess.  The data type lives in
+//!   JSON lines from the `__ffai_runner` subprocess.  The data type lives in
 //!   `ffai-kernels-core::protocol` so the CLI does not need `ffai-kernels-std`.
 
 use std::io::Write;
@@ -173,7 +173,7 @@ impl SuitePrinter {
 
         let sep = col_sep();
         // Column headers use the same muted bold as the rest of the CLI's labels
-        // (cf. `tile device`): BrightBlack-bold headers recede so the BrightWhite
+        // (cf. `ffaik device`): BrightBlack-bold headers recede so the BrightWhite
         // data values stand out. (Was BrightWhite-bold, which clashed with #255.)
         let bold = Style::new().fg(Color::BrightBlack).bold();
 

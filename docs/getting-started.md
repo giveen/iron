@@ -1,16 +1,16 @@
 # Getting started
 
-Get a MetalTile checkout building, tested, and emitting a kernel.
+Get a FFAI Kernels checkout building, tested, and emitting a kernel.
 
 ## Prerequisites
 
 - **Rust nightly.** The workspace is `edition = 2024` and uses unstable `rustfmt` features; the toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the right nightly automatically on first build.
-- **macOS + Metal** — only needed to *run* kernels on the GPU (`tile bench`, GPU correctness tests). The DSL, codegen passes, and MSL emission build and test on any platform; non-Mac CI exercises everything except GPU dispatch.
+- **macOS + Metal** — only needed to *run* kernels on the GPU (`ffaik bench`, GPU correctness tests). The DSL, codegen passes, and MSL emission build and test on any platform; non-Mac CI exercises everything except GPU dispatch.
 - **Xcode command-line tools** (`xcrun metal`) on macOS — the codegen smoke step compiles emitted MSL with the Metal toolchain.
 
 ## Install from source
 
-If you want to build and install the `tile` CLI from source rather than using
+If you want to build and install the `ffaik` CLI from source rather than using
 the release binary:
 
 ```bash
@@ -41,7 +41,7 @@ make build      # debug build of the whole workspace
 make test       # workspace tests — codegen, runtime, GPU correctness (GPU on a Mac)
 ```
 
-`make` is the canonical entry point — it centralises flags and always passes `--workspace`. See [Developing](developing.md) for the full dev loop and [the CLI reference](cli.md) for the `tile` binary.
+`make` is the canonical entry point — it centralises flags and always passes `--workspace`. See [Developing](developing.md) for the full dev loop and [the CLI reference](cli.md) for the `ffaik` binary.
 
 ## Crate layout
 
@@ -55,13 +55,13 @@ The workspace is seven crates:
 | [`ffai-kernels-runtime`](../crates/ffai-kernels-runtime/README.md) | Metal dispatch, PSO cache |
 | [`ffai-kernels`](../crates/ffai-kernels/README.md) | facade re-exporting all crates |
 | [`ffai-kernels-std`](../crates/ffai-kernels-std/README.md) | kernel stdlib, op files, bench types |
-| [`ffai-kernels-cli`](../crates/ffai-kernels-cli/README.md) | the `tile` CLI binary |
+| [`ffai-kernels-cli`](../crates/ffai-kernels-cli/README.md) | the `ffaik` CLI binary |
 
-The compile pipeline: `#[kernel] fn` → `ffai-kernels-macros` parses the body into **MetalTile IR** → `ffai-kernels-codegen` runs the optimization passes and emits **MSL** → `ffai-kernels-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `ffai-kernels-macros` parses the body into **FFAI Kernels IR** → `ffai-kernels-codegen` runs the optimization passes and emits **MSL** → `ffai-kernels-runtime` dispatches it on the GPU.
 
 ## Your first kernel
 
-A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into MetalTile IR; the codegen lowers it to Metal Shading Language.
+A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into FFAI Kernels IR; the codegen lowers it to Metal Shading Language.
 
 ```rust
 use ffai-kernels::prelude::*;
@@ -102,7 +102,7 @@ let msl = MslGenerator::default().generate(&vector_add::kernel_ir())?;
 println!("{msl}");
 ```
 
-or from the CLI: `tile inspect vector_add`.
+or from the CLI: `ffaik inspect vector_add`.
 
 ## Next steps
 

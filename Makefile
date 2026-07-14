@@ -1,4 +1,4 @@
-# MetalTile — Makefile
+# FFAI Kernels — Makefile
 #
 # Common dev-loop targets. See TOOLCHAIN_PLAN.md for the phased
 # build-out and scripts/ for the longer-form scripts.
@@ -105,24 +105,24 @@ typos: ## run typos checker (same config CI uses)
 check-bench-names: ## verify all #[bench] names use a CI-sharded group prefix (ffai/ or mlx/)
 	./scripts/check_bench_names.sh
 
-# ─── tile CLI ─────────────────────────────────────────────────────────
+# ─── ffaik CLI ─────────────────────────────────────────────────────────
 #
-# All targets call into the `tile` CLI via `cargo run --release`,
+# All targets call into the `ffaik` CLI via `cargo run --release`,
 # which handles incremental rebuilds itself — no explicit
 # `build-release` dependency needed. The `-q` quiets cargo's own
 # "Compiling … / Finished" lines so the CLI output is unobstructed.
 #
 # **Two entry points, no overlap**:
 #
-#   1. `make tile <subcommand> …`
+#   1. `make ffaik <subcommand> …`
 #       — the universal passthrough. Use for any bare CLI call:
-#           make tile bench
-#           make tile snap
-#           make tile diff
-#           make tile device
-#           make tile inspect aura_encode_int4
+#           make ffaik bench
+#           make ffaik snap
+#           make ffaik diff
+#           make ffaik device
+#           make ffaik inspect aura_encode_int4
 #       — args starting with `-` confuse make's option parser, so
-#         use `make tile-args ARGS="bench -vv --filter sdpa"` for
+#         use `make ffaik-args ARGS="bench -vv --filter sdpa"` for
 #         those. (`-vv` / `--filter …` as bare make args don't work.)
 #
 #   2. Named wrappers below — pre-baked flag combos that would be
@@ -145,27 +145,27 @@ OUT ?=
 
 # Named wrappers for flag combos that aren't ergonomic via passthrough.
 .PHONY: bench-v bench-vv
-bench-v: ## tile bench -v — adds occupancy + register-pressure profile
+bench-v: ## ffaik bench -v — adds occupancy + register-pressure profile
 	cargo run --release -q -p ffai-kernels-cli -- bench -v $(ARGS)
-bench-vv: ## tile bench -vv — adds GPU timing stats (min µs + bandwidth)
+bench-vv: ## ffaik bench -vv — adds GPU timing stats (min µs + bandwidth)
 	cargo run --release -q -p ffai-kernels-cli -- bench -vv $(ARGS)
 
 .PHONY: inspect-stats inspect-ir inspect-list
-inspect-stats: ## tile inspect KERNEL=<name> --stats — per-pass op-count deltas
+inspect-stats: ## ffaik inspect KERNEL=<name> --stats — per-pass op-count deltas
 	cargo run --release -q -p ffai-kernels-cli -- inspect $(KERNEL) --stats $(ARGS)
-inspect-ir: ## tile inspect KERNEL=<name> --ir — raw IR before passes
+inspect-ir: ## ffaik inspect KERNEL=<name> --ir — raw IR before passes
 	cargo run --release -q -p ffai-kernels-cli -- inspect $(KERNEL) --ir $(ARGS)
-inspect-list: ## tile inspect --all — list every registered kernel
+inspect-list: ## ffaik inspect --all — list every registered kernel
 	cargo run --release -q -p ffai-kernels-cli -- inspect --all $(ARGS)
 
 .PHONY: emit-all time-passes
-emit-all: ## tile build --emit all OUT=<dir> — codegen for FFAI consumption
+emit-all: ## ffaik build --emit all OUT=<dir> — codegen for FFAI consumption
 	@if [ -z "$(OUT)" ]; then \
-	  echo "Error: set OUT=<dir>, e.g. make emit-all OUT=../FFAI/Sources/MetalTileSwift"; \
+	  echo "Error: set OUT=<dir>, e.g. make emit-all OUT=../FFAI/Sources/FFAIKernelsSwift"; \
 	  exit 1; \
 	fi
 	cargo run --release -q -p ffai-kernels-cli -- build --emit all -o $(OUT) $(ARGS)
-time-passes: ## tile build --time-passes — wall-clock per codegen pass
+time-passes: ## ffaik build --time-passes — wall-clock per codegen pass
 	cargo run --release -q -p ffai-kernels-cli -- build --time-passes $(ARGS)
 
 # ─── insta MSL snapshot loop ──────────────────────────────────────────
@@ -179,30 +179,30 @@ snapshots-accept: ## cargo insta test --accept — accept ALL pending snapshots
 snapshots-pending: ## cargo insta pending-snapshots — list pending without accepting
 	cargo insta pending-snapshots
 
-# ─── tile passthrough escape hatch ────────────────────────────────────
+# ─── ffaik passthrough escape hatch ────────────────────────────────────
 #
 # Examples:
-#   make tile bench
-#   make tile snap
-#   make tile diff
-#   make tile device
-#   make tile inspect aura_encode_int4
+#   make ffaik bench
+#   make ffaik snap
+#   make ffaik diff
+#   make ffaik device
+#   make ffaik inspect aura_encode_int4
 #
 # For args starting with `-` (which make tries to consume), use:
-#   make tile-args ARGS="bench -vv --filter sdpa_decode"
-#   make tile-args ARGS="inspect aura_encode_int4 --stats --dtype bf16"
+#   make ffaik-args ARGS="bench -vv --filter sdpa_decode"
+#   make ffaik-args ARGS="inspect aura_encode_int4 --stats --dtype bf16"
 #
-# The catch-all `%:` rule is gated to only fire when `tile` is the
-# first goal — so trailing words like `bench` / `snap` after `make tile`
+# The catch-all `%:` rule is gated to only fire when `ffaik` is the
+# first goal — so trailing words like `bench` / `snap` after `make ffaik`
 # become no-op targets (just args to the cargo command), while typos
 # elsewhere (e.g. `make typotypo`) still error normally.
-.PHONY: tile tile-args
-tile: ## tile passthrough: `make tile <subcommand>` (use tile-args for flags)
-	@cargo run --release -q -p ffai-kernels-cli -- $(filter-out tile,$(MAKECMDGOALS))
-tile-args: ## tile passthrough with flags: `make tile-args ARGS="bench -vv --filter sdpa"`
+.PHONY: ffaik ffaik-args
+ffaik: ## ffaik passthrough: `make ffaik <subcommand>` (use ffaik-args for flags)
+	@cargo run --release -q -p ffai-kernels-cli -- $(filter-out ffaik,$(MAKECMDGOALS))
+ffaik-args: ## ffaik passthrough with flags: `make ffaik-args ARGS="bench -vv --filter sdpa"`
 	@cargo run --release -q -p ffai-kernels-cli -- $(ARGS)
 
-ifeq (tile,$(firstword $(MAKECMDGOALS)))
+ifeq (ffaik,$(firstword $(MAKECMDGOALS)))
 %:
 	@:
 endif

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Vulkan compute runtime (`VULKAN_BACKEND_SPEC.md` — Phase 1).
 //!
@@ -46,7 +46,7 @@ use ffai_kernels_codegen::{CodegenBackend, GlslGenerator, spirv::GlslBindingPlan
 use ffai_kernels_core::{dtype::DType, ir::Kernel};
 use ffi::*;
 
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 const ENTRY_POINT: &[u8] = b"main\0";
 
@@ -73,11 +73,11 @@ fn synth_strided_meta(shape: &ffai_kernels_core::shape::Shape, strides: bool) ->
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
-fn vk_check(res: VkResult, what: &str) -> Result<(), MetalTileError> {
+fn vk_check(res: VkResult, what: &str) -> Result<(), FFAIError> {
     if res == VK_SUCCESS {
         return Ok(());
     }
-    Err(MetalTileError::Dispatch(format!("{what}: VkResult={res}")))
+    Err(FFAIError::Dispatch(format!("{what}: VkResult={res}")))
 }
 
 /// A host-visible+coherent buffer backed by a single device allocation.
@@ -194,7 +194,7 @@ impl VulkanDevice {
     /// Initialize Vulkan, pick the first physical device with a compute
     /// queue, create a logical device + compute queue. Returns `Ok(None)`
     /// if no Vulkan loader / device is present.
-    pub fn create() -> Result<Option<Self>, MetalTileError> {
+    pub fn create() -> Result<Option<Self>, FFAIError> {
         unsafe {
             // Instance.
             let app_name = CString::new("ffai-kernels").unwrap();
@@ -257,7 +257,7 @@ impl VulkanDevice {
                 qprops.iter().position(|q| q.queueFlags & VK_QUEUE_COMPUTE_BIT != 0)
             else {
                 vkDestroyInstance(instance, ptr::null());
-                return Err(MetalTileError::Dispatch(
+                return Err(FFAIError::Dispatch(
                     "vulkan: no queue family with VK_QUEUE_COMPUTE_BIT".into(),
                 ));
             };
@@ -455,7 +455,7 @@ impl VulkanDevice {
 
     /// Find a memory type matching `mem_type_bits` (from
     /// `vkGetBufferMemoryRequirements`) with all the requested property flags.
-    fn find_memory_type(&self, mem_type_bits: u32, flags: u32) -> Result<u32, MetalTileError> {
+    fn find_memory_type(&self, mem_type_bits: u32, flags: u32) -> Result<u32, FFAIError> {
         for i in 0..self.memory_properties.memoryTypeCount {
             if (mem_type_bits & (1u32 << i)) != 0
                 && (self.memory_properties.memoryTypes[i as usize].propertyFlags & flags) == flags
@@ -463,14 +463,14 @@ impl VulkanDevice {
                 return Ok(i);
             }
         }
-        Err(MetalTileError::Dispatch(format!(
+        Err(FFAIError::Dispatch(format!(
             "vulkan: no memory type with flags=0x{flags:x} typeBits=0x{mem_type_bits:x}"
         )))
     }
 
     /// Allocate a host-visible, host-coherent storage buffer of `size` bytes.
     /// Mapped via `vkMapMemory`; no explicit flush required (`HOST_COHERENT`).
-    pub fn alloc_storage(&self, size: u64) -> Result<VulkanBuffer<'_>, MetalTileError> {
+    pub fn alloc_storage(&self, size: u64) -> Result<VulkanBuffer<'_>, FFAIError> {
         let bci = VkBufferCreateInfo {
             sType: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             pNext: ptr::null(),
@@ -512,7 +512,7 @@ impl VulkanDevice {
     }
 
     /// Allocate + upload host bytes (host-visible buffer, single mapping).
-    pub fn upload(&self, data: &[u8]) -> Result<VulkanBuffer<'_>, MetalTileError> {
+    pub fn upload(&self, data: &[u8]) -> Result<VulkanBuffer<'_>, FFAIError> {
         let size = data.len().max(4) as u64; // Vulkan rejects 0-byte allocs.
         let buf = self.alloc_storage(size)?;
         if !data.is_empty() {
@@ -530,7 +530,7 @@ impl VulkanDevice {
     }
 
     /// Read back `out.len()` bytes from a host-visible buffer.
-    pub fn download(&self, buf: &VulkanBuffer, out: &mut [u8]) -> Result<(), MetalTileError> {
+    pub fn download(&self, buf: &VulkanBuffer, out: &mut [u8]) -> Result<(), FFAIError> {
         if out.is_empty() {
             return Ok(());
         }
@@ -555,13 +555,13 @@ impl VulkanDevice {
         glsl_src: &str,
         plan: &GlslBindingPlan,
         kernel_name: &str,
-    ) -> Result<VulkanPipeline, MetalTileError> {
+    ) -> Result<VulkanPipeline, FFAIError> {
         let spv = compile_glsl_to_spv(glsl_src, kernel_name)?;
 
         // Validate the SPIR-V binary is word-aligned (shaderc returns bytes;
         // VkShaderModuleCreateInfo wants u32*).
         if spv.len() % 4 != 0 {
-            return Err(MetalTileError::Compilation(format!(
+            return Err(FFAIError::Compilation(format!(
                 "vulkan: SPIR-V size {} not a multiple of 4",
                 spv.len()
             )));
@@ -724,14 +724,14 @@ impl VulkanDevice {
         buffers: &BTreeMap<String, Vec<u8>>,
         grid: [u32; 3],
         block: [u32; 3],
-    ) -> Result<BTreeMap<String, Vec<u8>>, MetalTileError> {
+    ) -> Result<BTreeMap<String, Vec<u8>>, FFAIError> {
         let _exec = self.exec_lock.lock();
         // 1. Codegen: IR → GLSL + binding plan. Workgroup size matches
         //    the harness's `tpg` so single-warp / multi-warp / 3-D tpg
         //    kernels all map straight through.
         let cg = GlslGenerator::new().with_local_size_3d(block);
-        let plan = cg.binding_plan(kernel).map_err(MetalTileError::Codegen)?;
-        let glsl = cg.generate(kernel).map_err(MetalTileError::Codegen)?;
+        let plan = cg.binding_plan(kernel).map_err(FFAIError::Codegen)?;
+        let glsl = cg.generate(kernel).map_err(FFAIError::Codegen)?;
 
         // 2. Compile + build pipeline.
         let pipeline = self.compile(&glsl, &plan, &kernel.name)?;
@@ -744,7 +744,7 @@ impl VulkanDevice {
         let mut out_meta: Vec<Option<(String, usize)>> = Vec::new();
         for p in &kernel.params {
             let bytes = buffers.get(&p.name).ok_or_else(|| {
-                MetalTileError::Dispatch(format!("missing buffer for param '{}'", p.name))
+                FFAIError::Dispatch(format!("missing buffer for param '{}'", p.name))
             })?;
             dev_bufs.push(self.upload(bytes)?);
             out_meta.push(if p.is_output { Some((p.name.clone(), bytes.len())) } else { None });
@@ -904,13 +904,13 @@ impl VulkanDevice {
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
         plan: &GlslBindingPlan,
-    ) -> Result<Vec<u8>, MetalTileError> {
+    ) -> Result<Vec<u8>, FFAIError> {
         let mut push: Vec<u8> = Vec::with_capacity(plan.push_constant_bytes as usize);
         for ce in &kernel.constexprs {
             let name = ce.name.name();
             let bytes = buffers
                 .get(name)
-                .ok_or_else(|| MetalTileError::Dispatch(format!("missing constexpr '{name}'")))?;
+                .ok_or_else(|| FFAIError::Dispatch(format!("missing constexpr '{name}'")))?;
             let align = bytes.len().max(1);
             while !push.len().is_multiple_of(align) {
                 push.push(0);
@@ -948,7 +948,7 @@ impl VulkanDevice {
         pipeline: &VulkanPipeline,
         plan: &GlslBindingPlan,
         buf_infos: &[VkDescriptorBufferInfo],
-    ) -> Result<VkDescriptorSet, MetalTileError> {
+    ) -> Result<VkDescriptorSet, FFAIError> {
         let descriptor_set = unsafe {
             let ai = VkDescriptorSetAllocateInfo {
                 sType: VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -1023,11 +1023,11 @@ impl VulkanDevice {
         block: [u32; 3],
         warmup: u32,
         iters: u32,
-    ) -> Result<Vec<f64>, MetalTileError> {
+    ) -> Result<Vec<f64>, FFAIError> {
         // ns per timestamp tick. 0 = device cannot timestamp.
         let timestamp_period = self.physical_device_properties().limits.timestampPeriod;
         if timestamp_period <= 0.0 {
-            return Err(MetalTileError::DeviceCapability(
+            return Err(FFAIError::DeviceCapability(
                 "device reports timestampPeriod = 0 — no GPU timestamp support".into(),
             ));
         }
@@ -1047,10 +1047,7 @@ impl VulkanDevice {
         for p in &kernel.params {
             let Some(bytes) = buffers.get(&p.name) else {
                 free_all(&dev_bufs);
-                return Err(MetalTileError::Dispatch(format!(
-                    "missing buffer for param '{}'",
-                    p.name
-                )));
+                return Err(FFAIError::Dispatch(format!("missing buffer for param '{}'", p.name)));
             };
             match self.alloc_raw_device_local(bytes) {
                 Ok(b) => dev_bufs.push(b),
@@ -1082,10 +1079,10 @@ impl VulkanDevice {
         // Codegen, pipeline, push constants, descriptor set — as `run_kernel`.
         let cg = GlslGenerator::new().with_local_size_3d(block);
         let prep = (|| {
-            let plan = cg.binding_plan(kernel).map_err(MetalTileError::Codegen)?;
-            let glsl = cg.generate(kernel).map_err(MetalTileError::Codegen)?;
+            let plan = cg.binding_plan(kernel).map_err(FFAIError::Codegen)?;
+            let glsl = cg.generate(kernel).map_err(FFAIError::Codegen)?;
             let pipeline = self.compile(&glsl, &plan, &kernel.name)?;
-            Ok::<_, MetalTileError>((plan, pipeline))
+            Ok::<_, FFAIError>((plan, pipeline))
         })();
         let (plan, pipeline) = match prep {
             Ok(v) => v,
@@ -1131,7 +1128,7 @@ impl VulkanDevice {
 
         // One timed dispatch: record reset → timestamp(top) → dispatch →
         // timestamp(bottom), submit, wait, read the two ticks.
-        let dispatch_once = |timed: bool| -> Result<f64, MetalTileError> {
+        let dispatch_once = |timed: bool| -> Result<f64, FFAIError> {
             unsafe {
                 let cb_ai = VkCommandBufferAllocateInfo {
                     sType: VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1223,7 +1220,7 @@ impl VulkanDevice {
             }
         };
 
-        let run = || -> Result<Vec<f64>, MetalTileError> {
+        let run = || -> Result<Vec<f64>, FFAIError> {
             for _ in 0..warmup {
                 dispatch_once(false)?;
             }
@@ -1274,10 +1271,10 @@ impl VulkanDevice {
         &self,
         kernel: &Kernel,
         block: [u32; 3],
-    ) -> Result<VulkanPipeline, MetalTileError> {
+    ) -> Result<VulkanPipeline, FFAIError> {
         let cg = GlslGenerator::new().with_local_size_3d(block);
-        let plan = cg.binding_plan(kernel).map_err(MetalTileError::Codegen)?;
-        let glsl = cg.generate(kernel).map_err(MetalTileError::Codegen)?;
+        let plan = cg.binding_plan(kernel).map_err(FFAIError::Codegen)?;
+        let glsl = cg.generate(kernel).map_err(FFAIError::Codegen)?;
         let mut pipeline = self.compile(&glsl, &plan, &kernel.name)?;
         pipeline.plan = plan;
         Ok(pipeline)
@@ -1292,7 +1289,7 @@ impl VulkanDevice {
     /// alive while any raw buffer is live (the handles belong to its `VkDevice`).
     ///
     /// [`free_raw`]: VulkanDevice::free_raw
-    pub fn alloc_raw(&self, len: usize) -> Result<VulkanRawBuffer, MetalTileError> {
+    pub fn alloc_raw(&self, len: usize) -> Result<VulkanRawBuffer, FFAIError> {
         let size = (len.max(4)) as u64; // Vulkan rejects 0-byte allocs.
         let bci = VkBufferCreateInfo {
             sType: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1351,7 +1348,7 @@ impl VulkanDevice {
 
     /// Copy host bytes into a resident raw buffer (host->device). Host-visible
     /// coherent memory, so the map+memcpy is the whole transfer.
-    pub fn htod_raw(&self, buf: &VulkanRawBuffer, data: &[u8]) -> Result<(), MetalTileError> {
+    pub fn htod_raw(&self, buf: &VulkanRawBuffer, data: &[u8]) -> Result<(), FFAIError> {
         if data.is_empty() {
             return Ok(());
         }
@@ -1376,11 +1373,11 @@ impl VulkanDevice {
     /// a resident weight read in a decode GEMV runs at device bandwidth instead
     /// of host bandwidth. Upload is one-time (staged); reads are device-local.
     /// The returned handle is freed with [`free_raw`] exactly like `alloc_raw`.
-    pub fn alloc_raw_device_local(&self, data: &[u8]) -> Result<VulkanRawBuffer, MetalTileError> {
+    pub fn alloc_raw_device_local(&self, data: &[u8]) -> Result<VulkanRawBuffer, FFAIError> {
         let _exec = self.exec_lock.lock();
         let size = (data.len().max(4)) as u64;
         let make_buffer =
-            |usage: u32, props: u32| -> Result<(VkBuffer_, VkDeviceMemory), MetalTileError> {
+            |usage: u32, props: u32| -> Result<(VkBuffer_, VkDeviceMemory), FFAIError> {
                 let bci = VkBufferCreateInfo {
                     sType: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                     pNext: ptr::null(),
@@ -1491,7 +1488,7 @@ impl VulkanDevice {
     }
 
     /// Copy a resident raw buffer back to host (device->host).
-    pub fn dtoh_raw(&self, buf: &VulkanRawBuffer, out: &mut [u8]) -> Result<(), MetalTileError> {
+    pub fn dtoh_raw(&self, buf: &VulkanRawBuffer, out: &mut [u8]) -> Result<(), FFAIError> {
         if out.is_empty() {
             return Ok(());
         }
@@ -1527,11 +1524,11 @@ impl VulkanDevice {
         bufs: &[&VulkanRawBuffer],
         push: &[u8],
         grid: [u32; 3],
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         let _exec = self.exec_lock.lock();
         let plan = &pipeline.plan;
         if bufs.len() != plan.bindings.len() {
-            return Err(MetalTileError::Dispatch(format!(
+            return Err(FFAIError::Dispatch(format!(
                 "run_pipeline_bound: {} buffers but plan has {} bindings",
                 bufs.len(),
                 plan.bindings.len()
@@ -1699,7 +1696,7 @@ impl VulkanDevice {
     /// wait, so a long decode loop cannot leak handles. The caller is
     /// responsible for the lifetime of every `VulkanRawBuffer` bound here (the
     /// ffai-vulkan resident-tensor cache owns them across the batch).
-    pub fn run_pipeline_batch(&self, items: &[BatchDispatch]) -> Result<(), MetalTileError> {
+    pub fn run_pipeline_batch(&self, items: &[BatchDispatch]) -> Result<(), FFAIError> {
         let _exec = self.exec_lock.lock();
         if items.is_empty() {
             return Ok(());
@@ -1708,7 +1705,7 @@ impl VulkanDevice {
         for (i, it) in items.iter().enumerate() {
             let nb = it.pipeline.plan.bindings.len();
             if it.bufs.len() != nb {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "run_pipeline_batch: item {i} has {} buffers but plan has {nb} bindings",
                     it.bufs.len()
                 )));
@@ -1904,14 +1901,14 @@ impl Drop for VulkanDevice {
 
 /// GLSL → SPIR-V via shaderc. The result is a byte-vector whose length is
 /// a multiple of 4 (SPIR-V is a stream of u32 words).
-pub fn compile_glsl_to_spv(glsl_src: &str, file_name: &str) -> Result<Vec<u8>, MetalTileError> {
-    let csrc = CString::new(glsl_src).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
-    let cfile = CString::new(file_name).map_err(|e| MetalTileError::Compilation(e.to_string()))?;
+pub fn compile_glsl_to_spv(glsl_src: &str, file_name: &str) -> Result<Vec<u8>, FFAIError> {
+    let csrc = CString::new(glsl_src).map_err(|e| FFAIError::Compilation(e.to_string()))?;
+    let cfile = CString::new(file_name).map_err(|e| FFAIError::Compilation(e.to_string()))?;
     let centry = CString::new("main").unwrap();
     unsafe {
         let compiler = shaderc_compiler_initialize();
         if compiler.is_null() {
-            return Err(MetalTileError::Compilation("shaderc_compiler_initialize failed".into()));
+            return Err(FFAIError::Compilation("shaderc_compiler_initialize failed".into()));
         }
         let opts = shaderc_compile_options_initialize();
         shaderc_compile_options_set_target_env(
@@ -1922,10 +1919,10 @@ pub fn compile_glsl_to_spv(glsl_src: &str, file_name: &str) -> Result<Vec<u8>, M
         // Shaderc optimization level. Default 2 (performance): the SPIR-V
         // optimizer runs once per (kernel,dims) at first compile, then the
         // pipeline is cached, so the cost is paid once but every dispatch
-        // reaps the faster shader. Override with METALTILE_SHADERC_OPT:
+        // reaps the faster shader. Override with FFAI_SHADERC_OPT:
         //   0 = zero-opt (readable disasm / correctness fallback),
         //   1 = size, 2 = performance (default).
-        let opt_level: ::std::os::raw::c_int = ::std::env::var("METALTILE_SHADERC_OPT")
+        let opt_level: ::std::os::raw::c_int = ::std::env::var("FFAI_SHADERC_OPT")
             .ok()
             .and_then(|v| v.trim().parse::<i32>().ok())
             .filter(|n| (0..=2).contains(n))
@@ -1951,7 +1948,7 @@ pub fn compile_glsl_to_spv(glsl_src: &str, file_name: &str) -> Result<Vec<u8>, M
             shaderc_result_release(result);
             shaderc_compile_options_release(opts);
             shaderc_compiler_release(compiler);
-            return Err(MetalTileError::Compilation(format!(
+            return Err(FFAIError::Compilation(format!(
                 "shaderc_compile_into_spv: {m}\n--- glsl ---\n{glsl_src}"
             )));
         }

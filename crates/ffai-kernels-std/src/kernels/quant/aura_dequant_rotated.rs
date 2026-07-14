@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! AURA bulk dequant — unpack codebook-quantized values into rotated
 //! codec space, ready to be consumed by the AURA flash-SDPA path or

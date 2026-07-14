@@ -11,7 +11,7 @@ Correctness is checked at four layers, each catching what the layer above cannot
 | **DSL / codegen unit tests** | Pass correctness, body-parser arms, IR variants, emit paths; `trybuild` compile-fail fixtures | `crates/ffai-kernels-codegen`, `ffai-kernels-core`, `ffai-kernels-macros` | ✅ |
 | **MSL snapshots** (`insta`) | Codegen output drift — a reviewable text diff in the PR | `crates/ffai-kernels-codegen/tests/msl_snapshots.rs` | ✅ |
 | **GPU correctness** | Numeric disagreement vs a naive CPU oracle, on a real Metal device | `crates/ffai-kernels-std/tests/<kernel>_gpu_correctness.rs` | ✅ (macOS runner) |
-| **MLX side-by-side** (bench) | Throughput + numeric parity vs the upstream MLX kernel | `tile bench` | local-only (needs an MLX checkout) |
+| **MLX side-by-side** (bench) | Throughput + numeric parity vs the upstream MLX kernel | `ffaik bench` | local-only (needs an MLX checkout) |
 
 No single layer is sufficient. The unit tests never touch a GPU; snapshots pin *whatever* the codegen emits (including wrong output); `xcrun metal` only checks syntax. **GPU correctness tests are the floor** — see the gaps section below.
 
@@ -41,17 +41,17 @@ cargo test --release -p ffai-kernels-std --test <kernel>_gpu_correctness -- --ig
 | Job | Workflow | What it runs |
 |---|---|---|
 | `typos` / `clippy` / tests | `.github/workflows/check.yml` | spell-check, lint `-D warnings`, `cargo test --workspace` (Ubuntu — no GPU) |
-| build / test / bench | `.github/workflows/tile.yml` | `tile build`, `tile test` (GPU correctness vs CPU oracle), `tile bench` — on a **macOS GPU runner** |
+| build / test / bench | `.github/workflows/ffai.yml` | `ffaik build`, `ffaik test` (GPU correctness vs CPU oracle), `ffaik bench` — on a **macOS GPU runner** |
 | coverage | `.github/workflows/coverage.yml` | `cargo llvm-cov --workspace --codecov` on macOS, uploads to Codecov; runs on pushes touching `crates/`, `Cargo.*`, `rust-toolchain.toml`, `.github/configs/codecov.yml` |
 | PR title | `.github/workflows/pr.yml` | validates the conventional-commit format |
 | labels | `.github/workflows/auto-label.yml` | release-notes labels from the PR-title prefix |
 
 - The DSL / codegen / GPU-correctness layers all run in CI — including on a macOS runner with a real GPU.
-- **`tile bench` benches the ffai-kernels kernels by default**; the MLX side-by-side A/B is opt-in via `tile bench --mlx` (it needs an MLX checkout, so the default CI bench runs ffai-kernels-only).
+- **`ffaik bench` benches the ffai-kernels kernels by default**; the MLX side-by-side A/B is opt-in via `ffaik bench --mlx` (it needs an MLX checkout, so the default CI bench runs ffai-kernels-only).
 
 ### macOS runner environment
 
-The macOS CI jobs (`tile.yml` build/test/bench, plus `coverage.yml` and
+The macOS CI jobs (`ffai.yml` build/test/bench, plus `coverage.yml` and
 `release.yml`) run on the **`macos-26`** GitHub-hosted runner. To see exactly
 what is installed (Xcode versions, SDKs, CLI tools), consult the image manifest:
 [runner-images → macos-26-arm64 readme](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md).
@@ -64,7 +64,7 @@ what is installed (Xcode versions, SDKs, CLI tools), consult the image manifest:
 > compiles it. This is the *runtime* `newLibraryWithSource` compiler, which is the
 > OS's — **selecting a newer Xcode (`DEVELOPER_DIR`) does not change it** (that
 > only swaps the offline `metal` compiler). The `macos-26` runner image is
-> currently macOS 26.4, so `tile test` **skips** any cooperative-tensor kernel
+> currently macOS 26.4, so `ffaik test` **skips** any cooperative-tensor kernel
 > whose pipeline won't build (`Kernel::requires_cooperative_tensors()` →
 > `[SKIP]`), reporting them as skipped rather than failed. They still compile +
 > get correctness-tested wherever the toolchain supports them (a 26.5+ box, and
@@ -158,7 +158,7 @@ pub mod kernel_benches {
 Notes:
 - Buffers bind **by name** (matching the kernel parameter names); ordering of `.buffer()`/`.input()` calls doesn't matter. `#[constexpr]` scalars are passed as little-endian uniform buffers, same as the hand-written tests.
 - The CPU oracle is the same contract as above — compute expected in `f32`, let the runner pack to the dtype and diff within tolerance. `tol` accepts a scalar, a per-dtype array, or a `{ f32: …, f16: … }` table.
-- Run them with `tile test [-f <filter>]` and `tile bench [-f <filter>]`; the new benches render in the same table as legacy rows. The `tests/kernel_tests_harness.rs` cargo bridge runs every `#[test_kernel]` under `cargo test` so the new path is part of the commit gate without `tile test`.
+- Run them with `ffaik test [-f <filter>]` and `ffaik bench [-f <filter>]`; the new benches render in the same table as legacy rows. The `tests/kernel_tests_harness.rs` cargo bridge runs every `#[test_kernel]` under `cargo test` so the new path is part of the commit gate without `ffaik test`.
 - This in-process runner is deliberately simple (it re-dispatches per iteration rather than reusing the legacy `GpuRunner`'s resident-buffer + DVFS-pinning path), so new-syntax bench GB/s currently reads lower than the legacy rows — fidelity is a follow-up, correctness is not affected.
 
 ### MSL snapshots for new emit paths
@@ -191,7 +191,7 @@ These are the holes a bug can slip through. Know them; close them when you can.
 A kernel that emits an **empty body** — from an inner `macro_rules!` or from a codegen pass dropping a loop body (see [Developing → kernel-authoring hazards](developing.md#kernel-authoring-hazards)) — produces all-zeros output. That output:
 
 - **passes `xcrun metal`** — an empty body is valid MSL;
-- **passes `tile build --emit` smoke** — same reason;
+- **passes `ffaik build --emit` smoke** — same reason;
 - **passes MSL-snapshot drift checks** — the snapshot just pins the wrong-but-stable empty body;
 - **passes a loose integration test** if its tolerance absorbs the noise.
 

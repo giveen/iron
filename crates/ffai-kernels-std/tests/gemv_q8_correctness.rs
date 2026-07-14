@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `mt_gemv_q8` — Q8_0 inline-dequant gemv
 //! vs a CPU reference using the same dequant (value = d * int8).

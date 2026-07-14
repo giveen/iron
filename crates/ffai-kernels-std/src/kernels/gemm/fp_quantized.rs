@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! FP quantized kernels — fp4 and fp8 (e4m3 / e5m2) quant + dequant
 //! round-trip, corresponding to MLX `metal/fp_quantized.metal`.

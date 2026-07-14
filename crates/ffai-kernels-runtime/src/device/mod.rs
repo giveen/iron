@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Device layer: Metal adapter, CUDA adapter, HIP adapter, Vulkan adapter,
 //! buffer pool, GPU family.
 

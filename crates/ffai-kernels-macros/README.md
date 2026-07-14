@@ -1,11 +1,11 @@
 # ffai-kernels-macros
 
-Proc-macro crate providing the `#[kernel]` DSL for MetalTile GPU kernels.
+Proc-macro crate providing the `#[kernel]` DSL for FFAI Kernels GPU kernels.
 Parses Rust function signatures and bodies at compile time, translates
 DSL intrinsics into `ffai-kernels-core` IR, and generates host-side launch
 code.
 
-This crate is the front door of the MetalTile compiler: user-written
+This crate is the front door of the FFAI Kernels compiler: user-written
 `#[kernel]` functions enter here, and IR + dispatch surfaces exit. It
 also provides `shape!`/`tile!` constructors for shape annotations,
 `#[kernel(variants(...))]` for compile-time specialisation, and the `#[bench]` /
@@ -107,7 +107,7 @@ pub mod my_kernel {
     pub struct LaunchBuilder<'a> { … }
     impl<'a> LaunchBuilder<'a> {
         pub fn input(self, name: &str, data: Vec<u8>) -> Self { … }
-        pub fn dispatch(self) -> Result<DispatchResult, MetalTileError> { … }
+        pub fn dispatch(self) -> Result<DispatchResult, FFAIError> { … }
     }
 
     // Entry point.

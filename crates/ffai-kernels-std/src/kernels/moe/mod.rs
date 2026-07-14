@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Mixture-of-experts kernels — the moe family (see
 //! `docs/specs/KERNEL_CONSOLIDATION_PLAN.md`). The routing layer (top-k expert

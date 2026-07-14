@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! CPU-side kernel profiling + bottleneck classification for `tile bench`.
+//! CPU-side kernel profiling + bottleneck classification for `ffaik bench`.
 //!
 //! [`estimate_profile`] runs the standard optimization pipeline on a clone of a
 //! kernel and reports its estimated occupancy, register pressure, and the raw

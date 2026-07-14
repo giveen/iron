@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! HIGH-THROUGHPUT amortized MoE Q2_K grouped BGEMM (down) — bm64 tiling
 //! (64×64×32, 4 simdgroups) with the canonical Q2_K dequant. Q2_K twin of

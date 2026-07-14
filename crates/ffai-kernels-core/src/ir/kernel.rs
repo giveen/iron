@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
+//! SPDX-License-Identifier: Apache-2.0
 //! Kernel structure: [`KernelMode`], [`Block`], [`Kernel`].
 
 use std::{collections::BTreeMap, fmt};
@@ -185,7 +187,7 @@ impl Kernel {
     /// These compile via the **runtime Metal toolchain** that ships with the OS,
     /// and the dynamic-extent `cooperative_tensor` they emit needs macOS 26.5+;
     /// on an older OS toolchain the pipeline fails to build ("unsupported
-    /// deferred-static-alloca-size") regardless of the selected Xcode. `tile test`
+    /// deferred-static-alloca-size") regardless of the selected Xcode. `ffaik test`
     /// uses this to *skip* (not fail) such a kernel when its pipeline won't build
     /// on the current runner — they still compile + get tested wherever the
     /// toolchain supports them. Plain simdgroup-matrix MMA is **not** included

@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Probe kernels — `#[kernel]`s whose purpose is to validate a codegen path or
 //! HW intrinsic end-to-end (not production work). Named `mt_<thing>_probe`; this

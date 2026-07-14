@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! MetalTile core: IR types, shape algebra, and DType system.
+//! FFAI Kernels core: IR types, shape algebra, and DType system.
 //!
 //! This crate defines the foundational types shared across all other crates:
 //! - [`DType`]: numeric element types (f16, f32, i32, etc.)

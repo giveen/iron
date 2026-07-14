@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! NVFP4 / FP8 cutlass grouped-MoE GEMM entry points for `CudaDevice`.
 //!
@@ -21,12 +21,12 @@ use std::{
 };
 
 use super::{CUBLASLT_WORKSPACE_BYTES, CUdeviceptr, CudaDevice, cu_check, ffi::*};
-use crate::error::MetalTileError;
+use crate::error::FFAIError;
 
 impl CudaDevice {
     /// Lazily create the cublasLt handle + fixed device workspace. Returns
     /// `(handle, workspace_ptr)`.
-    fn lt_beta_zero_ptr(&self) -> Result<CUdeviceptr, MetalTileError> {
+    fn lt_beta_zero_ptr(&self) -> Result<CUdeviceptr, FFAIError> {
         let mut g = self.lt_beta_zero.lock().unwrap();
         if *g == 0 {
             let p = self.alloc_raw(4)?;
@@ -61,7 +61,7 @@ impl CudaDevice {
         alpha_vec: CUdeviceptr, // device f32[n_groups] per-group scales, 0 = none
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -83,7 +83,7 @@ impl CudaDevice {
                 ) -> c_int;
             }
             if group_rows.len() != expert_ids.len() || group_rows.len() != sfa_off.len() {
-                return Err(MetalTileError::Dispatch(
+                return Err(FFAIError::Dispatch(
                     "moe_grouped_cutlass_fp4: group_rows/expert_ids/sfa_off len mismatch".into(),
                 ));
             }
@@ -105,7 +105,7 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "moe_grouped_gemm_cutlass_fp4 failed: code {r}"
                 )));
             }
@@ -114,7 +114,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (a, sfa, w, sfw, c, group_rows, expert_ids, sfa_off, alpha_vec, n, k);
-            Err(MetalTileError::Dispatch(
+            Err(FFAIError::Dispatch(
                 "moe_grouped_cutlass_fp4: runtime built without CUTLASS (set CUTLASS_DIR)".into(),
             ))
         }
@@ -136,7 +136,7 @@ impl CudaDevice {
         alpha_vec: CUdeviceptr,
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -159,9 +159,7 @@ impl CudaDevice {
                 ) -> c_int;
             }
             if group_rows.len() != expert_ids.len() || group_rows.len() != sfa_off.len() {
-                return Err(MetalTileError::Dispatch(
-                    "moe_grouped_cutlass_w4a8: len mismatch".into(),
-                ));
+                return Err(FFAIError::Dispatch("moe_grouped_cutlass_w4a8: len mismatch".into()));
             }
             let r = unsafe {
                 moe_grouped_gemm_w4a8(
@@ -182,7 +180,7 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!("moe_grouped_gemm_w4a8 failed: {r}")));
+                return Err(FFAIError::Dispatch(format!("moe_grouped_gemm_w4a8 failed: {r}")));
             }
             Ok(())
         }
@@ -202,7 +200,7 @@ impl CudaDevice {
                 n,
                 k,
             );
-            Err(MetalTileError::Dispatch("moe_grouped_cutlass_w4a8: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("moe_grouped_cutlass_w4a8: built without CUTLASS".into()))
         }
     }
 
@@ -217,7 +215,7 @@ impl CudaDevice {
         sfa_off: &[i64],
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -253,7 +251,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (x, out, sf, group_rows, sfa_off, n, k);
-            Err(MetalTileError::Dispatch("w4a8_actquant: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("w4a8_actquant: built without CUTLASS".into()))
         }
     }
 
@@ -267,7 +265,7 @@ impl CudaDevice {
         n_exp: usize,
         n: usize,
         k: usize,
-    ) -> Result<i64, MetalTileError> {
+    ) -> Result<i64, FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -297,7 +295,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (w, outp, sf, n_exp, n, k);
-            Err(MetalTileError::Dispatch("w4a8_packw: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("w4a8_packw: built without CUTLASS".into()))
         }
     }
 
@@ -315,7 +313,7 @@ impl CudaDevice {
         alpha_vec: CUdeviceptr,
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -338,9 +336,7 @@ impl CudaDevice {
                 ) -> c_int;
             }
             if group_rows.len() != expert_ids.len() || group_rows.len() != sfa_off.len() {
-                return Err(MetalTileError::Dispatch(
-                    "moe_grouped_cutlass_w8a8: len mismatch".into(),
-                ));
+                return Err(FFAIError::Dispatch("moe_grouped_cutlass_w8a8: len mismatch".into()));
             }
             let r = unsafe {
                 moe_grouped_gemm_w8a8(
@@ -361,7 +357,7 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!("moe_grouped_gemm_w8a8 failed: {r}")));
+                return Err(FFAIError::Dispatch(format!("moe_grouped_gemm_w8a8 failed: {r}")));
             }
             Ok(())
         }
@@ -381,7 +377,7 @@ impl CudaDevice {
                 n,
                 k,
             );
-            Err(MetalTileError::Dispatch("moe_grouped_cutlass_w8a8: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("moe_grouped_cutlass_w8a8: built without CUTLASS".into()))
         }
     }
 
@@ -396,7 +392,7 @@ impl CudaDevice {
         sfa_off: &[i64],
         n: usize,
         k: usize,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -432,7 +428,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (x, out, sf, group_rows, sfa_off, n, k);
-            Err(MetalTileError::Dispatch("w8a8_actquant: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("w8a8_actquant: built without CUTLASS".into()))
         }
     }
 
@@ -446,7 +442,7 @@ impl CudaDevice {
         n_exp: usize,
         n: usize,
         k: usize,
-    ) -> Result<i64, MetalTileError> {
+    ) -> Result<i64, FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -476,7 +472,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (w, outp, sf, n_exp, n, k);
-            Err(MetalTileError::Dispatch("w8a8_packw: built without CUTLASS".into()))
+            Err(FFAIError::Dispatch("w8a8_packw: built without CUTLASS".into()))
         }
     }
 
@@ -494,7 +490,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         max_m_total: usize,
-    ) -> Result<u64, MetalTileError> {
+    ) -> Result<u64, FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -521,14 +517,14 @@ impl CudaDevice {
                 )
             };
             if h.is_null() {
-                return Err(MetalTileError::Dispatch("cutlass_fp4_prepare failed".into()));
+                return Err(FFAIError::Dispatch("cutlass_fp4_prepare failed".into()));
             }
             Ok(h as u64)
         }
         #[cfg(not(have_cutlass))]
         {
             let _ = (w, sfw, alpha_vec, n_groups, n, k, max_m_total);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -541,7 +537,7 @@ impl CudaDevice {
         sfa: CUdeviceptr,
         d_out: CUdeviceptr,
         off_dev: CUdeviceptr,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -566,14 +562,14 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!("cutlass_fp4_run failed: code {r}")));
+                return Err(FFAIError::Dispatch(format!("cutlass_fp4_run failed: code {r}")));
             }
             Ok(())
         }
         #[cfg(not(have_cutlass))]
         {
             let _ = (handle, a, sfa, d_out, off_dev);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -592,7 +588,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         max_m_total: usize,
-    ) -> Result<u64, MetalTileError> {
+    ) -> Result<u64, FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -621,14 +617,14 @@ impl CudaDevice {
                 )
             };
             if h.is_null() {
-                return Err(MetalTileError::Dispatch("cutlass_fp4_FUSEDACT_prepare failed".into()));
+                return Err(FFAIError::Dispatch("cutlass_fp4_FUSEDACT_prepare failed".into()));
             }
             Ok(h as u64)
         }
         #[cfg(not(have_cutlass))]
         {
             let _ = (w, sfw, alpha_vec, norm_constant, n_groups, n, k, max_m_total);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -644,7 +640,7 @@ impl CudaDevice {
         d_out: CUdeviceptr,
         sfd_out: CUdeviceptr,
         off_dev: CUdeviceptr,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -671,7 +667,7 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cutlass_fp4_FUSEDACT_run failed: code {r}"
                 )));
             }
@@ -680,7 +676,7 @@ impl CudaDevice {
         #[cfg(not(have_cutlass))]
         {
             let _ = (handle, a, sfa, d_out, sfd_out, off_dev);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -700,7 +696,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         max_m_total: usize,
-    ) -> Result<u64, MetalTileError> {
+    ) -> Result<u64, FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -727,14 +723,14 @@ impl CudaDevice {
                 )
             };
             if h.is_null() {
-                return Err(MetalTileError::Dispatch("cutlass_fp4_AMAX_prepare failed".into()));
+                return Err(FFAIError::Dispatch("cutlass_fp4_AMAX_prepare failed".into()));
             }
             Ok(h as u64)
         }
         #[cfg(not(have_cutlass))]
         {
             let _ = (w, sfw, d_amax, n_groups, n, k, max_m_total);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -750,7 +746,7 @@ impl CudaDevice {
         sfa: CUdeviceptr,
         d_out: CUdeviceptr,
         off_dev: CUdeviceptr,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         #[cfg(have_cutlass)]
         {
@@ -775,16 +771,14 @@ impl CudaDevice {
                 )
             };
             if r != 0 {
-                return Err(MetalTileError::Dispatch(format!(
-                    "cutlass_fp4_AMAX_run failed: code {r}"
-                )));
+                return Err(FFAIError::Dispatch(format!("cutlass_fp4_AMAX_run failed: code {r}")));
             }
             Ok(())
         }
         #[cfg(not(have_cutlass))]
         {
             let _ = (handle, a, sfa, d_out, off_dev);
-            Err(MetalTileError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
+            Err(FFAIError::Dispatch("built without CUTLASS (set CUTLASS_DIR)".into()))
         }
     }
 
@@ -809,7 +803,7 @@ impl CudaDevice {
         k: usize,
         out_f32: bool,
         d_scale: CUdeviceptr, // device f32 applied to D (per-tensor global fold); 0 = none
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let (lt, workspace) = self.cublaslt_ctx()?;
         let alpha: f32 = 1.0;
@@ -820,7 +814,7 @@ impl CudaDevice {
             let mut desc: cublasLtMatmulDesc_t = ptr::null_mut();
             let s = cublasLtMatmulDescCreate(&mut desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
             if s != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
+                return Err(FFAIError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
             }
             if use_dev_alpha {
                 let pm: c_int = CUBLASLT_POINTER_MODE_DEVICE;
@@ -924,7 +918,7 @@ impl CudaDevice {
                 cublasLtMatrixLayoutDestroy(b_l);
                 cublasLtMatrixLayoutDestroy(d_l);
                 cublasLtMatmulDescDestroy(desc);
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLt-fp4: no algo (m={m} n={n} k={k} status={hs} returned={returned})"
                 )));
             }
@@ -962,7 +956,7 @@ impl CudaDevice {
             cublasLtMatrixLayoutDestroy(d_l);
             cublasLtMatmulDescDestroy(desc);
             if mm != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLtMatmul(fp4) failed: status {mm} (m={m} n={n} k={k})"
                 )));
             }
@@ -987,7 +981,7 @@ impl CudaDevice {
         n: usize,
         k: usize,
         out_f32: bool,
-    ) -> Result<(), MetalTileError> {
+    ) -> Result<(), FFAIError> {
         self.ensure_current();
         let (lt, workspace) = self.cublaslt_ctx()?;
         let alpha: f32 = 1.0;
@@ -996,7 +990,7 @@ impl CudaDevice {
             let mut desc: cublasLtMatmulDesc_t = ptr::null_mut();
             let s = cublasLtMatmulDescCreate(&mut desc, CUBLAS_COMPUTE_32F, CUDA_R_32F);
             if s != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
+                return Err(FFAIError::Dispatch(format!("cublasLtMatmulDescCreate: {s}")));
             }
             let opt = CUBLAS_OP_T;
             let opn = CUBLAS_OP_N;
@@ -1080,7 +1074,7 @@ impl CudaDevice {
                 cublasLtMatrixLayoutDestroy(b_l);
                 cublasLtMatrixLayoutDestroy(d_l);
                 cublasLtMatmulDescDestroy(desc);
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLt-fp8: no algo (m={m} n={n} k={k} status={hs} returned={returned})"
                 )));
             }
@@ -1108,7 +1102,7 @@ impl CudaDevice {
             cublasLtMatrixLayoutDestroy(d_l);
             cublasLtMatmulDescDestroy(desc);
             if mm != CUBLAS_STATUS_SUCCESS {
-                return Err(MetalTileError::Dispatch(format!(
+                return Err(FFAIError::Dispatch(format!(
                     "cublasLtMatmul(fp8) failed: status {mm} (m={m} n={n} k={k})"
                 )));
             }
@@ -1120,7 +1114,7 @@ impl CudaDevice {
     /// No host staging buffer and no stream drain — the cheap way to seed an
     /// accumulator (vs uploading a host zero buffer, which for a [s,hid] f32
     /// accumulator is a multi-MB pageable H2D copy per call).
-    pub fn memset_zero_raw(&self, ptr: CUdeviceptr, len: usize) -> Result<(), MetalTileError> {
+    pub fn memset_zero_raw(&self, ptr: CUdeviceptr, len: usize) -> Result<(), FFAIError> {
         self.ensure_current();
         if ptr == 0 || len == 0 {
             return Ok(());

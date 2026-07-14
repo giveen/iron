@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! Value Sinking — move single-use definitions closer to their consumers.
 //!
@@ -10,7 +10,7 @@
 //!
 //! ## Why It Matters
 //!
-//! MetalTile emits MSL source with `auto` variables.  The Metal compiler
+//! FFAI Kernels emits MSL source with `auto` variables.  The Metal compiler
 //! handles register allocation, but shorter live ranges in the IR correlate
 //! with lower register pressure in the generated code.  On M3+, the OMU can
 //! exploit lower register pressure for higher occupancy.

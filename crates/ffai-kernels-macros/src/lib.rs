@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! MetalTile proc macros: `#[kernel]`, `#[bench]`, `#[test_kernel]`, `shape!`, `tile!`.
+//! FFAI Kernels proc macros: `#[kernel]`, `#[bench]`, `#[test_kernel]`, `shape!`, `tile!`.
 //!
 //! Each macro lives in its own submodule; this file is a thin routing layer.
 //! Kernel authors never need to look here — see `specs/TOOLCHAIN_DESIGN.md`.
@@ -82,7 +82,7 @@ pub fn strided(_attr: TokenStream, item: TokenStream) -> TokenStream { item }
 // #[kernel]
 // ---------------------------------------------------------------------------
 
-/// Marks a function as a MetalTile kernel.
+/// Marks a function as a FFAI Kernels kernel.
 ///
 /// Use the separate `#[bench]` and `#[test_kernel]` attributes for
 /// benchmark and correctness-test registration.
@@ -98,7 +98,7 @@ pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream { kernel::exp
 // #[bench] — new OO bench registration
 // ---------------------------------------------------------------------------
 
-/// Register a kernel benchmark with the `tile bench` runner.
+/// Register a kernel benchmark with the `ffaik bench` runner.
 ///
 /// ```ignore
 /// #[bench(name = "unary/exp", dtypes = [f32, f16, bf16])]
@@ -111,7 +111,7 @@ pub fn bench(attr: TokenStream, item: TokenStream) -> TokenStream { bench::expan
 // #[test_kernel] — new OO test registration
 // ---------------------------------------------------------------------------
 
-/// Register a kernel correctness test with the `tile test` runner.
+/// Register a kernel correctness test with the `ffaik test` runner.
 ///
 /// ```ignore
 /// #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-4)]

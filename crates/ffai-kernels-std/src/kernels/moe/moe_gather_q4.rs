@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched Q4 mixture-of-experts gather projections — fuse the per-expert
 //! up / down GEMVs into single big dispatches (gather the top-k selected

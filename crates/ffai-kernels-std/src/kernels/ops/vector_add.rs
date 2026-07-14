@@ -1,11 +1,11 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Generic elementwise vector add — `out[i] = a[i] + b[i]`.
 //!
 //! Trivial kernel that didn't already exist in the binary-op surface
 //! (which is shape-spec-tied to MLX's `Binary` class registration).
 //! Lands in `ffai/` so the bare-`#[kernel]` form emits cleanly into
-//! `MetalTileKernels.swift` for FFAI callers.
+//! `FFAIKernels.swift` for FFAI callers.
 
 use ffai_kernels::kernel;
 

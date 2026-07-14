@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Block-scaled **dequantizing GEMV** kernels (Phase B of the precision
 //! roadmap, `specs/BENCH_METRICS_SPEC.md` Appendix B): `output[row] =

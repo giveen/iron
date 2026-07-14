@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU runner: compile Metal source, allocate buffers, dispatch kernels, measure GPU time.
 //!
@@ -659,7 +659,7 @@ pub fn bench_gbps(
 }
 
 /// Like [`bench_gbps`] but with explicit warmup / iteration counts, allowing
-/// `tile.toml` `warmup_runs` / `runs` to override the compile-time defaults.
+/// `ffai.toml` `warmup_runs` / `runs` to override the compile-time defaults.
 #[allow(clippy::too_many_arguments)]
 pub fn bench_gbps_with(
     runner: &GpuRunner,

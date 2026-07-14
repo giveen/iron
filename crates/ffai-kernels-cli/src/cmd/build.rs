@@ -1,8 +1,8 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `tile build` — Compile all registered kernels.
+//! `ffaik build` — Compile all registered kernels.
 //!
-//! Spawns `__tile_runner build` as a subprocess. All kernel discovery,
+//! Spawns `__ffai_runner build` as a subprocess. All kernel discovery,
 //! MSL generation, xcrun compile-checks, and artifact emission happen in
 //! the runner process where `ffai-kernels-std` is linked.
 //!
@@ -12,7 +12,7 @@
 //!   --emit msl       Write per-kernel `<dir>/Resources/kernels/<name>.metal`
 //!   --emit metallib  Compile + write `<dir>/Resources/kernels.metallib`
 //!                    (implies msl)
-//!   --emit swift     Write `<dir>/Generated/MetalTileKernels.swift`
+//!   --emit swift     Write `<dir>/Generated/FFAIKernels.swift`
 //!   --emit ir        Write `<dir>/Resources/manifest.json` IR descriptor
 //!   --emit all       Shorthand for msl,metallib,swift,ir
 //!
@@ -32,10 +32,10 @@ use crate::{
 
 fn pad_left(text: &str, width: usize) -> String { format!("{text:<width$}") }
 
-/// `TileCommand` wrapper for `tile build`.
+/// `FFAICommand` wrapper for `ffaik build`.
 pub struct BuildCommand<'a>(pub &'a BuildArgs);
 
-impl<'a> super::TileCommand for BuildCommand<'a> {
+impl<'a> super::FFAICommand for BuildCommand<'a> {
     fn run(&self, harness: &crate::harness::Harness) -> Result<(), crate::CliError> {
         run(self.0, harness)
     }
@@ -45,7 +45,7 @@ pub fn run(args: &BuildArgs, harness: &crate::harness::Harness) -> Result<(), Cl
     let _span = tracing::info_span!("build", filter = ?args.filter_args.filter, emit = ?args.emit)
         .entered();
     let verbose = harness.verbosity() > 0;
-    // CLI --sdk overrides tile.toml sdk.
+    // CLI --sdk overrides ffai.toml sdk.
     let sdk = args.sdk.clone().unwrap_or_else(|| harness.config.effective_sdk().to_string());
 
     // Validate --emit + --out combination early in the CLI (before spawning runner).

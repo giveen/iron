@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness for `mt_moe_gather_qmm_int4_m16` and
 //! `mt_moe_gather_qmm_int4_m32` — short-prefill MoE GEMV with int4

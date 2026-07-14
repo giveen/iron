@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Fused MoE decode kernel: SwiGLU + 8-way indexed down-projection + scalar-FMA chain.
 //!
@@ -133,7 +133,7 @@ use ffai_kernels::kernel;
 ///   locals. Passing them in (instead of declaring `let we = ...`
 ///   inside the macro body) gives each slot a distinct C-level name,
 ///   so the emitted MSL is byte-identical to the hand-unrolled version
-///   (verified via `tile build --emit` diff across f32/f16/bf16).
+///   (verified via `ffaik build --emit` diff across f32/f16/bf16).
 /// - `$trailing`: either `{ threadgroup_barrier(); }` (slots 0..6,
 ///   WAR barrier before next slot overwrites `tg_inner`) or `{}`
 ///   (slot 7, no further `tg_inner` access after this slot).

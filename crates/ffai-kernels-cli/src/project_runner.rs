@@ -1,14 +1,14 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `ProjectRunner` — spawns `__tile_runner` as a subprocess and streams its
+//! `ProjectRunner` — spawns `__ffai_runner` as a subprocess and streams its
 //! `ProtocolMessage` JSON-lines output to stdout.
 //!
 //! ```text
-//!  tile CLI  ──spawn──►  __tile_runner  (ffai-kernels-std linked → inventory populated)
+//!  ffaik CLI  ──spawn──►  __ffai_runner  (ffai-kernels-std linked → inventory populated)
 //!             JSON Lines ◄── stdout
 //! ```
 //!
-//! `__tile_runner` is a hidden binary scaffolded by `tile init` into the
+//! `__ffai_runner` is a hidden binary scaffolded by `ffaik init` into the
 //! project's `bin/` directory and installed there via
 //! `cargo install --path . --root .`.
 
@@ -16,7 +16,7 @@ use ffai_kernels_core::protocol::ProtocolMessage;
 
 use crate::harness::Harness;
 
-/// Describes one invocation of `__tile_runner`.
+/// Describes one invocation of `__ffai_runner`.
 #[derive(Debug, Clone, Default)]
 pub struct RunnerInvocation {
     /// Subcommand: "bench", "test", "build", or "inspect".
@@ -64,7 +64,7 @@ pub struct ProjectRunner<'a> {
 impl<'a> ProjectRunner<'a> {
     pub fn new(harness: &'a Harness) -> Self { Self { harness } }
 
-    /// Spawn `__tile_runner` as a subprocess with stdout/stderr inherited,
+    /// Spawn `__ffai_runner` as a subprocess with stdout/stderr inherited,
     /// so its `ProtocolMessage` JSON lines flow directly to the terminal.
     /// Returns `true` when the runner exits with status 0.
     pub fn run(&self, inv: &RunnerInvocation) -> bool {
@@ -76,13 +76,13 @@ impl<'a> ProjectRunner<'a> {
         match cmd.status() {
             Ok(s) => s.success(),
             Err(e) => {
-                eprintln!("[tile] failed to spawn '{binary}': {e}");
+                eprintln!("[ffaik] failed to spawn '{binary}': {e}");
                 false
             },
         }
     }
 
-    /// Spawn `__tile_runner`, capture its stdout, parse each
+    /// Spawn `__ffai_runner`, capture its stdout, parse each
     /// `ProtocolMessage` JSON line, and call `on_msg` for each.
     /// Returns `true` if the subprocess exits successfully.
     pub fn run_streaming(
@@ -99,7 +99,7 @@ impl<'a> ProjectRunner<'a> {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[tile] failed to spawn '{binary}': {e}");
+                eprintln!("[ffaik] failed to spawn '{binary}': {e}");
                 return false;
             },
         };
@@ -124,34 +124,34 @@ impl<'a> ProjectRunner<'a> {
         }
     }
 
-    /// Resolve the `__tile_runner` binary path.
+    /// Resolve the `__ffai_runner` binary path.
     ///
     /// Precedence:
-    /// 1. `tile.toml [runner] binary` config override (default: `bin/__tile_runner`).
-    /// 2. `./bin/__tile_runner` relative to CWD — the standard install location
-    ///    populated by `cargo install --path . --root .` in a tile project.
-    /// 3. Sibling of the current `tile` executable — works when both binaries
+    /// 1. `ffai.toml [runner] binary` config override (default: `bin/__ffai_runner`).
+    /// 2. `./bin/__ffai_runner` relative to CWD — the standard install location
+    ///    populated by `cargo install --path . --root .` in a ffaik project.
+    /// 3. Sibling of the current `ffaik` executable — works when both binaries
     ///    are installed to the same prefix (e.g. `~/.cargo/bin/`).
-    /// 4. Bare `"__tile_runner"` resolved via `$PATH` as a last resort.
+    /// 4. Bare `"__ffai_runner"` resolved via `$PATH` as a last resort.
     fn runner_binary(&self) -> String {
         let configured = self.harness.runner_binary();
-        if configured != "__tile_runner" {
+        if configured != "__ffai_runner" {
             return configured.to_string();
         }
         let cwd = std::env::current_dir().unwrap_or_default();
-        let local = cwd.join("bin").join("__tile_runner");
+        let local = cwd.join("bin").join("__ffai_runner");
         if local.exists() {
             return local.to_string_lossy().into_owned();
         }
         if let Ok(exe) = std::env::current_exe()
             && let Some(dir) = exe.parent()
         {
-            let sibling = dir.join("__tile_runner");
+            let sibling = dir.join("__ffai_runner");
             if sibling.exists() {
                 return sibling.to_string_lossy().into_owned();
             }
         }
-        "__tile_runner".to_string()
+        "__ffai_runner".to_string()
     }
 }
 

@@ -1,4 +1,4 @@
-//! Copyright 2026 TheTom
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Localize the u16 view-bm64 dequant bug: run the POOL bm64 (validated) and
 //! the view-u16 bm64 on the SAME IQ2_XXS source (raw 66-byte blocks →

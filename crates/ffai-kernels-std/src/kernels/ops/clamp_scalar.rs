@@ -1,3 +1,5 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
 //! Element-wise scalar clamp: `out[i] = min(max(x[i], lo), hi)`.
 //!
 //! The clamp bound for Gemma 4's `Gemma4ClippableLinear` (vision tower +

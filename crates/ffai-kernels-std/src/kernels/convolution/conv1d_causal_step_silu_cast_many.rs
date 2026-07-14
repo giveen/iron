@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Batched depthwise causal conv1d step + SiLU + cast-to-f32 — sweeps T
 //! tokens for one channel in ONE dispatch with the K-1 conv state held

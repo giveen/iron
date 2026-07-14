@@ -1,11 +1,11 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! In-process kernel IR registry consumed by [`KernelInlinePass`].
 //!
 //! [`KernelEntry`] lives here — alongside the pass that uses it — rather than
 //! in `ffai-kernels-core`, because kernel discovery is a runner/codegen concern.
-//! The `tile` CLI never calls `all_kernels()` or instantiates `KernelEntry`;
-//! those operations only happen inside the `__tile_runner` subprocess.
+//! The `ffaik` CLI never calls `all_kernels()` or instantiates `KernelEntry`;
+//! those operations only happen inside the `__ffai_runner` subprocess.
 //!
 //! The `ffai-kernels` facade re-exports [`KernelEntry`] and [`all_kernels`] from
 //! `ffai_kernels::harness::registry` so user code and the runner module can access
@@ -17,7 +17,7 @@ use ffai_kernels_core::{DType, ir::Kernel};
 // KernelEntry
 // ---------------------------------------------------------------------------
 
-/// Registry entry for a MetalTile kernel available for cross-kernel inlining.
+/// Registry entry for a FFAI Kernels kernel available for cross-kernel inlining.
 ///
 /// Each `#[kernel]` macro auto-submits one of these via `inventory::submit!`.
 /// [`KernelInlinePass`](crate::passes::KernelInlinePass) calls [`all_kernels`]

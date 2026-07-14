@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Block-scaled **dequantizing GEMM** (multi-row matmul) kernels — the qmm
 //! counterpart of the GEMVs in [`super::block_scaled_matmul`]:

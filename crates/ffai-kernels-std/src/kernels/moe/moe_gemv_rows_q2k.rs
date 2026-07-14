@@ -1,4 +1,4 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill MoE Q2_K GEMV-over-rows (down projection) — the Q2_K twin of
 //! mt_moe_gemv_rows_iq2xxs. Replaces the slow coop-tile bgemm

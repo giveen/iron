@@ -1,6 +1,6 @@
-//! Copyright 2026 0xClandestine, Ekryski, TheTom, Ambisphaeric
+//! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Protocol-message emitter for the `__tile_runner` subprocess.
+//! Protocol-message emitter for the `__ffai_runner` subprocess.
 //!
 //! Each emitted message is one JSON line terminated by `\n`, written to
 //! any `std::io::Write` sink (typically `std::io::stdout()`).
