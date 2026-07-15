@@ -7,10 +7,12 @@
 //! frame differencing. Migrated from the legacy `ffai/`.
 
 pub mod avg_pool2d_nhwc;
+pub mod broadcast_affine;
 pub mod frame_diff_luma;
 pub mod im2col_patch;
 pub mod im2col_patch_interleaved;
 pub mod patch_unfold;
+pub mod patch_unfold_qwen;
 pub mod pos_emb_2d_add;
 pub mod resize_normalize;
 pub mod transpose_th;

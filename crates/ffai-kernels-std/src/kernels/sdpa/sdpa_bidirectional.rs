@@ -757,10 +757,16 @@ pub mod kernel_tests {
     // oracle). f32-only: the O(n_query·n_q_heads·n_kv·head_dim) ≈ 340M-flop
     // oracle is the same in every dtype, so one dtype suffices here and
     // the small-shape tests above cover f16/bf16 rounding.
-    fn setup_prod(dt: DType) -> TestSetup {
-        let head_dim = 64usize;
-        let (n_q_heads, n_kv_heads) = (16usize, 16usize);
-        let (base_kv, n_query) = (0usize, 576usize);
+    #[allow(clippy::too_many_arguments)]
+    fn setup_prod(
+        ir: ffai_kernels::core::ir::Kernel,
+        head_dim: usize,
+        n_q_heads: usize,
+        n_kv_heads: usize,
+        n_query: usize,
+        dt: DType,
+    ) -> TestSetup {
+        let base_kv = 0usize;
         let kv_stride = base_kv + n_query;
         let heads_per_group = n_q_heads / n_kv_heads;
         let scale = 1.0f32 / (head_dim as f32).sqrt();
@@ -774,7 +780,7 @@ pub mod kernel_tests {
             &q, &k, &v, n_q_heads, n_kv_heads, head_dim, base_kv, n_query, kv_stride, scale,
         );
 
-        TestSetup::new(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt))
+        TestSetup::new(ir)
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -791,8 +797,34 @@ pub mod kernel_tests {
             .grid_3d((n_q_heads * n_query) as u32, 1, 1, [1024, 1, 1])
     }
 
+    // Production VLM vision-tower self-attention: 576 patches all attending each
+    // other, MHA 16 heads (base_kv=0, kv_stride=576). Grid `16 * 576 = 9216`
+    // threadgroups of 1024 — the exact shape that once CPU-pinned. These cells
+    // pin a correct dense bidirectional softmax at that geometry, no GPU pin.
     #[test_kernel(dtypes = [f32], tol = [2e-3])]
-    fn test_ffai_sdpa_bidirectional_d64_vision_tower(dt: DType) -> TestSetup { setup_prod(dt) }
+    fn test_ffai_sdpa_bidirectional_d64_vision_tower(dt: DType) -> TestSetup {
+        setup_prod(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, 16, 16, 576, dt)
+    }
+
+    // d80 (Qwen2.5-VL vision tower) at production shape — ragged-lane variant.
+    #[test_kernel(dtypes = [f32], tol = [2e-3])]
+    fn test_ffai_sdpa_bidirectional_d80_vision_tower(dt: DType) -> TestSetup {
+        setup_prod(ffai_sdpa_bidirectional_d80::kernel_ir_for(dt), 80, 16, 16, 576, dt)
+    }
+
+    // d96 (Phi-3-vision / Qwen variants) at production shape — ragged-lane.
+    #[test_kernel(dtypes = [f32], tol = [2e-3])]
+    fn test_ffai_sdpa_bidirectional_d96_vision_tower(dt: DType) -> TestSetup {
+        setup_prod(ffai_sdpa_bidirectional_d96::kernel_ir_for(dt), 96, 16, 16, 576, dt)
+    }
+
+    // Audio-encoder shape (Whisper / Qwen-Omni / SenseVoice): a long 1500-frame
+    // bidirectional block, 16 heads, head_dim 64 — longer KV walk than the
+    // vision shape; pins the n_kv-strided inner loop at audio sequence lengths.
+    #[test_kernel(dtypes = [f32], tol = [2e-3])]
+    fn test_ffai_sdpa_bidirectional_d64_audio_encoder(dt: DType) -> TestSetup {
+        setup_prod(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, 16, 16, 1500, dt)
+    }
 }
 
 /// New-syntax benchmarks for the bidirectional SDPA family (all head dims,

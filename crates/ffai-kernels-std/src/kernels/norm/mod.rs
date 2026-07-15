@@ -13,6 +13,7 @@
 
 pub mod adain1d;
 pub mod gated_rms_norm_block_scaled_qgemv;
+pub mod gated_rms_norm_pregate_qgemv;
 pub mod gated_rms_norm_qgemv;
 pub mod gated_rmsnorm;
 pub mod layer_norm;

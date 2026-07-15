@@ -13,6 +13,7 @@ pub mod conv3d;
 pub mod conv3d_block_scaled;
 pub mod conv3d_mma;
 pub mod conv3d_mma_block_scaled;
+pub mod depthwise_conv1d;
 pub mod depthwise_conv2d;
 pub mod depthwise_conv2d_block_scaled;
 pub mod depthwise_conv2d_nhwc;
