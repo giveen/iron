@@ -22,7 +22,7 @@
 //! memory.
 //!
 //! Lane → element mapping is the **A/C convention** used everywhere
-//! else in the codebase (see `mt_mma_probe_a_identity_b_identity`):
+//! else in the codebase (see `ffai_mma_probe_a_identity_b_identity`):
 //!
 //! ```text
 //!   qid = lane / 4
@@ -36,7 +36,7 @@
 //! Dispatch: grid `[1, 1, 1]`, tpg `[32, 1, 1]` (one simdgroup).
 //!
 //! Sample MSL the codegen produces (look for these in
-//! `cargo run -p ffai-kernels-cli -- inspect mt_simdgroup_load_probe`):
+//! `cargo run -p ffai-kernels-cli -- inspect ffai_simdgroup_load_probe`):
 //!
 //! ```text
 //!   threadgroup T tg_tile[64];
@@ -58,7 +58,7 @@ use ffai_kernels::kernel;
 ///   - `dst`: `[64]` flat row-major 8×8 destination, written from
 ///     the fragment in A/C lane convention
 #[kernel]
-pub fn mt_simdgroup_load_probe<T>(src: Tensor<T>, mut dst: Tensor<T>) {
+pub fn ffai_simdgroup_load_probe<T>(src: Tensor<T>, mut dst: Tensor<T>) {
     let lane = simd_lane;
     // A/C lane → frag-element mapping. Matches the probe kernel +
     // every MMA call site in `quantized.rs`. `fn0` / `fn1` are the
@@ -108,14 +108,14 @@ pub fn mt_simdgroup_load_probe<T>(src: Tensor<T>, mut dst: Tensor<T>) {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_simdgroup_load_probe;
+    use super::ffai_simdgroup_load_probe;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[test_kernel(dtypes = [f32, f16], tol = 0.0)]
     fn test_simdgroup_load_probe(dt: DType) -> TestSetup {
         // Distinct, dtype-representable values so a dropped/garbled lane shows.
         let src_f: Vec<f32> = (0..64).map(|i| (i as f32 - 32.0) * 0.5).collect();
-        TestSetup::new(mt_simdgroup_load_probe::kernel_ir_for(dt))
+        TestSetup::new(ffai_simdgroup_load_probe::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("src", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::zeros("dst", 64, dt))
@@ -129,11 +129,11 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_simdgroup_load_probe;
+    use super::ffai_simdgroup_load_probe;
 
     #[bench(dtypes = [f32, f16])]
     fn bench_simdgroup_load_probe(dt: DType) -> BenchSetup {
-        BenchSetup::new(mt_simdgroup_load_probe::kernel_ir_for(dt))
+        BenchSetup::new(ffai_simdgroup_load_probe::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("src", 64, dt))
             .buffer(BenchBuffer::zeros("dst", 64, dt).output())

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_grouped_gemm_q8` — the GROUPED multi-row
+//! GPU correctness for `ffai::ffai_grouped_gemm_q8` — the GROUPED multi-row
 //! Q8_0 tiled GEMM (O-LoRA-A prefill). Oracle: triple loop with the SAME Q8
 //! dequant as `gemm_q8_correctness`, but output column `o` belongs to group
 //! `g = o / rows_per_group` and reads the `g`-th `in_dim`-slice of an
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::gemm::gemm_q8::mt_grouped_gemm_q8;
+use ffai_kernels_std::kernels::gemm::gemm_q8::ffai_grouped_gemm_q8;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -87,7 +87,7 @@ fn run_case(
     buffers.insert("rows_per_group".into(), (rows_per_group as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut kernel = mt_grouped_gemm_q8::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_grouped_gemm_q8::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let gx = (out_dim as u32).div_ceil(32);
     let gy = (n_rows as u32).div_ceil(32);

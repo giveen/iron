@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn pso_cache_key_folds_all_param_dtypes() {
         // Regression: `pso_cache_key` used to fold only `params.first()`.
-        // Quantized kernels (mt_qmm, dequant_gemv_int*) take a packed
+        // Quantized kernels (ffai_qmm, dequant_gemv_int*) take a packed
         // `Tensor<u32>` weight as their first param, so the f32 / f16 /
         // bf16 monomorphizations shared one key and collided onto a single
         // PSO — whichever dtype compiled first served the others, reading
@@ -662,13 +662,13 @@ mod tests {
         // full param-dtype signature now participates: kernels that differ
         // only in a *later* value dtype must hash to distinct keys.
         let consts = BTreeMap::new();
-        let mut k_f32 = Kernel::new("mt_qmm");
+        let mut k_f32 = Kernel::new("ffai_qmm");
         k_f32.params = vec![
             tensor_param("w", DType::U32, &[4], false, ParamKind::Tensor),
             tensor_param("scales", DType::F32, &[4], false, ParamKind::Tensor),
             tensor_param("out", DType::F32, &[4], true, ParamKind::Tensor),
         ];
-        let mut k_f16 = Kernel::new("mt_qmm");
+        let mut k_f16 = Kernel::new("ffai_qmm");
         k_f16.params = vec![
             tensor_param("w", DType::U32, &[4], false, ParamKind::Tensor),
             tensor_param("scales", DType::F16, &[4], false, ParamKind::Tensor),

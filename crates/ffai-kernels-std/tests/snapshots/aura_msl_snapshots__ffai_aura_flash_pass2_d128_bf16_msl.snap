@@ -6,7 +6,7 @@ expression: msl
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mt_aura_flash_pass2_d128(
+kernel void ffai_aura_flash_pass2_d128(
     const device bfloat *o_partials [[buffer(0)]],
     const device bfloat *m_partials [[buffer(1)]],
     const device bfloat *l_partials [[buffer(2)]],

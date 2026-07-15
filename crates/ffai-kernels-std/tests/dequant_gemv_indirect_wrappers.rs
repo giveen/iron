@@ -1,8 +1,8 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Regression guard: `mt_dequant_gemv_int4` indirect Swift wrappers.
+//! Regression guard: `ffai_dequant_gemv_int4` indirect Swift wrappers.
 //!
-//! FFAI's GPU-router dispatches `mt_dequant_gemv_int4` indirectly (grid shape
+//! FFAI's GPU-router dispatches `ffai_dequant_gemv_int4` indirectly (grid shape
 //! from an `MTLBuffer` rather than a host `MTLSize`). This test lives in
 //! `ffai-kernels-std` — not the CLI — because the kernel corpus lives here and
 //! `all_benches()` only returns entries when std is linked.
@@ -40,7 +40,8 @@ fn collect_kernels_with_indirect_flags() -> Vec<Kernel> {
             };
             let mut k = b.setup(dt).kernel().clone();
             k.name = mono.clone();
-            if matches!(mono.as_str(), "mt_dequant_gemv_int4_f16" | "mt_dequant_gemv_int4_bf16") {
+            if matches!(mono.as_str(), "ffai_dequant_gemv_int4_f16" | "ffai_dequant_gemv_int4_bf16")
+            {
                 k.wants_indirect_variant = true;
             }
             kernels.push(k);
@@ -50,29 +51,29 @@ fn collect_kernels_with_indirect_flags() -> Vec<Kernel> {
 }
 
 #[test]
-fn mt_dequant_gemv_int4_is_registered() {
+fn ffai_dequant_gemv_int4_is_registered() {
     let kernels = collect_kernels_with_indirect_flags();
     assert!(
-        kernels.iter().any(|k| k.name == "mt_dequant_gemv_int4_f16"),
-        "mt_dequant_gemv_int4_f16 missing from kernel set"
+        kernels.iter().any(|k| k.name == "ffai_dequant_gemv_int4_f16"),
+        "ffai_dequant_gemv_int4_f16 missing from kernel set"
     );
     assert!(
-        kernels.iter().any(|k| k.name == "mt_dequant_gemv_int4_bf16"),
-        "mt_dequant_gemv_int4_bf16 missing from kernel set"
+        kernels.iter().any(|k| k.name == "ffai_dequant_gemv_int4_bf16"),
+        "ffai_dequant_gemv_int4_bf16 missing from kernel set"
     );
 }
 
 #[test]
-fn mt_dequant_gemv_int4_swift_wrappers_are_indirect() {
+fn ffai_dequant_gemv_int4_swift_wrappers_are_indirect() {
     let kernels = collect_kernels_with_indirect_flags();
     let swift = render_swift_wrappers(&kernels);
     assert!(
-        swift.contains("func mt_dequant_gemv_int4_f16_indirect("),
-        "indirect Swift wrapper for mt_dequant_gemv_int4_f16 dropped"
+        swift.contains("func ffai_dequant_gemv_int4_f16_indirect("),
+        "indirect Swift wrapper for ffai_dequant_gemv_int4_f16 dropped"
     );
     assert!(
-        swift.contains("func mt_dequant_gemv_int4_bf16_indirect("),
-        "indirect Swift wrapper for mt_dequant_gemv_int4_bf16 dropped"
+        swift.contains("func ffai_dequant_gemv_int4_bf16_indirect("),
+        "indirect Swift wrapper for ffai_dequant_gemv_int4_bf16 dropped"
     );
     assert!(
         swift.contains("dispatchThreadgroups(indirectBuffer:"),

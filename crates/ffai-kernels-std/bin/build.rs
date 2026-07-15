@@ -44,7 +44,7 @@ fn main() {
 ///
 /// Progress visibility: when the cache is hot this is a 1 ms noop and prints
 /// nothing. When stale/missing (first `ffaik bench` after `cargo clean`, or
-/// after the pinned `MLX_COMMIT` changes — e.g. PR #94 repointed to
+/// after the pinned `MLX_COMMIT` changes — e.g. when it was repointed to
 /// `ekryski/mlx@alpha`), prints status to stderr in real time so the build
 /// doesn't look hung during the 30-60 s git fetch.
 ///

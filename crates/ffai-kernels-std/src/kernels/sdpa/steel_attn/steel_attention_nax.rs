@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_sdpa_prefill_nax` — flash attention via `mpp::tensor_ops::matmul2d`.
+//! `ffai_sdpa_prefill_nax` — flash attention via `mpp::tensor_ops::matmul2d`.
 //!
 //! NAX (Apple tensor-core) port of the steel flash-attention prefill
 //! kernel. Requires Metal 4 / macOS 26+ and Apple10+ hardware (M4 family
@@ -8,7 +8,7 @@
 //!
 //! Expressed in the `#[kernel]` DSL via the `coop_tile_*` intrinsics —
 //! no `Op::InlineMsl`. The cooperative-tensor counterpart of
-//! `mt_sdpa_prefill_mma`: the standard FlashAttention-2 online-softmax
+//! `ffai_sdpa_prefill_mma`: the standard FlashAttention-2 online-softmax
 //! loop, but the two matmuls — `S = Q·Kᵀ` and `O += P·V` — are each one
 //! cooperative `matmul2d` instead of an 8×8 `simdgroup_matmul` ladder.
 //!
@@ -74,7 +74,7 @@ pub const TG_LD_K: u32 = BK + TG_SKEW; // 20
 ///
 /// Legacy variant — head_dim is fixed at 32 (no D-chunk loop). Kept for
 /// back-compat with callers that call into this module directly. New code
-/// should prefer `mt_sdpa_prefill_nax_d64` / `_d128` / `_d256` for
+/// should prefer `ffai_sdpa_prefill_nax_d64` / `_d128` / `_d256` for
 /// production head dims.
 ///
 /// Params: `q`/`k`/`v`/`out` are `[batch, heads, len, head_dim]` slabs
@@ -82,7 +82,7 @@ pub const TG_LD_K: u32 = BK + TG_SKEW; // 20
 /// `q_len`, `k_len`, `gqa_factor`, `n_q_heads`, `n_kv_heads`, `scale`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_sdpa_prefill_nax<T>(
+pub fn ffai_sdpa_prefill_nax<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -237,7 +237,7 @@ pub fn mt_sdpa_prefill_nax<T>(
     }
 }
 
-// ── D-chunk macro: generates mt_sdpa_prefill_nax_d{64,128,256} ────────────
+// ── D-chunk macro: generates ffai_sdpa_prefill_nax_d{64,128,256} ────────────
 //
 // The macro expands to a full kernel body that loops the QK and PV
 // contractions over `n_chunks = $head_dim / 32` consecutive 32-wide D-slices.
@@ -261,7 +261,7 @@ macro_rules! sdpa_prefill_nax_wide {
             "Flash-attention prefill via cooperative `matmul2d`, head_dim=",
             stringify!($head_dim),
             ".\n\n",
-            "Same algorithm as `mt_sdpa_prefill_nax` (d=32) but loops the QK and PV\n",
+            "Same algorithm as `ffai_sdpa_prefill_nax` (d=32) but loops the QK and PV\n",
             "contractions over `", stringify!($n_chunks), "` consecutive 32-wide D-chunks.\n",
             "The S-tile (16×16) and online-softmax state are unchanged; only the\n",
             "head_dim axis of the Q/K/V loads and the Os accumulator scale up.\n\n",
@@ -526,9 +526,9 @@ macro_rules! sdpa_prefill_nax_wide {
 // d64:  16 × 68  = 1088
 // d128: 16 × 132 = 2112
 // d256: 16 × 260 = 4160
-sdpa_prefill_nax_wide!(mt_sdpa_prefill_nax_d64, 64u32, 2u32, 1088);
-sdpa_prefill_nax_wide!(mt_sdpa_prefill_nax_d128, 128u32, 4u32, 2112);
-sdpa_prefill_nax_wide!(mt_sdpa_prefill_nax_d256, 256u32, 8u32, 4160);
+sdpa_prefill_nax_wide!(ffai_sdpa_prefill_nax_d64, 64u32, 2u32, 1088);
+sdpa_prefill_nax_wide!(ffai_sdpa_prefill_nax_d128, 128u32, 4u32, 2112);
+sdpa_prefill_nax_wide!(ffai_sdpa_prefill_nax_d256, 256u32, 8u32, 4160);
 
 /// New-syntax benchmark for the NAX SDPA-prefill kernel (`mpp::matmul2d`
 /// flash attention, head_dim=32). The NAX path lowers to Apple
@@ -536,8 +536,7 @@ sdpa_prefill_nax_wide!(mt_sdpa_prefill_nax_d256, 256u32, 8u32, 4160);
 /// dispatches everywhere but only executes on supported HW.
 ///
 /// Dispatch contract (mirrors the in-source `#[test_kernel]`s, ported from
-/// the legacy `tests/steel_attention_nax_gpu_correctness.rs`, removed in
-/// #240):
+/// the legacy `tests/steel_attention_nax_gpu_correctness.rs`, since removed):
 ///
 /// - **Reduction mode** — the kernel reads `tgid_x`/`tgid_y`/`tgid_z`.
 /// - **Grid = (q_len / BQ=16, n_q_heads, batch)** threadGROUP counts,
@@ -551,7 +550,7 @@ sdpa_prefill_nax_wide!(mt_sdpa_prefill_nax_d256, 256u32, 8u32, 4160);
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{BQ, TPG, mt_sdpa_prefill_nax};
+    use super::{BQ, TPG, ffai_sdpa_prefill_nax};
 
     // SDPA prefill geometry — NAX head_dim is fixed at 32.
     const HEAD_DIM: usize = 32;
@@ -567,7 +566,7 @@ pub mod kernel_benches {
         let q_elems = BATCH * N_Q_HEADS * Q_LEN * HEAD_DIM;
         let kv_elems = BATCH * N_KV_HEADS * K_LEN * HEAD_DIM;
         let scale = 1.0f32 / (HEAD_DIM as f32).sqrt();
-        BenchSetup::new(mt_sdpa_prefill_nax::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_prefill_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", q_elems, dt))
             .buffer(BenchBuffer::random("k", kv_elems, dt))
@@ -610,10 +609,10 @@ pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
     use super::{
-        mt_sdpa_prefill_nax,
-        mt_sdpa_prefill_nax_d64,
-        mt_sdpa_prefill_nax_d128,
-        mt_sdpa_prefill_nax_d256,
+        ffai_sdpa_prefill_nax,
+        ffai_sdpa_prefill_nax_d64,
+        ffai_sdpa_prefill_nax_d128,
+        ffai_sdpa_prefill_nax_d256,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -713,21 +712,21 @@ pub mod kernel_tests {
     // scalar/MMA siblings (online-softmax + matmul drift).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_sdpa_prefill_nax::kernel_ir_for(dt), 32, dt)
+        nax_setup(ffai_sdpa_prefill_nax::kernel_ir_for(dt), 32, dt)
     }
 
     // Wide head-dim variants — D-chunk loop over head_dim/32 32-wide chunks.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_nax_d64(dt: DType) -> TestSetup {
-        nax_setup(mt_sdpa_prefill_nax_d64::kernel_ir_for(dt), 64, dt)
+        nax_setup(ffai_sdpa_prefill_nax_d64::kernel_ir_for(dt), 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_nax_d128(dt: DType) -> TestSetup {
-        nax_setup(mt_sdpa_prefill_nax_d128::kernel_ir_for(dt), 128, dt)
+        nax_setup(ffai_sdpa_prefill_nax_d128::kernel_ir_for(dt), 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_nax_d256(dt: DType) -> TestSetup {
-        nax_setup(mt_sdpa_prefill_nax_d256::kernel_ir_for(dt), 256, dt)
+        nax_setup(ffai_sdpa_prefill_nax_d256::kernel_ir_for(dt), 256, dt)
     }
 }
 
@@ -740,8 +739,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_sdpa_prefill_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_sdpa_prefill_nax");
+            let k = ffai_sdpa_prefill_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_sdpa_prefill_nax");
             assert_eq!(k.params.len(), 4);
             assert!(k.params[3].is_output);
             assert_eq!(k.constexprs.len(), 6);
@@ -761,9 +760,12 @@ mod tests {
         // (accumulate), pv (overwrite).
         for dt in [DType::F32, DType::F16, DType::BF16] {
             for (name, kernel_ir) in [
-                ("mt_sdpa_prefill_nax_d64", mt_sdpa_prefill_nax_d64::kernel_ir_for as fn(_) -> _),
-                ("mt_sdpa_prefill_nax_d128", mt_sdpa_prefill_nax_d128::kernel_ir_for),
-                ("mt_sdpa_prefill_nax_d256", mt_sdpa_prefill_nax_d256::kernel_ir_for),
+                (
+                    "ffai_sdpa_prefill_nax_d64",
+                    ffai_sdpa_prefill_nax_d64::kernel_ir_for as fn(_) -> _,
+                ),
+                ("ffai_sdpa_prefill_nax_d128", ffai_sdpa_prefill_nax_d128::kernel_ir_for),
+                ("ffai_sdpa_prefill_nax_d256", ffai_sdpa_prefill_nax_d256::kernel_ir_for),
             ] {
                 let k = kernel_ir(dt);
                 assert_eq!(k.name, name);
@@ -786,17 +788,17 @@ mod tests {
     fn codegen_emits_mpp_include_and_kernel_decl() {
         use ffai_kernels::codegen::msl::MslGenerator;
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
-            let mut k = mt_sdpa_prefill_nax::kernel_ir_for(dt);
+            let mut k = ffai_sdpa_prefill_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 _ => "bf16",
             };
-            k.name = format!("mt_sdpa_prefill_nax_{suffix}");
+            k.name = format!("ffai_sdpa_prefill_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
             assert!(msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"));
             assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-            assert!(msl.contains(&format!("kernel void mt_sdpa_prefill_nax_{suffix}")));
+            assert!(msl.contains(&format!("kernel void ffai_sdpa_prefill_nax_{suffix}")));
             assert!(msl.contains(&format!("threadgroup {t_name}")));
         }
     }
@@ -806,9 +808,9 @@ mod tests {
         use ffai_kernels::codegen::msl::MslGenerator;
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
             for (dim, kernel_ir) in [
-                (64usize, mt_sdpa_prefill_nax_d64::kernel_ir_for as fn(_) -> _),
-                (128, mt_sdpa_prefill_nax_d128::kernel_ir_for),
-                (256, mt_sdpa_prefill_nax_d256::kernel_ir_for),
+                (64usize, ffai_sdpa_prefill_nax_d64::kernel_ir_for as fn(_) -> _),
+                (128, ffai_sdpa_prefill_nax_d128::kernel_ir_for),
+                (256, ffai_sdpa_prefill_nax_d256::kernel_ir_for),
             ] {
                 let suffix = match dt {
                     DType::F32 => "f32",
@@ -816,7 +818,7 @@ mod tests {
                     _ => "bf16",
                 };
                 let mut k = kernel_ir(dt);
-                k.name = format!("mt_sdpa_prefill_nax_d{dim}_{suffix}");
+                k.name = format!("ffai_sdpa_prefill_nax_d{dim}_{suffix}");
                 let msl = MslGenerator::default().generate(&k).expect("codegen");
                 assert!(
                     msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"),
@@ -827,7 +829,7 @@ mod tests {
                     "d{dim} {suffix}: missing matmul2d_descriptor"
                 );
                 assert!(
-                    msl.contains(&format!("kernel void mt_sdpa_prefill_nax_d{dim}_{suffix}")),
+                    msl.contains(&format!("kernel void ffai_sdpa_prefill_nax_d{dim}_{suffix}")),
                     "d{dim} {suffix}: missing kernel declaration"
                 );
                 assert!(

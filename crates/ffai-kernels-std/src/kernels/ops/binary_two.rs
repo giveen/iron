@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_binary_two<T>(a: Tensor<T>, b: Tensor<T>, mut c: Tensor<T>, mut d: Tensor<T>) {
+pub fn ffai_binary_two<T>(a: Tensor<T>, b: Tensor<T>, mut c: Tensor<T>, mut d: Tensor<T>) {
     let idx = program_id(0);
     let x = load(a[idx]);
     let y = load(b[idx]);
@@ -13,12 +13,12 @@ pub fn mt_binary_two<T>(a: Tensor<T>, b: Tensor<T>, mut c: Tensor<T>, mut d: Ten
     store(d[idx], x * y);
 }
 
-/// New-syntax correctness for `mt_binary_two` (fused two-output elementwise:
+/// New-syntax correctness for `ffai_binary_two` (fused two-output elementwise:
 /// `c = a + b`, `d = a * b`). Exercises multiple `.expect()` buffers.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_binary_two;
+    use super::ffai_binary_two;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, dt: DType) -> TestSetup {
@@ -28,7 +28,7 @@ pub mod kernel_tests {
         let b_dt = unpack_f32(&pack_f32(&b, dt), dt);
         let c: Vec<f32> = a_dt.iter().zip(&b_dt).map(|(&x, &y)| x + y).collect();
         let d: Vec<f32> = a_dt.iter().zip(&b_dt).map(|(&x, &y)| x * y).collect();
-        TestSetup::new(mt_binary_two::kernel_ir_for(dt))
+        TestSetup::new(ffai_binary_two::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
             .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
             .input(TestBuffer::zeros("c", n, dt))
@@ -39,19 +39,19 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1e-2, 1e-1])]
-    fn test_mt_binary_two(dt: DType) -> TestSetup { setup(512, dt) }
+    fn test_ffai_binary_two(dt: DType) -> TestSetup { setup(512, dt) }
 }
 
-/// New-syntax benchmark for `mt_binary_two` — reads a+b, writes c+d.
+/// New-syntax benchmark for `ffai_binary_two` — reads a+b, writes c+d.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_binary_two;
+    use super::ffai_binary_two;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_binary_two(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_binary_two::kernel_ir_for(dt))
+        BenchSetup::new(ffai_binary_two::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("a", n, dt))
             .buffer(BenchBuffer::random("b", n, dt))
             .buffer(BenchBuffer::zeros("c", n, dt).output())

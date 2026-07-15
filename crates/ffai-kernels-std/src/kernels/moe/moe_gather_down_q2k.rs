@@ -35,7 +35,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_moe_gather_down_q2k<T>(
+pub fn ffai_moe_gather_down_q2k<T>(
     inners_all: Tensor<T>,
     qs_all: Tensor<u32>,
     scales_all: Tensor<u8>,
@@ -106,7 +106,7 @@ pub fn mt_moe_gather_down_q2k<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gather_down_q2k;
+    use super::ffai_moe_gather_down_q2k;
 
     // n_slots=6; production down dims (m_out=4096, k_in=2048).
     #[bench(dtypes = [f32, f16, bf16])]
@@ -115,7 +115,7 @@ pub mod kernel_benches {
         let m_out = 4096usize;
         let k_in = 2048usize;
         let nblk = m_out * (k_in / 256);
-        BenchSetup::new(mt_moe_gather_down_q2k::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gather_down_q2k::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inners_all", n_slots * k_in, dt))
             .buffer(BenchBuffer::random("qs_all", n_slots * nblk * 16, DType::U32))

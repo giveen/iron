@@ -1,10 +1,10 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_fp4_qmm_mma` / `mt_fp8_e4m3_qmm_mma` — fp4/fp8 simdgroup-matrix MMA.
+//! `ffai_fp4_qmm_mma` / `ffai_fp8_e4m3_qmm_mma` — fp4/fp8 simdgroup-matrix MMA.
 //!
 //! Simdgroup-matrix MMA prefill path for fp4 (E2M1) and fp8 (E4M3) quantized
-//! dense GEMM — the non-NAX counterpart of `mt_fp_qmm_nax`. Falls back from
-//! `mt_fp_qmm_nax` on pre-M4 hardware (no Apple tensor cores).
+//! dense GEMM — the non-NAX counterpart of `ffai_fp_qmm_nax`. Falls back from
+//! `ffai_fp_qmm_nax` on pre-M4 hardware (no Apple tensor cores).
 //!
 //! ## fp4 E2M1 codebook
 //!
@@ -21,18 +21,18 @@
 //! ## fp8 E4M3 dequant
 //!
 //! Eight fp8 codes pack into two u32s (8 bits each, 4 per u32). E4M3:
-//! `[sign:1][exp:4][mantissa:3]`. Dequant follows the `mt_fp8_e4m3_quant_dequant`
+//! `[sign:1][exp:4][mantissa:3]`. Dequant follows the `ffai_fp8_e4m3_quant_dequant`
 //! math from `fp_quantized.rs`: find the binade via `floor/log2`, clamp exponent
 //! to `[-6, 8]`, snap mantissa to the fp8 grid, rescale. Here we use the inverse
 //! path — given a packed 8-bit code, reconstruct the fp32 value:
 //!   `e = (code7 >> 3) - 7` (biased exponent, bias=7), `m = code7 & 7`
 //!   normal: `val = 2^e * (1 + m/8)`, subnormal (e_raw=0): `val = 2^(-6) * m/8`
 //!   sign: `1 - 2*(code >> 7)`.
-//! Scale per group (group_size=32 for fp8, matching `mt_fp8_e4m3_quant_dequant`).
+//! Scale per group (group_size=32 for fp8, matching `ffai_fp8_e4m3_quant_dequant`).
 //!
 //! ## Geometry (both kernels)
 //!
-//! Identical to `mt_qmm_mma`:
+//! Identical to `ffai_qmm_mma`:
 //!   - tpg = 128 (4 SG × 32 lanes, WM=WN=2)
 //!   - BM = BN = BK = 32, output tile 32×32
 //!   - Grid: `[N/32, M/32, 1]`
@@ -45,11 +45,11 @@ use ffai_kernels::kernel;
 /// formats (§7). `Out = X · dequant(W)` with a per-group `T` scale; both pack
 /// into `Tensor<u32>` (8 fp4 nibbles or 4 fp8 bytes per word). The geometry,
 /// X-load, MMA, and write-back are shared; only the W-dequant staging branches
-/// on `WDEC` (fp4: 1 pass × 8 nibbles via `mt_decode_e2m1`; fp8: 2 passes × 4
-/// bytes, inline E4M3). Produces `mt_fp4_qmm_mma` / `mt_fp8_e4m3_qmm_mma`.
+/// on `WDEC` (fp4: 1 pass × 8 nibbles via `ffai_decode_e2m1`; fp8: 2 passes × 4
+/// bytes, inline E4M3). Produces `ffai_fp4_qmm_mma` / `ffai_fp8_e4m3_qmm_mma`.
 #[kernel(variants((FMT, WDEC) = [(fp4, 0u32), (fp8_e4m3, 2u32)], suffix = "{FMT}_qmm_mma"))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     x: Tensor<T>,
@@ -106,7 +106,7 @@ pub fn mt<T>(
     // group_size = k / gs_per_row (= 32 for the default fp4 layout).
     let group_size = k / gs_per_row;
     for kb in range(0u32, k, 32u32) {
-        // ── 1. Coop X load ── (identical to mt_qmm_mma)
+        // ── 1. Coop X load ── (identical to ffai_qmm_mma)
         let x_row_dev_base = (x_m_base + x_m_row) * k + kb + x_k_base;
         let x_ws_base = x_m_row * xs_ld + x_k_base;
         threadgroup_store("xs", x_ws_base, load(x[x_row_dev_base]).cast::<T>());
@@ -133,7 +133,7 @@ pub fn mt<T>(
             // unwritten (zeros / stale garbage) — while f16/bf16 happened to mask it.
             for _ci in range(0u32, 8u32, 1u32) {
                 let nibble = (pack >> (_ci * 4u32)) & 15u32;
-                let val = s * mt_decode_e2m1(nibble);
+                let val = s * ffai_decode_e2m1(nibble);
                 threadgroup_store("ws", ws_base + _ci, val.cast::<T>());
             }
         } else {
@@ -182,7 +182,7 @@ pub fn mt<T>(
             threadgroup_barrier();
         }
         threadgroup_barrier();
-        // ── 3. MMA inner loop — identical to mt_qmm_mma ──
+        // ── 3. MMA inner loop — identical to ffai_qmm_mma ──
         let row_a0 = sm * 16u32 + fm;
         let row_a1 = sm * 16u32 + 8u32 + fm;
         let col_b0 = sn * 16u32;
@@ -286,7 +286,7 @@ pub fn mt<T>(
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
-    use super::{mt_fp4_qmm_mma, mt_fp8_e4m3_qmm_mma};
+    use super::{ffai_fp4_qmm_mma, ffai_fp8_e4m3_qmm_mma};
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Decode one E2M1 fp4 nibble (`sign · two_m_int / 2`).
@@ -300,7 +300,7 @@ pub mod kernel_tests {
     }
 
     /// Decode one E4M3 fp8 code (bias 7; subnormal when `e_raw == 0`).
-    pub(crate) fn fp8_mt_decode_e4m3(code: u32) -> f32 {
+    pub(crate) fn fp8_ffai_decode_e4m3(code: u32) -> f32 {
         let sign = 1.0 - 2.0 * (code >> 7) as f32;
         let c = code & 0x7F;
         let e = c >> 3;
@@ -364,7 +364,7 @@ pub mod kernel_tests {
                     let dec = if bits == 4 {
                         fp4_decode(codes[nc * k + d])
                     } else {
-                        fp8_mt_decode_e4m3(codes[nc * k + d])
+                        fp8_ffai_decode_e4m3(codes[nc * k + d])
                     };
                     acc += scales[nc * gspr + g] * dec * x[mr * k + d];
                 }
@@ -411,21 +411,21 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp4_qmm_mma(dt: DType) -> TestSetup {
-        fp_setup(mt_fp4_qmm_mma::kernel_ir_for(dt), 32, 32, 128, 4, dt)
+        fp_setup(ffai_fp4_qmm_mma::kernel_ir_for(dt), 32, 32, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp8_e4m3_qmm_mma(dt: DType) -> TestSetup {
-        fp_setup(mt_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 32, 32, 128, 8, dt)
+        fp_setup(ffai_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 32, 32, 128, 8, dt)
     }
     // Multi-tile (64×64 → grid [2, 2, 1]): exercises the cross-threadgroup
     // N/M tile indexing the single-tile shapes leave dormant.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp4_qmm_mma_multi_tile(dt: DType) -> TestSetup {
-        fp_setup(mt_fp4_qmm_mma::kernel_ir_for(dt), 64, 64, 128, 4, dt)
+        fp_setup(ffai_fp4_qmm_mma::kernel_ir_for(dt), 64, 64, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp8_e4m3_qmm_mma_multi_tile(dt: DType) -> TestSetup {
-        fp_setup(mt_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 64, 64, 128, 8, dt)
+        fp_setup(ffai_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 64, 64, 128, 8, dt)
     }
 }
 
@@ -433,7 +433,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, core::ir::Kernel, test::*};
 
-    use super::{mt_fp4_qmm_mma, mt_fp8_e4m3_qmm_mma};
+    use super::{ffai_fp4_qmm_mma, ffai_fp8_e4m3_qmm_mma};
 
     pub(crate) fn fpb(
         kernel: Kernel,
@@ -466,10 +466,10 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_qmm_mma(dt: DType) -> BenchSetup {
-        fpb(mt_fp4_qmm_mma::kernel_ir_for(dt), 32, 4096, 4096, 4, dt)
+        fpb(ffai_fp4_qmm_mma::kernel_ir_for(dt), 32, 4096, 4096, 4, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_qmm_mma(dt: DType) -> BenchSetup {
-        fpb(mt_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 32, 4096, 4096, 8, dt)
+        fpb(ffai_fp8_e4m3_qmm_mma::kernel_ir_for(dt), 32, 4096, 4096, 8, dt)
     }
 }

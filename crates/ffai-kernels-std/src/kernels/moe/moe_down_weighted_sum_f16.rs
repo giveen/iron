@@ -27,7 +27,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_down_weighted_sum_6<T>(
+pub fn ffai_moe_down_weighted_sum_6<T>(
     down_0: Tensor<T>,
     inner_0: Tensor<T>,
     down_1: Tensor<T>,
@@ -271,7 +271,7 @@ pub fn mt_moe_down_weighted_sum_6<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_moe_down_weighted_sum_6;
+    use super::ffai_moe_down_weighted_sum_6;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(m: usize, k: usize, dt: DType) -> TestSetup {
@@ -300,7 +300,7 @@ pub mod kernel_tests {
                 s
             })
             .collect();
-        TestSetup::new(mt_moe_down_weighted_sum_6::kernel_ir_for(dt))
+        TestSetup::new(ffai_moe_down_weighted_sum_6::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("down_0", pack_f32(&dws[0], dt), dt))
             .input(TestBuffer::from_vec("inner_0", pack_f32(&inns[0], dt), dt))
@@ -328,12 +328,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_down_weighted_sum_6;
+    use super::ffai_moe_down_weighted_sum_6;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mds(dt: DType) -> BenchSetup {
         let (m, k) = (4096usize, 2048usize);
-        BenchSetup::new(mt_moe_down_weighted_sum_6::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_down_weighted_sum_6::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("down_0", m * k, dt))
             .buffer(BenchBuffer::random("inner_0", k, dt))

@@ -2,8 +2,8 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! State-space-model kernels — the ssm family (see
 //! `docs/specs/KERNEL_CONSOLIDATION_PLAN.md`): the Mamba-2 selective-scan
-//! decode step (`mt_ssm_step`, + `_a2d` for 2-D A_log, + `_grouped` for the
-//! MLX-aligned reduction form), the SSD chunked-scan ops (`mt_ssd_*`), Mamba
+//! decode step (`ffai_ssm_step`, + `_a2d` for 2-D A_log, + `_grouped` for the
+//! MLX-aligned reduction form), the SSD chunked-scan ops (`ffai_ssd_*`), Mamba
 //! input-projection split + gated group RMSNorm, the gated-delta-net family
 //! (+ prep / chunk / wy / replay), and record/replay. Migrated from `ffai/`.
 //! (The depthwise causal conv1d that precedes the scan lives in

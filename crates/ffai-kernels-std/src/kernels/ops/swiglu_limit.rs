@@ -7,12 +7,17 @@
 //! batched-prefill vs sequential-decode paths diverge (large values
 //! round differently across kernels — the clamp pins them identical).
 //!
-//! Drop-in replacement for `mt_swiglu` on the DSv4 gate/up → inner path.
+//! Drop-in replacement for `ffai_swiglu` on the DSv4 gate/up → inner path.
 
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_swiglu_limit<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>, #[constexpr] limit: f32) {
+pub fn ffai_swiglu_limit<T>(
+    gate: Tensor<T>,
+    up: Tensor<T>,
+    out: Tensor<T>,
+    #[constexpr] limit: f32,
+) {
     let idx = tid;
     let g = load(gate[idx]).cast::<f32>();
     let u = load(up[idx]).cast::<f32>();
@@ -29,7 +34,7 @@ pub fn mt_swiglu_limit<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>, #[cons
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_swiglu_limit;
+    use super::ffai_swiglu_limit;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, dt: DType) -> TestSetup {
@@ -49,7 +54,7 @@ pub mod kernel_tests {
                 s * ul
             })
             .collect();
-        TestSetup::new(mt_swiglu_limit::kernel_ir_for(dt))
+        TestSetup::new(ffai_swiglu_limit::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
             .input(TestBuffer::from_vec("up", pack_f32(&up, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -71,12 +76,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_swiglu_limit;
+    use super::ffai_swiglu_limit;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dsv4_swiglu_limit(dt: DType) -> BenchSetup {
         let n = 1024 * 1024usize;
-        BenchSetup::new(mt_swiglu_limit::kernel_ir_for(dt))
+        BenchSetup::new(ffai_swiglu_limit::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", n, dt))
             .buffer(BenchBuffer::random("up", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

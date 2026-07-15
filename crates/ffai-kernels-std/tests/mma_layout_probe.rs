@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 
 use ffai_kernels::{Context, core::ir::Kernel};
 use ffai_kernels_std::probe::mma_layout_probe::{
-    mt_mma_probe_a_identity_b_gemm,
-    mt_mma_probe_a_identity_b_identity,
+    ffai_mma_probe_a_identity_b_gemm,
+    ffai_mma_probe_a_identity_b_identity,
 };
 
 fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -51,7 +51,7 @@ fn run_probe(name: &str, kernel: Kernel) {
 fn probe_a_identity_b_gemm_convention() {
     run_probe(
         "A=identity, B=gemm-transposed (lane(fm,fn) holds B[fn,fm])",
-        mt_mma_probe_a_identity_b_gemm::kernel_ir_for(),
+        ffai_mma_probe_a_identity_b_gemm::kernel_ir_for(),
     );
 }
 
@@ -59,6 +59,6 @@ fn probe_a_identity_b_gemm_convention() {
 fn probe_a_identity_b_identity_convention() {
     run_probe(
         "A=identity, B=identity (lane(fm,fn) holds B[fm,fn])",
-        mt_mma_probe_a_identity_b_identity::kernel_ir_for(),
+        ffai_mma_probe_a_identity_b_identity::kernel_ir_for(),
     );
 }

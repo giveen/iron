@@ -6,7 +6,7 @@ expression: msl
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mt_hadamard_m20(
+kernel void ffai_hadamard_m20(
     const device float *inp [[buffer(0)]],
     device float *out [[buffer(1)]],
     constant float &scale [[buffer(2)]],

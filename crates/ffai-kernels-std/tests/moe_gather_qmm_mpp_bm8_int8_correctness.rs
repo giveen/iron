@@ -2,11 +2,11 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::moe_mpp_bm8::mt_moe_gather_qmm_mma_int8_bm8_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp_bm8::ffai_moe_gather_qmm_mma_int8_bm8_mpp`.
 //!
 //! BM=8 MPP MoE int8 kernel — same output semantics as the int4 BM=8 sibling
 //! but the weight layout changes from 8 nibbles/u32 to 4 bytes/u32.
-//! Validated against the scalar `mt_moe_gather_qmm_b8` oracle (pow2-width
+//! Validated against the scalar `ffai_moe_gather_qmm_b8` oracle (pow2-width
 //! family from `moe.rs`) on a battery of shapes covering f32 / f16 / bf16
 //! dtypes, single-tile + multi-tile + ragged-T, and a production-like tile.
 //!
@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::{moe_gather_qmm::mt_moe_gather_qmm_b8, moe_mpp_bm8};
+use ffai_kernels_std::kernels::moe::{moe_gather_qmm::ffai_moe_gather_qmm_b8, moe_mpp_bm8};
 
 /// Pack a row of int8 weight codes into uint32s (4 codes per uint, LE byte
 /// order). Code values must be in 0..=255.
@@ -151,7 +151,7 @@ fn run_case(case: &Case) {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -173,7 +173,7 @@ fn run_case(case: &Case) {
         buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = moe_mpp_bm8::mt_moe_gather_qmm_mma_int8_bm8_mpp::kernel_ir_for(dt.to_dtype());
+        let mut k = moe_mpp_bm8::ffai_moe_gather_qmm_mma_int8_bm8_mpp::kernel_ir_for(dt.to_dtype());
         k.mode = KernelMode::Reduction;
         // Grid: [ceil(N/32), ceil(T/8), 1]. TG: 32 lanes = 1 SG.
         let r = ctx

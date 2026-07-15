@@ -1,10 +1,10 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_bgemm_q2k_view` — the ZERO-COPY Q2_K
+//! GPU correctness for `ffai::ffai_moe_bgemm_q2k_view` — the ZERO-COPY Q2_K
 //! grouped BGEMM that reads raw 84-byte Q2_K blocks straight from a no-copy
 //! mmap VIEW buffer. Rather than re-derive a scalar oracle for the canonical
 //! Q2_K layout, this proves the view kernel produces the SAME output as the
-//! PROVEN pool kernel (`mt_moe_gather_bgemm_q2k_mpp`, the validated "Tokyo"
+//! PROVEN pool kernel (`ffai_moe_gather_bgemm_q2k_mpp`, the validated "Tokyo"
 //! path) on identical logical weights — the view just reads the raw bytes the
 //! pool would have been repacked from. cosine ≥ 0.999. NO 86 GB model load.
 #![cfg(target_os = "macos")]
@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::{
-    moe_bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
-    moe_bgemm_q2k_view::mt_moe_bgemm_q2k_view,
+    moe_bgemm_q2k_mpp::ffai_moe_gather_bgemm_q2k_mpp,
+    moe_bgemm_q2k_view::ffai_moe_bgemm_q2k_view,
 };
 use half::f16;
 
@@ -79,7 +79,7 @@ fn bgemm_q2k_view_matches_pool_kernel() {
     pool.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
     pool.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     let ctx = Context::new().unwrap();
-    let mut kp = mt_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kp = ffai_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
     kp.mode = KernelMode::Reduction;
     let rp = ctx
         .dispatch_with_grid(&kp, &pool, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [
@@ -121,7 +121,7 @@ fn bgemm_q2k_view_matches_pool_kernel() {
     vb.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     vb.insert("tensor_byte_off".into(), 0u32.to_le_bytes().to_vec());
     vb.insert("expert_byte_stride".into(), (expert_byte_stride as u32).to_le_bytes().to_vec());
-    let mut kv = mt_moe_bgemm_q2k_view::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kv = ffai_moe_bgemm_q2k_view::kernel_ir_for(Dt::F32.to_dtype());
     kv.mode = KernelMode::Reduction;
     let rv = ctx
         .dispatch_with_grid(&kv, &vb, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [

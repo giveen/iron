@@ -8,7 +8,7 @@
 //! Hadamard of any batch of M-vectors.
 //!
 //! Expressed in the `#[kernel]` DSL — no `Op::InlineMsl`. The three M values
-//! get their own monomorphized DSL function (`mt_hadamard_m12`, `_m20`, `_m28`)
+//! get their own monomorphized DSL function (`ffai_hadamard_m12`, `_m20`, `_m28`)
 //! because each has its own compile-time sign table; `#[kernel(variants(...))]`
 //! cannot be used here since the DSL has no compile-time loop over Rust arrays.
 //! The Rust-level wrapper `kernel_ir_for(m, dt)` dispatches to the right fn.
@@ -37,7 +37,7 @@
 //! Correctness pinned by the in-module `kernel_tests` (`#[test_kernel]`,
 //! consistent with the other migrated mlx kernels); these absorbed the
 //! richer oracle cases (identity-vector, not-all-zeros) from the legacy
-//! `tests/hadamard_m_gpu_correctness.rs` (removed in #240).
+//! `tests/hadamard_m_gpu_correctness.rs` (since removed).
 //!
 //! ## Sign-bit encoding
 //!
@@ -80,7 +80,7 @@ const H28_SIGNS: [u32; 28] = [
 
 /// M=12 specialization. Sign table = `H12_SIGNS`.
 #[kernel]
-pub fn mt_hadamard_m12<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
+pub fn ffai_hadamard_m12<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
     threadgroup_alloc("buf", 12u32, f32);
     stack_alloc("signs", 12u32, "u32");
     stack_store("signs", 0u32, 4093u32);
@@ -116,7 +116,7 @@ pub fn mt_hadamard_m12<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale
 
 /// M=20 specialization. Sign table = `H20_SIGNS`.
 #[kernel]
-pub fn mt_hadamard_m20<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
+pub fn ffai_hadamard_m20<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
     threadgroup_alloc("buf", 20u32, f32);
     stack_alloc("signs", 20u32, "u32");
     stack_store("signs", 0u32, 445473u32);
@@ -160,7 +160,7 @@ pub fn mt_hadamard_m20<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale
 
 /// M=28 specialization. Sign table = `H28_SIGNS`.
 #[kernel]
-pub fn mt_hadamard_m28<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
+pub fn ffai_hadamard_m28<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale: f32) {
     threadgroup_alloc("buf", 28u32, f32);
     stack_alloc("signs", 28u32, "u32");
     stack_store("signs", 0u32, 53043585u32);
@@ -210,18 +210,18 @@ pub fn mt_hadamard_m28<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] scale
     store(out[tg], scaled.cast::<T>());
 }
 
-/// Build the kernel IR for `mt_hadamard_m{M}` with M ∈ {12, 20, 28}.
+/// Build the kernel IR for `ffai_hadamard_m{M}` with M ∈ {12, 20, 28}.
 /// Dispatches to the appropriate monomorphized DSL function.
 pub fn kernel_ir_for(m: u32, dt: DType) -> Kernel {
-    assert!(matches!(m, 12 | 20 | 28), "mt_hadamard_m only supports M ∈ {{12, 20, 28}}, got {m}");
+    assert!(matches!(m, 12 | 20 | 28), "ffai_hadamard_m only supports M ∈ {{12, 20, 28}}, got {m}");
     assert!(
         matches!(dt, DType::F32 | DType::F16 | DType::BF16),
-        "mt_hadamard_m only supports F32/F16/BF16, got {dt:?}"
+        "ffai_hadamard_m only supports F32/F16/BF16, got {dt:?}"
     );
     match m {
-        12 => mt_hadamard_m12::kernel_ir_for(dt),
-        20 => mt_hadamard_m20::kernel_ir_for(dt),
-        28 => mt_hadamard_m28::kernel_ir_for(dt),
+        12 => ffai_hadamard_m12::kernel_ir_for(dt),
+        20 => ffai_hadamard_m20::kernel_ir_for(dt),
+        28 => ffai_hadamard_m28::kernel_ir_for(dt),
         _ => unreachable!(),
     }
 }
@@ -230,14 +230,14 @@ pub fn kernel_ir_for(m: u32, dt: DType) -> Kernel {
 /// (M ∈ {12, 20, 28}; Reduction, one TG per row, tpg=M). In-process
 /// correctness for the same kernels lives in [`kernel_tests`] below, which
 /// absorbed the richer oracle cases (identity-vector, not-all-zeros) from
-/// the legacy `tests/hadamard_m_gpu_correctness.rs` (removed in #240).
+/// the legacy `tests/hadamard_m_gpu_correctness.rs` (since removed).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_hadamard_m12(dt: DType) -> BenchSetup {
         let (rows, m) = (16384usize, 12usize);
-        BenchSetup::new(super::mt_hadamard_m12::kernel_ir_for(dt))
+        BenchSetup::new(super::ffai_hadamard_m12::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", rows * m, dt))
             .buffer(BenchBuffer::zeros("out", rows * m, dt).output())
@@ -249,7 +249,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_hadamard_m20(dt: DType) -> BenchSetup {
         let (rows, m) = (16384usize, 20usize);
-        BenchSetup::new(super::mt_hadamard_m20::kernel_ir_for(dt))
+        BenchSetup::new(super::ffai_hadamard_m20::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", rows * m, dt))
             .buffer(BenchBuffer::zeros("out", rows * m, dt).output())
@@ -261,7 +261,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_hadamard_m28(dt: DType) -> BenchSetup {
         let (rows, m) = (16384usize, 28usize);
-        BenchSetup::new(super::mt_hadamard_m28::kernel_ir_for(dt))
+        BenchSetup::new(super::ffai_hadamard_m28::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", rows * m, dt))
             .buffer(BenchBuffer::zeros("out", rows * m, dt).output())
@@ -314,7 +314,7 @@ pub mod kernel_tests {
         let raw: Vec<f32> = (0..rows * m).map(|i| ((i % 13) as f32 - 6.0) * 0.5).collect();
         let data = unpack_f32(&pack_f32(&raw, dt), dt);
         let expected = oracle(&data, m, &super::H12_SIGNS, scale);
-        TestSetup::new(super::mt_hadamard_m12::kernel_ir_for(dt))
+        TestSetup::new(super::ffai_hadamard_m12::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&data, dt), dt))
             .input(TestBuffer::zeros("out", rows * m, dt))
@@ -330,7 +330,7 @@ pub mod kernel_tests {
         let raw: Vec<f32> = (0..rows * m).map(|i| ((i % 13) as f32 - 6.0) * 0.5).collect();
         let data = unpack_f32(&pack_f32(&raw, dt), dt);
         let expected = oracle(&data, m, &super::H20_SIGNS, scale);
-        TestSetup::new(super::mt_hadamard_m20::kernel_ir_for(dt))
+        TestSetup::new(super::ffai_hadamard_m20::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&data, dt), dt))
             .input(TestBuffer::zeros("out", rows * m, dt))
@@ -346,7 +346,7 @@ pub mod kernel_tests {
         let raw: Vec<f32> = (0..rows * m).map(|i| ((i % 13) as f32 - 6.0) * 0.5).collect();
         let data = unpack_f32(&pack_f32(&raw, dt), dt);
         let expected = oracle(&data, m, &super::H28_SIGNS, scale);
-        TestSetup::new(super::mt_hadamard_m28::kernel_ir_for(dt))
+        TestSetup::new(super::ffai_hadamard_m28::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&data, dt), dt))
             .input(TestBuffer::zeros("out", rows * m, dt))
@@ -368,7 +368,7 @@ mod tests {
         for m in [12u32, 20, 28] {
             for dt in [DType::F32, DType::F16, DType::BF16] {
                 let k = kernel_ir_for(m, dt);
-                assert_eq!(k.name, format!("mt_hadamard_m{m}"));
+                assert_eq!(k.name, format!("ffai_hadamard_m{m}"));
                 assert_eq!(k.params.len(), 2);
                 assert_eq!(k.params[0].name, "inp");
                 assert!(!k.params[0].is_output);
@@ -401,9 +401,9 @@ mod tests {
                     DType::BF16 => "bf16",
                     _ => unreachable!(),
                 };
-                k.name = format!("mt_hadamard_m{m}_{suffix}");
+                k.name = format!("ffai_hadamard_m{m}_{suffix}");
                 let msl = MslGenerator::default().generate(&k).expect("codegen");
-                assert!(msl.contains(&format!("kernel void mt_hadamard_m{m}_{suffix}")));
+                assert!(msl.contains(&format!("kernel void ffai_hadamard_m{m}_{suffix}")));
                 assert!(!msl.contains("InlineMsl"));
             }
         }

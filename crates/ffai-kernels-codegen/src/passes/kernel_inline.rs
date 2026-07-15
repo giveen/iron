@@ -366,13 +366,13 @@ mod tests {
         }
     }
 
-    /// Build a minimal callee that looks like `mt_silu`:
+    /// Build a minimal callee that looks like `ffai_silu`:
     ///   tid   = program_id::<0>()          → v0
     ///   loaded = load(a[tid])              → v1
     ///   result = Activation(Silu, loaded)  → v2
     ///   store(out[tid], result)            (no result)
     fn build_silu_callee() -> Kernel {
-        let mut k = Kernel::new("mt_silu");
+        let mut k = Kernel::new("ffai_silu");
         k.params.push(tensor_param("a", DType::F32, false));
         k.params.push(tensor_param("out", DType::F32, true));
 
@@ -400,9 +400,9 @@ mod tests {
         k
     }
 
-    // ── test 1: Value arg — scalar callee (mt_silu pattern) ──────────────────
+    // ── test 1: Value arg — scalar callee (ffai_silu pattern) ──────────────────
 
-    /// Caller passes a pre-computed f32 scalar to mt_silu via Value arg.
+    /// Caller passes a pre-computed f32 scalar to ffai_silu via Value arg.
     /// Expected: silu op is kept with the scalar vid; no load/store/ProgramId.
     #[test]
     fn value_arg_scalar_callee_splices_activation() {

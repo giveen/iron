@@ -866,7 +866,7 @@ fn run_one_bench(
     let kernel = setup.kernel();
     // Report the registered kernel name (dtype-suffixed, mirroring the build
     // path's emitted names) — NOT the `#[bench]` setup-fn ident, which is
-    // often just `bench`/`bench_<op>` and collapses across kernels (#279).
+    // often just `bench`/`bench_<op>` and collapses across kernels.
     let name = suffixed_kernel_name(&kernel.name, dt);
     let dtype_str = format!("{dt:?}").to_lowercase();
 
@@ -881,9 +881,9 @@ fn run_one_bench(
         Vec::with_capacity(kernel.params.len() + kernel.constexprs.len());
     let mut input_bytes: std::collections::HashMap<String, Vec<u8>> =
         std::collections::HashMap::new();
-    let mut mt_out_idx: Option<usize> = None;
-    let mut mt_out_n = 0usize;
-    let mut mt_out_dt = dt;
+    let mut ffai_out_idx: Option<usize> = None;
+    let mut ffai_out_n = 0usize;
+    let mut ffai_out_dt = dt;
 
     for param in &kernel.params {
         let buf = setup.buffers().iter().find(|b| b.name() == param.name).or_else(|| {
@@ -895,10 +895,10 @@ fn run_one_bench(
             None
         })?;
         let bytes = buf.initial_bytes();
-        if param.is_output && mt_out_idx.is_none() {
-            mt_out_idx = Some(bufs.len());
-            mt_out_n = buf.len();
-            mt_out_dt = buf.dtype();
+        if param.is_output && ffai_out_idx.is_none() {
+            ffai_out_idx = Some(bufs.len());
+            ffai_out_n = buf.len();
+            ffai_out_dt = buf.dtype();
         }
         bufs.push(runner.buffer_bytes(&bytes));
         input_bytes.insert(param.name.clone(), bytes);
@@ -921,26 +921,26 @@ fn run_one_bench(
     let grid = setup.grid();
     let g = grid.grid.map(|x| x as usize);
     let t = grid.tpg.map(|x| x as usize);
-    let (mt_gbps, stats) =
+    let (ffai_gbps, stats) =
         bench_gbps_with(runner, &compiled, &refs, g, t, bytes_moved as f64, warmup, iters)?;
 
     // Reference comparison (optional).
-    let (ref_gbps, mt_pct, correct) =
-        if let (Some(rk), Some(out_idx)) = (setup.ref_kernel(), mt_out_idx) {
+    let (ref_gbps, ffai_pct, correct) =
+        if let (Some(rk), Some(out_idx)) = (setup.ref_kernel(), ffai_out_idx) {
             match run_reference(
                 runner,
                 rk,
                 &bufs,
                 out_idx,
-                mt_out_n,
-                mt_out_dt,
+                ffai_out_n,
+                ffai_out_dt,
                 &input_bytes,
                 bytes_moved,
                 warmup,
                 iters,
             ) {
                 Some((rgbps, pass)) => {
-                    let pct = mt_gbps / rgbps * 100.0;
+                    let pct = ffai_gbps / rgbps * 100.0;
                     (Some(rgbps), Some(pct), pass)
                 },
                 None => (None, None, true),
@@ -968,9 +968,9 @@ fn run_one_bench(
         group: family.to_string(),
         dtype: dtype_str,
         shape,
-        mt_gbps,
+        ffai_gbps,
         ref_gbps,
-        mt_pct,
+        ffai_pct,
         correct,
         min_us: stats.min_us,
         mean_us: stats.mean_us,
@@ -988,10 +988,10 @@ fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 fn run_reference(
     runner: &GpuRunner,
     rk: &RefKernel,
-    mt_bufs: &[GpuBuffer],
-    mt_out_idx: usize,
-    mt_out_n: usize,
-    mt_out_dt: DType,
+    ffai_bufs: &[GpuBuffer],
+    ffai_out_idx: usize,
+    ffai_out_n: usize,
+    ffai_out_dt: DType,
     input_bytes: &std::collections::HashMap<String, Vec<u8>>,
     bytes_moved: u64,
     warmup: usize,
@@ -1026,10 +1026,10 @@ fn run_reference(
     let (ref_gbps, _) =
         bench_gbps_with(runner, &compiled, &ref_refs, g, t, bytes_moved as f64, warmup, iters)?;
 
-    let n = mt_out_n.min(ref_out_n).min(COMPARE_ELEM_CAP);
-    let mt_vals = read_typed(runner, &mt_bufs[mt_out_idx], n, mt_out_dt);
+    let n = ffai_out_n.min(ref_out_n).min(COMPARE_ELEM_CAP);
+    let ffai_vals = read_typed(runner, &ffai_bufs[ffai_out_idx], n, ffai_out_dt);
     let ref_vals = read_typed(runner, &ref_bufs[ref_out_idx], n, ref_out_dt);
-    let err = max_abs_diff(&mt_vals, &ref_vals);
+    let err = max_abs_diff(&ffai_vals, &ref_vals);
     let passed = (err as f64) <= rk.tol.into();
 
     Some((ref_gbps, passed))
@@ -1259,10 +1259,10 @@ pub(crate) fn read_raw_f32(bytes: &[u8], dt: DType, n: usize) -> Vec<f32> {
     }
 }
 
-// ── Name filtering (#279) ─────────────────────────────────────────────────
+// ── Name filtering ────────────────────────────────────────────────────────
 
 /// The registered kernel name with the dtype suffix appended, mirroring the
-/// names the build path emits (`mt_exp` at f32 → `mt_exp_f32`). Names that
+/// names the build path emits (`ffai_exp` at f32 → `ffai_exp_f32`). Names that
 /// already carry the suffix (single-dtype variants benches) pass through.
 pub(crate) fn suffixed_kernel_name(kernel_name: &str, dt: DType) -> String {
     let suffix = codegen_emit::dtype_suffix(dt);
@@ -1284,7 +1284,7 @@ pub(crate) fn bench_display_name(bench: &'static dyn KernelBench, dt: DType) -> 
 /// `--filter` / `--match-name` / `--no-match-name` / `--match-group` /
 /// `--no-match-group` so filtering happens *before* GPU work — previously
 /// only `--filter` crossed the subprocess boundary and a `--match-name` run
-/// benched the full corpus while printing nothing (#279).
+/// benched the full corpus while printing nothing.
 pub(crate) struct NameFilter {
     filter: Option<String>,
     match_name: Option<regex::Regex>,
@@ -1393,7 +1393,7 @@ mod name_filter_tests {
 
     #[test]
     fn suffixed_name_appends_dtype() {
-        assert_eq!(suffixed_kernel_name("mt_exp", DType::F32), "mt_exp_f32");
+        assert_eq!(suffixed_kernel_name("ffai_exp", DType::F32), "ffai_exp_f32");
         assert_eq!(
             suffixed_kernel_name("dequant_gather_int4", DType::F16),
             "dequant_gather_int4_f16"
@@ -1402,14 +1402,14 @@ mod name_filter_tests {
 
     #[test]
     fn suffixed_name_passes_through_when_already_suffixed() {
-        assert_eq!(suffixed_kernel_name("mt_exp_f32", DType::F32), "mt_exp_f32");
+        assert_eq!(suffixed_kernel_name("ffai_exp_f32", DType::F32), "ffai_exp_f32");
     }
 
     #[test]
     fn empty_filter_matches_everything() {
         let nf = NameFilter::from_args(&args_with(|_| {})).unwrap();
         assert!(nf.is_empty());
-        assert!(nf.matches("mt_exp_f32", "bench", ""));
+        assert!(nf.matches("ffai_exp_f32", "bench", ""));
     }
 
     #[test]
@@ -1419,7 +1419,7 @@ mod name_filter_tests {
         }))
         .unwrap();
         assert!(nf.matches("dequant_gather_int4_f32", "bench", ""));
-        assert!(!nf.matches("mt_exp_f32", "bench", ""));
+        assert!(!nf.matches("ffai_exp_f32", "bench", ""));
     }
 
     #[test]
@@ -1428,8 +1428,8 @@ mod name_filter_tests {
             a.no_match_name = Some("_bf16$".into());
         }))
         .unwrap();
-        assert!(nf.matches("mt_exp_f32", "bench", ""));
-        assert!(!nf.matches("mt_exp_bf16", "bench", ""));
+        assert!(nf.matches("ffai_exp_f32", "bench", ""));
+        assert!(!nf.matches("ffai_exp_bf16", "bench", ""));
     }
 
     #[test]
@@ -1439,10 +1439,10 @@ mod name_filter_tests {
         }))
         .unwrap();
         // kernel name hit
-        assert!(nf.matches("mt_vector_add_f32", "bench_add", ""));
+        assert!(nf.matches("ffai_vector_add_f32", "bench_add", ""));
         // legacy bench-fn-ident hit
         assert!(nf.matches("some_other_kernel_f32", "bench_vector_add", ""));
-        assert!(!nf.matches("mt_exp_f32", "bench_exp", ""));
+        assert!(!nf.matches("ffai_exp_f32", "bench_exp", ""));
     }
 
     #[test]
@@ -1451,8 +1451,8 @@ mod name_filter_tests {
             a.match_group = Some("^softmax$".into());
         }))
         .unwrap();
-        assert!(nf.matches("mt_softmax_f32", "bench", ""));
-        assert!(!nf.matches("mt_softplus_f32", "bench", ""));
+        assert!(nf.matches("ffai_softmax_f32", "bench", ""));
+        assert!(!nf.matches("ffai_softplus_f32", "bench", ""));
     }
 
     #[test]
@@ -1463,8 +1463,8 @@ mod name_filter_tests {
             a.match_group = Some("norm|ops|sampling".into());
         }))
         .unwrap();
-        assert!(nf.matches("mt_copy_f32", "bench", "ops"));
-        assert!(!nf.matches("mt_copy_f32", "bench", "gemm"));
+        assert!(nf.matches("ffai_copy_f32", "bench", "ops"));
+        assert!(!nf.matches("ffai_copy_f32", "bench", "gemm"));
     }
 
     #[test]

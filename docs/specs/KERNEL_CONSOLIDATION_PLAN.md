@@ -74,7 +74,7 @@ crates/ffai-kernels-std/src/kernels/
               transpose_th · frame_diff · broadcast_affine
   sampling/   ✅ DONE — logits_topk/top_p/min_p/processors · categorical_sample · softmax · sort
   kv_cache/   ✅ DONE — kv_cache(_update_many) · kv_append · fft
-  primitives.rs   cross-family decode/reduce ops (mt_decode_e2m1/e4m3/e5m2/e8m0, mt_unpack_nbit, …)
+  primitives.rs   cross-family decode/reduce ops (ffai_decode_e2m1/e4m3/e5m2/e8m0, ffai_unpack_nbit, …)
   mod.rs          pub mod ops; pub mod gemm; pub mod sdpa; …
 ```
 
@@ -148,7 +148,7 @@ Mechanics, per family:
 2. Merge fragmented 1-kernel files; extract shared primitives (tool 1).
 3. Collapse format/bit-width/scale families onto `variants(...)` (tool 2); merge
    by op (tool 3).
-4. Rename to `mt_<op>`, dropping the legacy `ffai_` prefix **and any model name**
+4. Rename to `ffai_<op>`, dropping the legacy `ffai_` prefix **and any model name**
    — name the operation / layout, not the model (§9.1); regenerate the FFAI emit
    consumer from the new inventory.
 5. Gate: `cargo build` + `ffaik test -f <family>` green + `make fmt`. The
@@ -190,7 +190,7 @@ k-quant paths, and the AURA codec stack. The target:
   decode in `codec`, still shared between kernel and oracle.
 - The **`f16`-scale variants are not separate kernels** — `ScaleKind` (F32 /
   E8M0 / F16) is another axis of the format, so an op's `variants(...)` block
-  carries it alongside `FMT` and the `mt_*_f16` twins fold into the base op
+  carries it alongside `FMT` and the `ffai_*_f16` twins fold into the base op
   (§9.3).
 
 ## 8. What this does NOT change
@@ -209,9 +209,9 @@ consumer to accept both names across the cutover.)
 
 ## 9. Decisions
 
-1. **Name the operation / layout, never the model → `mt_<op>`.** Drop the legacy
-   `ffai_` prefix *and* any model name (`ffai_rope_llama` → `mt_rope_banded`,
-   `dsv4_partial_rope` → `mt_partial_rope`); the differentiator between similar
+1. **Name the operation / layout, never the model → `ffai_<op>`.** Drop the legacy
+   `ffai_` prefix *and* any model name (`ffai_rope_llama` → `ffai_rope_banded`,
+   `dsv4_partial_rope` → `ffai_partial_rope`); the differentiator between similar
    kernels is the layout, which the name should describe. Model-specific usage
    notes go in a comment above the kernel. Names are **not** pinned in-tree, but
    they are not free downstream — see the paired consumer-side PR note in §8.
@@ -219,7 +219,7 @@ consumer to accept both names across the cutover.)
 2. **Keep `vision/` and `audio/`** as their own folders for now — do not
    distribute their ops into `convolution/` / `norm/` / `ops/`.
 3. **`f16`-scale twins become a scale axis.** `ScaleKind` (F32 / E8M0 / F16) is an
-   axis of the *format*, carried by `variants(...)`; `mt_*_f16` kernels collapse
+   axis of the *format*, carried by `variants(...)`; `ffai_*_f16` kernels collapse
    into their base op rather than existing as separate files (§7).
 4. **Metal references stay on the kernels that mirror them, indefinitely.** Any
    kernel that is the same op / functionality as an upstream (MLX) reference keeps

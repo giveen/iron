@@ -15,7 +15,7 @@
 //!
 //! ## Naming
 //!
-//! `mt_sdpa_bidirectional_dN<T>` — N is the constexpr head_dim,
+//! `ffai_sdpa_bidirectional_dN<T>` — N is the constexpr head_dim,
 //! T is the element type (f32 / f16 / bf16).
 //!
 //! Two per-lane layout families:
@@ -33,7 +33,7 @@
 //!
 //! Reduction-mode kernels — STRICT threadgroup geometry. Wrappers MUST
 //! encode these as preconditions; the same machine-freeze hazard as
-//! `mt_sdpa_decode` / `mt_sdpa_multi`.
+//! `ffai_sdpa_decode` / `ffai_sdpa_multi`.
 //!
 //! - **TPG = 1024 threads** (32 simdgroups × 32 lanes). Hard. A TPG
 //!   below 32 makes `n_simd = TPG / 32 = 0`, turning the K walk
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
 // ─── head_dim = 64 (SigLIP base/large, CLIP-L) ─────────────────────
 
 #[kernel]
-pub fn mt_sdpa_bidirectional_d64<T>(
+pub fn ffai_sdpa_bidirectional_d64<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -165,7 +165,7 @@ pub fn mt_sdpa_bidirectional_d64<T>(
 // ─── head_dim = 32 (FastViT-HD) ────────────────────────────────────
 
 #[kernel]
-pub fn mt_sdpa_bidirectional_d32<T>(
+pub fn ffai_sdpa_bidirectional_d32<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -261,7 +261,7 @@ pub fn mt_sdpa_bidirectional_d32<T>(
 // a 32-wide simdgroup.
 
 #[kernel]
-pub fn mt_sdpa_bidirectional_d72<T>(
+pub fn ffai_sdpa_bidirectional_d72<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -394,7 +394,7 @@ pub fn mt_sdpa_bidirectional_d72<T>(
 // the same per-element bounds masks.
 
 #[kernel]
-pub fn mt_sdpa_bidirectional_d80<T>(
+pub fn ffai_sdpa_bidirectional_d80<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -512,7 +512,7 @@ pub fn mt_sdpa_bidirectional_d80<T>(
 // 24-active-lane geometry; here every lane participates.
 
 #[kernel]
-pub fn mt_sdpa_bidirectional_d96<T>(
+pub fn ffai_sdpa_bidirectional_d96<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -619,11 +619,11 @@ pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
     use super::{
-        mt_sdpa_bidirectional_d32,
-        mt_sdpa_bidirectional_d64,
-        mt_sdpa_bidirectional_d72,
-        mt_sdpa_bidirectional_d80,
-        mt_sdpa_bidirectional_d96,
+        ffai_sdpa_bidirectional_d32,
+        ffai_sdpa_bidirectional_d64,
+        ffai_sdpa_bidirectional_d72,
+        ffai_sdpa_bidirectional_d80,
+        ffai_sdpa_bidirectional_d96,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -720,12 +720,12 @@ pub mod kernel_tests {
     // head_dim 32 — exactly one element per lane (32 / 32 = 1).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_ffai_sdpa_bidirectional_d32(dt: DType) -> TestSetup {
-        setup(mt_sdpa_bidirectional_d32::kernel_ir_for(dt), 32, dt)
+        setup(ffai_sdpa_bidirectional_d32::kernel_ir_for(dt), 32, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_ffai_sdpa_bidirectional_d64(dt: DType) -> TestSetup {
-        setup(mt_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, dt)
+        setup(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, dt)
     }
 
     // head_dim 72 — ragged: 72 = 32·2 + 8, so the first 8 lanes own a third
@@ -733,18 +733,18 @@ pub mod kernel_tests {
     // masking the clean-fit dims leave dormant.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_ffai_sdpa_bidirectional_d72(dt: DType) -> TestSetup {
-        setup(mt_sdpa_bidirectional_d72::kernel_ir_for(dt), 72, dt)
+        setup(ffai_sdpa_bidirectional_d72::kernel_ir_for(dt), 72, dt)
     }
 
     // head_dim 80 — ragged: 80 = 32·2 + 16, partial-lane bounds masking.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_ffai_sdpa_bidirectional_d80(dt: DType) -> TestSetup {
-        setup(mt_sdpa_bidirectional_d80::kernel_ir_for(dt), 80, dt)
+        setup(ffai_sdpa_bidirectional_d80::kernel_ir_for(dt), 80, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_ffai_sdpa_bidirectional_d96(dt: DType) -> TestSetup {
-        setup(mt_sdpa_bidirectional_d96::kernel_ir_for(dt), 96, dt)
+        setup(ffai_sdpa_bidirectional_d96::kernel_ir_for(dt), 96, dt)
     }
 
     // Production vision-tower self-attention shape that previously
@@ -774,7 +774,7 @@ pub mod kernel_tests {
             &q, &k, &v, n_q_heads, n_kv_heads, head_dim, base_kv, n_query, kv_stride, scale,
         );
 
-        TestSetup::new(mt_sdpa_bidirectional_d64::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -802,11 +802,11 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     use super::{
-        mt_sdpa_bidirectional_d32,
-        mt_sdpa_bidirectional_d64,
-        mt_sdpa_bidirectional_d72,
-        mt_sdpa_bidirectional_d80,
-        mt_sdpa_bidirectional_d96,
+        ffai_sdpa_bidirectional_d32,
+        ffai_sdpa_bidirectional_d64,
+        ffai_sdpa_bidirectional_d72,
+        ffai_sdpa_bidirectional_d80,
+        ffai_sdpa_bidirectional_d96,
     };
 
     fn setup(ir: ffai_kernels::core::ir::Kernel, head_dim: usize, dt: DType) -> BenchSetup {
@@ -839,26 +839,26 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_d32(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_bidirectional_d32::kernel_ir_for(dt), 32, dt)
+        setup(ffai_sdpa_bidirectional_d32::kernel_ir_for(dt), 32, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_d64(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, dt)
+        setup(ffai_sdpa_bidirectional_d64::kernel_ir_for(dt), 64, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_d72(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_bidirectional_d72::kernel_ir_for(dt), 72, dt)
+        setup(ffai_sdpa_bidirectional_d72::kernel_ir_for(dt), 72, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_d80(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_bidirectional_d80::kernel_ir_for(dt), 80, dt)
+        setup(ffai_sdpa_bidirectional_d80::kernel_ir_for(dt), 80, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_d96(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_bidirectional_d96::kernel_ir_for(dt), 96, dt)
+        setup(ffai_sdpa_bidirectional_d96::kernel_ir_for(dt), 96, dt)
     }
 }

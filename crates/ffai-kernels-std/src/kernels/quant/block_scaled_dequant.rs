@@ -24,7 +24,7 @@ use ffai_kernels::kernel;
 /// mxfp4 — E2M1 elements (block 32), E8M0 pow-2 block scale.
 /// `scales[b]` is the biased exponent; effective scale `2^(bits - 127)`.
 #[kernel]
-pub fn mt_mxfp4_dequant<T>(
+pub fn ffai_mxfp4_dequant<T>(
     codes: Tensor<u32>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -35,7 +35,7 @@ pub fn mt_mxfp4_dequant<T>(
     if i < n {
         let word = load(codes[i / 8u32]);
         let nib = (word >> ((i & 7u32) * 4u32)) & 0xFu32;
-        let val = mt_decode_e2m1(nib);
+        let val = ffai_decode_e2m1(nib);
         let sbits = load(scales[i / block_size]).cast::<f32>();
         let scale = exp2(sbits - 127.0f32); // E8M0: 2^(bits-127), exact for integer bits
         store(out[i], (val * scale).cast::<T>());
@@ -45,7 +45,7 @@ pub fn mt_mxfp4_dequant<T>(
 /// nvfp4 — E2M1 elements (block 16), E4M3 micro-scale × a global FP32.
 /// `scales[b]` is an E4M3 code; effective block scale `e4m3(scales[b]) * global`.
 #[kernel]
-pub fn mt_nvfp4_dequant<T>(
+pub fn ffai_nvfp4_dequant<T>(
     codes: Tensor<u32>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -57,16 +57,16 @@ pub fn mt_nvfp4_dequant<T>(
     if i < n {
         let word = load(codes[i / 8u32]);
         let nib = (word >> ((i & 7u32) * 4u32)) & 0xFu32;
-        let elem = mt_decode_e2m1(nib);
+        let elem = ffai_decode_e2m1(nib);
         // E4M3 micro-scale × global.
-        let block_scale = mt_decode_e4m3(load(scales[i / block_size]).cast::<u32>()) * global;
+        let block_scale = ffai_decode_e4m3(load(scales[i / block_size]).cast::<u32>()) * global;
         store(out[i], (elem * block_scale).cast::<T>());
     }
 }
 
 /// mxfp8 (E4M3) — E4M3 elements (block 32), E8M0 pow-2 block scale.
 #[kernel]
-pub fn mt_mxfp8_e4m3_dequant<T>(
+pub fn ffai_mxfp8_e4m3_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -75,7 +75,7 @@ pub fn mt_mxfp8_e4m3_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e4m3(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e4m3(load(codes[i]).cast::<u32>());
         let sbits = load(scales[i / block_size]).cast::<f32>();
         let scale = exp2(sbits - 127.0f32);
         store(out[i], (elem * scale).cast::<T>());
@@ -84,7 +84,7 @@ pub fn mt_mxfp8_e4m3_dequant<T>(
 
 /// mxfp8 (E5M2) — E5M2 elements (block 32), E8M0 pow-2 block scale.
 #[kernel]
-pub fn mt_mxfp8_e5m2_dequant<T>(
+pub fn ffai_mxfp8_e5m2_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -93,7 +93,7 @@ pub fn mt_mxfp8_e5m2_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e5m2(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e5m2(load(codes[i]).cast::<u32>());
         let sbits = load(scales[i / block_size]).cast::<f32>();
         let scale = exp2(sbits - 127.0f32);
         store(out[i], (elem * scale).cast::<T>());
@@ -102,7 +102,7 @@ pub fn mt_mxfp8_e5m2_dequant<T>(
 
 /// nvfp8 — E4M3 elements (block 16), per-block FP32 scale (loaded directly).
 #[kernel]
-pub fn mt_nvfp8_dequant<T>(
+pub fn ffai_nvfp8_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f32>,
     out: Tensor<T>,
@@ -111,7 +111,7 @@ pub fn mt_nvfp8_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e4m3(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e4m3(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]);
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -120,12 +120,12 @@ pub fn mt_nvfp8_dequant<T>(
 // ── Legacy float-scale (fp4 / fp8) + symmetric int8 dequant ────────────────
 // These share the per-element decode framework but store a raw per-group FP32
 // scale (no E8M0/E4M3/global). fp8_e4m3 has the same shape as nvfp8 (8-bit
-// E4M3 + f32 scale), so it reuses `mt_nvfp8_dequant` — only fp4 (4-bit E2M1),
+// E4M3 + f32 scale), so it reuses `ffai_nvfp8_dequant` — only fp4 (4-bit E2M1),
 // fp8_e5m2 (8-bit E5M2), and int8 (8-bit symmetric) need their own decode here.
 
 /// Legacy fp4 — E2M1 elements (group 32), per-group FP32 scale (loaded directly).
 #[kernel]
-pub fn mt_fp4_dequant<T>(
+pub fn ffai_fp4_dequant<T>(
     codes: Tensor<u32>,
     scales: Tensor<f32>,
     out: Tensor<T>,
@@ -136,7 +136,7 @@ pub fn mt_fp4_dequant<T>(
     if i < n {
         let word = load(codes[i / 8u32]);
         let nib = (word >> ((i & 7u32) * 4u32)) & 0xFu32;
-        let elem = mt_decode_e2m1(nib);
+        let elem = ffai_decode_e2m1(nib);
         let scale = load(scales[i / block_size]);
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -144,7 +144,7 @@ pub fn mt_fp4_dequant<T>(
 
 /// Legacy fp8 (E5M2) — E5M2 elements (group 32), per-group FP32 scale.
 #[kernel]
-pub fn mt_fp8_e5m2_dequant<T>(
+pub fn ffai_fp8_e5m2_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f32>,
     out: Tensor<T>,
@@ -153,7 +153,7 @@ pub fn mt_fp8_e5m2_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e5m2(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e5m2(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]);
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -162,7 +162,7 @@ pub fn mt_fp8_e5m2_dequant<T>(
 /// Symmetric int8 — 8-bit codes (group 64), per-group FP32 scale (scale-only
 /// affine). Decode is sign-extend → `code · scale`.
 #[kernel]
-pub fn mt_int8_dequant<T>(
+pub fn ffai_int8_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f32>,
     out: Tensor<T>,
@@ -171,7 +171,7 @@ pub fn mt_int8_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_int8(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_int8(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]);
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -218,11 +218,11 @@ macro_rules! int_dequant_f32 {
         }
     };
 }
-int_dequant_f32!(mt_int2_dequant, 2u32, 2u32, 4.0f32);
-int_dequant_f32!(mt_int3_dequant, 3u32, 4u32, 8.0f32);
-int_dequant_f32!(mt_int4_dequant, 4u32, 8u32, 16.0f32);
-int_dequant_f32!(mt_int5_dequant, 5u32, 16u32, 32.0f32);
-int_dequant_f32!(mt_int6_dequant, 6u32, 32u32, 64.0f32);
+int_dequant_f32!(ffai_int2_dequant, 2u32, 2u32, 4.0f32);
+int_dequant_f32!(ffai_int3_dequant, 3u32, 4u32, 8.0f32);
+int_dequant_f32!(ffai_int4_dequant, 4u32, 8u32, 16.0f32);
+int_dequant_f32!(ffai_int5_dequant, 5u32, 16u32, 32.0f32);
+int_dequant_f32!(ffai_int6_dequant, 6u32, 32u32, 64.0f32);
 
 /// E8M0-scaled symmetric int (MXINT2/3/4/5/6): bit-stream code × pow-2 block scale.
 macro_rules! int_dequant_e8m0 {
@@ -257,15 +257,15 @@ macro_rules! int_dequant_e8m0 {
         }
     };
 }
-int_dequant_e8m0!(mt_mxint2_dequant, 2u32, 2u32, 4.0f32);
-int_dequant_e8m0!(mt_mxint3_dequant, 3u32, 4u32, 8.0f32);
-int_dequant_e8m0!(mt_mxint4_dequant, 4u32, 8u32, 16.0f32);
-int_dequant_e8m0!(mt_mxint5_dequant, 5u32, 16u32, 32.0f32);
-int_dequant_e8m0!(mt_mxint6_dequant, 6u32, 32u32, 64.0f32);
+int_dequant_e8m0!(ffai_mxint2_dequant, 2u32, 2u32, 4.0f32);
+int_dequant_e8m0!(ffai_mxint3_dequant, 3u32, 4u32, 8.0f32);
+int_dequant_e8m0!(ffai_mxint4_dequant, 4u32, 8u32, 16.0f32);
+int_dequant_e8m0!(ffai_mxint5_dequant, 5u32, 16u32, 32.0f32);
+int_dequant_e8m0!(ffai_mxint6_dequant, 6u32, 32u32, 64.0f32);
 
 /// MXINT8 — 8-bit codes (byte layout, block 32), E8M0 pow-2 block scale.
 #[kernel]
-pub fn mt_mxint8_dequant<T>(
+pub fn ffai_mxint8_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -274,7 +274,7 @@ pub fn mt_mxint8_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_int8(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_int8(load(codes[i]).cast::<u32>());
         let sbits = load(scales[i / block_size]).cast::<f32>();
         let scale = exp2(sbits - 127.0f32);
         store(out[i], (elem * scale).cast::<T>());
@@ -289,7 +289,7 @@ pub fn mt_mxint8_dequant<T>(
 /// nvfp8 (FP16 scale) — E4M3 elements (block 16), per-block FP16 scale. Also
 /// serves `fp8_e4m3_f16` (same 8-bit-E4M3 + scale shape).
 #[kernel]
-pub fn mt_nvfp8_f16_dequant<T>(
+pub fn ffai_nvfp8_f16_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f16>,
     out: Tensor<T>,
@@ -298,7 +298,7 @@ pub fn mt_nvfp8_f16_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e4m3(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e4m3(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]).cast::<f32>();
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -306,7 +306,7 @@ pub fn mt_nvfp8_f16_dequant<T>(
 
 /// fp4 (FP16 scale) — E2M1 elements (group 32), per-group FP16 scale.
 #[kernel]
-pub fn mt_fp4_f16_dequant<T>(
+pub fn ffai_fp4_f16_dequant<T>(
     codes: Tensor<u32>,
     scales: Tensor<f16>,
     out: Tensor<T>,
@@ -317,7 +317,7 @@ pub fn mt_fp4_f16_dequant<T>(
     if i < n {
         let word = load(codes[i / 8u32]);
         let nib = (word >> ((i & 7u32) * 4u32)) & 0xFu32;
-        let elem = mt_decode_e2m1(nib);
+        let elem = ffai_decode_e2m1(nib);
         let scale = load(scales[i / block_size]).cast::<f32>();
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -325,7 +325,7 @@ pub fn mt_fp4_f16_dequant<T>(
 
 /// fp8 (E5M2, FP16 scale) — E5M2 elements (group 32), per-group FP16 scale.
 #[kernel]
-pub fn mt_fp8_e5m2_f16_dequant<T>(
+pub fn ffai_fp8_e5m2_f16_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f16>,
     out: Tensor<T>,
@@ -334,7 +334,7 @@ pub fn mt_fp8_e5m2_f16_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_e5m2(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_e5m2(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]).cast::<f32>();
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -372,15 +372,15 @@ macro_rules! int_dequant_f16 {
         }
     };
 }
-int_dequant_f16!(mt_int2_f16_dequant, 2u32, 2u32, 4.0f32);
-int_dequant_f16!(mt_int3_f16_dequant, 3u32, 4u32, 8.0f32);
-int_dequant_f16!(mt_int4_f16_dequant, 4u32, 8u32, 16.0f32);
-int_dequant_f16!(mt_int5_f16_dequant, 5u32, 16u32, 32.0f32);
-int_dequant_f16!(mt_int6_f16_dequant, 6u32, 32u32, 64.0f32);
+int_dequant_f16!(ffai_int2_f16_dequant, 2u32, 2u32, 4.0f32);
+int_dequant_f16!(ffai_int3_f16_dequant, 3u32, 4u32, 8.0f32);
+int_dequant_f16!(ffai_int4_f16_dequant, 4u32, 8u32, 16.0f32);
+int_dequant_f16!(ffai_int5_f16_dequant, 5u32, 16u32, 32.0f32);
+int_dequant_f16!(ffai_int6_f16_dequant, 6u32, 32u32, 64.0f32);
 
 /// int8 (FP16 scale) — 8-bit codes (byte layout, group 64), per-group FP16 scale.
 #[kernel]
-pub fn mt_int8_f16_dequant<T>(
+pub fn ffai_int8_f16_dequant<T>(
     codes: Tensor<u8>,
     scales: Tensor<f16>,
     out: Tensor<T>,
@@ -389,7 +389,7 @@ pub fn mt_int8_f16_dequant<T>(
 ) {
     let i = program_id::<0>();
     if i < n {
-        let elem = mt_decode_int8(load(codes[i]).cast::<u32>());
+        let elem = ffai_decode_int8(load(codes[i]).cast::<u32>());
         let scale = load(scales[i / block_size]).cast::<f32>();
         store(out[i], (elem * scale).cast::<T>());
     }
@@ -459,27 +459,27 @@ pub mod kernel_tests {
     // cols 64 is divisible by both block sizes (16 and 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
     fn test_mxfp4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4, 64, dt)
+        dequant_setup(ffai_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
     fn test_nvfp4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_nvfp4_dequant::kernel_ir_for(dt), QFormat::Nvfp4, 4, 64, dt)
+        dequant_setup(ffai_nvfp4_dequant::kernel_ir_for(dt), QFormat::Nvfp4, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxfp8_e4m3_dequant::kernel_ir_for(dt), QFormat::Mxfp8E4, 4, 64, dt)
+        dequant_setup(ffai_mxfp8_e4m3_dequant::kernel_ir_for(dt), QFormat::Mxfp8E4, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxfp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Mxfp8E5, 4, 64, dt)
+        dequant_setup(ffai_mxfp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Mxfp8E5, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
     fn test_nvfp8_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_nvfp8_dequant::kernel_ir_for(dt), QFormat::Nvfp8, 4, 64, dt)
+        dequant_setup(ffai_nvfp8_dequant::kernel_ir_for(dt), QFormat::Nvfp8, 4, 64, dt)
     }
 
     // Legacy float-scale fp4 / fp8 + symmetric int8. fp8_e4m3 reuses the nvfp8
@@ -487,22 +487,22 @@ pub mod kernel_tests {
     // 64 is divisible by all group sizes here (16 / 32 / 64).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_fp4_dequant::kernel_ir_for(dt), QFormat::Fp4, 4, 64, dt)
+        dequant_setup(ffai_fp4_dequant::kernel_ir_for(dt), QFormat::Fp4, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_nvfp8_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3, 4, 64, dt)
+        dequant_setup(ffai_nvfp8_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_fp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2, 4, 64, dt)
+        dequant_setup(ffai_fp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int8_dequant::kernel_ir_for(dt), QFormat::Int8, 4, 64, dt)
+        dequant_setup(ffai_int8_dequant::kernel_ir_for(dt), QFormat::Int8, 4, 64, dt)
     }
 
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale). The
@@ -511,90 +511,90 @@ pub mod kernel_tests {
     // divisible by both group sizes (int 64, mxint 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int2_dequant::kernel_ir_for(dt), QFormat::Int2, 4, 64, dt)
+        dequant_setup(ffai_int2_dequant::kernel_ir_for(dt), QFormat::Int2, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int3_dequant::kernel_ir_for(dt), QFormat::Int3, 4, 64, dt)
+        dequant_setup(ffai_int3_dequant::kernel_ir_for(dt), QFormat::Int3, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int4_dequant::kernel_ir_for(dt), QFormat::Int4, 4, 64, dt)
+        dequant_setup(ffai_int4_dequant::kernel_ir_for(dt), QFormat::Int4, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int5_dequant::kernel_ir_for(dt), QFormat::Int5, 4, 64, dt)
+        dequant_setup(ffai_int5_dequant::kernel_ir_for(dt), QFormat::Int5, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int6_dequant::kernel_ir_for(dt), QFormat::Int6, 4, 64, dt)
+        dequant_setup(ffai_int6_dequant::kernel_ir_for(dt), QFormat::Int6, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint2_dequant::kernel_ir_for(dt), QFormat::Mxint2, 4, 64, dt)
+        dequant_setup(ffai_mxint2_dequant::kernel_ir_for(dt), QFormat::Mxint2, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint3_dequant::kernel_ir_for(dt), QFormat::Mxint3, 4, 64, dt)
+        dequant_setup(ffai_mxint3_dequant::kernel_ir_for(dt), QFormat::Mxint3, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint4_dequant::kernel_ir_for(dt), QFormat::Mxint4, 4, 64, dt)
+        dequant_setup(ffai_mxint4_dequant::kernel_ir_for(dt), QFormat::Mxint4, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint5_dequant::kernel_ir_for(dt), QFormat::Mxint5, 4, 64, dt)
+        dequant_setup(ffai_mxint5_dequant::kernel_ir_for(dt), QFormat::Mxint5, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint6_dequant::kernel_ir_for(dt), QFormat::Mxint6, 4, 64, dt)
+        dequant_setup(ffai_mxint6_dequant::kernel_ir_for(dt), QFormat::Mxint6, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_mxint8_dequant::kernel_ir_for(dt), QFormat::Mxint8, 4, 64, dt)
+        dequant_setup(ffai_mxint8_dequant::kernel_ir_for(dt), QFormat::Mxint8, 4, 64, dt)
     }
 
     // FP16-scale twins of the FP32-scaled formats. `fp8_e4m3_f16` reuses the
     // `nvfp8_f16` kernel (same 8-bit-E4M3 + scale shape); the rest decode here.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Nvfp8F16, 4, 64, dt)
+        dequant_setup(ffai_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Nvfp8F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 4, 64, dt)
+        dequant_setup(ffai_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_fp4_f16_dequant::kernel_ir_for(dt), QFormat::Fp4F16, 4, 64, dt)
+        dequant_setup(ffai_fp4_f16_dequant::kernel_ir_for(dt), QFormat::Fp4F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_fp8_e5m2_f16_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2F16, 4, 64, dt)
+        dequant_setup(ffai_fp8_e5m2_f16_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int2_f16_dequant::kernel_ir_for(dt), QFormat::Int2F16, 4, 64, dt)
+        dequant_setup(ffai_int2_f16_dequant::kernel_ir_for(dt), QFormat::Int2F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int3_f16_dequant::kernel_ir_for(dt), QFormat::Int3F16, 4, 64, dt)
+        dequant_setup(ffai_int3_f16_dequant::kernel_ir_for(dt), QFormat::Int3F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int4_f16_dequant::kernel_ir_for(dt), QFormat::Int4F16, 4, 64, dt)
+        dequant_setup(ffai_int4_f16_dequant::kernel_ir_for(dt), QFormat::Int4F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int5_f16_dequant::kernel_ir_for(dt), QFormat::Int5F16, 4, 64, dt)
+        dequant_setup(ffai_int5_f16_dequant::kernel_ir_for(dt), QFormat::Int5F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int6_f16_dequant::kernel_ir_for(dt), QFormat::Int6F16, 4, 64, dt)
+        dequant_setup(ffai_int6_f16_dequant::kernel_ir_for(dt), QFormat::Int6F16, 4, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_dequant(dt: DType) -> TestSetup {
-        dequant_setup(mt_int8_f16_dequant::kernel_ir_for(dt), QFormat::Int8F16, 4, 64, dt)
+        dequant_setup(ffai_int8_f16_dequant::kernel_ir_for(dt), QFormat::Int8F16, 4, 64, dt)
     }
 }
 
@@ -649,104 +649,110 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4096, 4096, dt)
+        dequant_bench(ffai_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_nvfp4_dequant::kernel_ir_for(dt), QFormat::Nvfp4, 4096, 4096, dt)
+        dequant_bench(ffai_nvfp4_dequant::kernel_ir_for(dt), QFormat::Nvfp4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxfp8_e4m3_dequant::kernel_ir_for(dt), QFormat::Mxfp8E4, 4096, 4096, dt)
+        dequant_bench(ffai_mxfp8_e4m3_dequant::kernel_ir_for(dt), QFormat::Mxfp8E4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxfp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Mxfp8E5, 4096, 4096, dt)
+        dequant_bench(ffai_mxfp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Mxfp8E5, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_nvfp8_dequant::kernel_ir_for(dt), QFormat::Nvfp8, 4096, 4096, dt)
+        dequant_bench(ffai_nvfp8_dequant::kernel_ir_for(dt), QFormat::Nvfp8, 4096, 4096, dt)
     }
     // Legacy float-scale fp4 / fp8 + symmetric int8. fp8_e4m3 reuses the nvfp8
     // kernel (same 8-bit-E4M3 + f32-scale shape); the others decode in their own.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_fp4_dequant::kernel_ir_for(dt), QFormat::Fp4, 4096, 4096, dt)
+        dequant_bench(ffai_fp4_dequant::kernel_ir_for(dt), QFormat::Fp4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_nvfp8_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3, 4096, 4096, dt)
+        dequant_bench(ffai_nvfp8_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_fp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2, 4096, 4096, dt)
+        dequant_bench(ffai_fp8_e5m2_dequant::kernel_ir_for(dt), QFormat::Fp8E5m2, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int8_dequant::kernel_ir_for(dt), QFormat::Int8, 4096, 4096, dt)
+        dequant_bench(ffai_int8_dequant::kernel_ir_for(dt), QFormat::Int8, 4096, 4096, dt)
     }
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int2_dequant::kernel_ir_for(dt), QFormat::Int2, 4096, 4096, dt)
+        dequant_bench(ffai_int2_dequant::kernel_ir_for(dt), QFormat::Int2, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int3_dequant::kernel_ir_for(dt), QFormat::Int3, 4096, 4096, dt)
+        dequant_bench(ffai_int3_dequant::kernel_ir_for(dt), QFormat::Int3, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int4_dequant::kernel_ir_for(dt), QFormat::Int4, 4096, 4096, dt)
+        dequant_bench(ffai_int4_dequant::kernel_ir_for(dt), QFormat::Int4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int5_dequant::kernel_ir_for(dt), QFormat::Int5, 4096, 4096, dt)
+        dequant_bench(ffai_int5_dequant::kernel_ir_for(dt), QFormat::Int5, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int6_dequant::kernel_ir_for(dt), QFormat::Int6, 4096, 4096, dt)
+        dequant_bench(ffai_int6_dequant::kernel_ir_for(dt), QFormat::Int6, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint2_dequant::kernel_ir_for(dt), QFormat::Mxint2, 4096, 4096, dt)
+        dequant_bench(ffai_mxint2_dequant::kernel_ir_for(dt), QFormat::Mxint2, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint3_dequant::kernel_ir_for(dt), QFormat::Mxint3, 4096, 4096, dt)
+        dequant_bench(ffai_mxint3_dequant::kernel_ir_for(dt), QFormat::Mxint3, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint4_dequant::kernel_ir_for(dt), QFormat::Mxint4, 4096, 4096, dt)
+        dequant_bench(ffai_mxint4_dequant::kernel_ir_for(dt), QFormat::Mxint4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint5_dequant::kernel_ir_for(dt), QFormat::Mxint5, 4096, 4096, dt)
+        dequant_bench(ffai_mxint5_dequant::kernel_ir_for(dt), QFormat::Mxint5, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint6_dequant::kernel_ir_for(dt), QFormat::Mxint6, 4096, 4096, dt)
+        dequant_bench(ffai_mxint6_dequant::kernel_ir_for(dt), QFormat::Mxint6, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_mxint8_dequant::kernel_ir_for(dt), QFormat::Mxint8, 4096, 4096, dt)
+        dequant_bench(ffai_mxint8_dequant::kernel_ir_for(dt), QFormat::Mxint8, 4096, 4096, dt)
     }
     // FP16-scale twins (fp8_e4m3_f16 reuses the nvfp8_f16 kernel).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Nvfp8F16, 4096, 4096, dt)
+        dequant_bench(ffai_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Nvfp8F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_nvfp8_f16_dequant::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 4096, 4096, dt)
+        dequant_bench(
+            ffai_nvfp8_f16_dequant::kernel_ir_for(dt),
+            QFormat::Fp8E4m3F16,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_fp4_f16_dequant::kernel_ir_for(dt), QFormat::Fp4F16, 4096, 4096, dt)
+        dequant_bench(ffai_fp4_f16_dequant::kernel_ir_for(dt), QFormat::Fp4F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16_dequant(dt: DType) -> BenchSetup {
         dequant_bench(
-            mt_fp8_e5m2_f16_dequant::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_dequant::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4096,
             4096,
@@ -755,26 +761,26 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int2_f16_dequant::kernel_ir_for(dt), QFormat::Int2F16, 4096, 4096, dt)
+        dequant_bench(ffai_int2_f16_dequant::kernel_ir_for(dt), QFormat::Int2F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int3_f16_dequant::kernel_ir_for(dt), QFormat::Int3F16, 4096, 4096, dt)
+        dequant_bench(ffai_int3_f16_dequant::kernel_ir_for(dt), QFormat::Int3F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int4_f16_dequant::kernel_ir_for(dt), QFormat::Int4F16, 4096, 4096, dt)
+        dequant_bench(ffai_int4_f16_dequant::kernel_ir_for(dt), QFormat::Int4F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int5_f16_dequant::kernel_ir_for(dt), QFormat::Int5F16, 4096, 4096, dt)
+        dequant_bench(ffai_int5_f16_dequant::kernel_ir_for(dt), QFormat::Int5F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int6_f16_dequant::kernel_ir_for(dt), QFormat::Int6F16, 4096, 4096, dt)
+        dequant_bench(ffai_int6_f16_dequant::kernel_ir_for(dt), QFormat::Int6F16, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(mt_int8_f16_dequant::kernel_ir_for(dt), QFormat::Int8F16, 4096, 4096, dt)
+        dequant_bench(ffai_int8_f16_dequant::kernel_ir_for(dt), QFormat::Int8F16, 4096, 4096, dt)
     }
 }

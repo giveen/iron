@@ -27,7 +27,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_avg_pool2d_nhwc<T>(
+pub fn ffai_avg_pool2d_nhwc<T>(
     input: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] batch: u32,
@@ -75,7 +75,7 @@ pub fn mt_avg_pool2d_nhwc<T>(
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
-    use super::mt_avg_pool2d_nhwc;
+    use super::ffai_avg_pool2d_nhwc;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -173,13 +173,13 @@ pub mod kernel_tests {
     // Gemma 4-style 3×3 stride-3 non-overlapping pool (the pooling kernel).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-3, 3e-2])]
     fn test_avg_pool2d_nhwc_3x3_s3(dt: DType) -> TestSetup {
-        setup(mt_avg_pool2d_nhwc::kernel_ir_for(dt), 1, 16, 24, 24, 3, 3, 3, 0, dt)
+        setup(ffai_avg_pool2d_nhwc::kernel_ir_for(dt), 1, 16, 24, 24, 3, 3, 3, 0, dt)
     }
 
     // 2×2 stride-2 with padding-1 — exercises the partial-window divisor.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-3, 3e-2])]
     fn test_avg_pool2d_nhwc_2x2_pad(dt: DType) -> TestSetup {
-        setup(mt_avg_pool2d_nhwc::kernel_ir_for(dt), 2, 8, 15, 15, 2, 2, 2, 1, dt)
+        setup(ffai_avg_pool2d_nhwc::kernel_ir_for(dt), 2, 8, 15, 15, 2, 2, 2, 1, dt)
     }
 }
 
@@ -187,7 +187,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_avg_pool2d_nhwc;
+    use super::ffai_avg_pool2d_nhwc;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_avg_pool2d_nhwc(dt: DType) -> BenchSetup {
@@ -196,7 +196,7 @@ pub mod kernel_benches {
         let out_h = (in_h + 2 * pad - k) / stride + 1;
         let out_w = (in_w + 2 * pad - k) / stride + 1;
         let n_out = batch * out_h * out_w * ch;
-        BenchSetup::new(mt_avg_pool2d_nhwc::kernel_ir_for(dt))
+        BenchSetup::new(ffai_avg_pool2d_nhwc::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", batch * in_h * in_w * ch, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

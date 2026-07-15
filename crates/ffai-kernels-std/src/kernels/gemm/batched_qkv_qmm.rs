@@ -3,7 +3,7 @@
 //! Batched Q/K/V 4-bit quantized QMM (M>1) — fuses the three independent
 //! Q, K, V projection matmuls of a *prefill* step into one dispatch.
 //!
-//! This is the M>1 sibling of `mt_batched_qkv_qgemv_fast`. At
+//! This is the M>1 sibling of `ffai_batched_qkv_qgemv_fast`. At
 //! `program_id::<1>() = m` we load row `m` of the batched input
 //! `x: [M, in_dim]` and produce row `m` of THREE separate output tensors:
 //!   q_buf: [M, out_q] T
@@ -15,7 +15,7 @@
 //! Callers can alias all three into one backing allocation if they want;
 //! the kernel only sees three base pointers.
 //!
-//! Dispatch geometry mirrors `mt_batched_qkv_qgemv_fast`:
+//! Dispatch geometry mirrors `ffai_batched_qkv_qgemv_fast`:
 //!   * `program_id::<2>()` selects matrix (0 = Q, 1 = K, 2 = V).
 //!   * `program_id::<1>()` selects batched row m (0..M).
 //!   * `tgid_x` selects an 8-row output tile. TPG = 64 = 2 SG × 32 lanes.
@@ -47,7 +47,7 @@ use ffai_kernels::kernel;
 /// Grid: `[ceil(max(out_q,out_k,out_v)/8), M, 3]`. See module docs for
 /// the full geometry contract. TGs past a matrix's `out_*` rows no-op.
 #[kernel]
-pub fn mt_batched_qkv_qmm_fast<T>(
+pub fn ffai_batched_qkv_qmm_fast<T>(
     x: Tensor<T>,
     w_q: Tensor<u32>,
     scales_q: Tensor<T>,
@@ -286,7 +286,7 @@ pub fn mt_batched_qkv_qmm_fast<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_batched_qkv_qmm_fast;
+    use super::ffai_batched_qkv_qmm_fast;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -395,7 +395,7 @@ pub mod kernel_tests {
         let ev = naive_qmm(&wv_p, &r(&sv), &r(&bv), &x, m, in_dim, gs, out_v);
 
         let n_tgs = out_q.max(out_k).max(out_v).div_ceil(8);
-        TestSetup::new(mt_batched_qkv_qmm_fast::kernel_ir_for(dt))
+        TestSetup::new(ffai_batched_qkv_qmm_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w_q", pack_u32(&wq_p), DType::U32))
@@ -422,12 +422,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_batched_qkv_qmm_fast` — MLX-less reduction
+/// New-syntax benchmark for `ffai_batched_qkv_qmm_fast` — MLX-less reduction
 /// kernel. Small-batch prefill (M=4) GQA shape: hidden 4096, out_q 4096, k/v 1024.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_batched_qkv_qmm_fast;
+    use super::ffai_batched_qkv_qmm_fast;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_batched_qkv_qmm_fast(dt: DType) -> BenchSetup {
@@ -437,7 +437,7 @@ pub mod kernel_benches {
         let words = |o: usize| o * in_dim / 8;
         let total = words(out_q) + words(out_k) + words(out_v);
         let n_tgs = out_q.max(out_k).max(out_v).div_ceil(8);
-        BenchSetup::new(mt_batched_qkv_qmm_fast::kernel_ir_for(dt))
+        BenchSetup::new(ffai_batched_qkv_qmm_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m * in_dim, dt))
             .buffer(BenchBuffer::random("w_q", words(out_q), DType::U32))

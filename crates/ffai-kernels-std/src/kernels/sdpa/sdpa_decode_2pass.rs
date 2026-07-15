@@ -81,7 +81,7 @@ mod heuristic_tests {
 // ── Pass 1: per-block partials, GQA co-load ──────────────────────────────
 
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1<T>(
+pub fn ffai_sdpa_decode_2pass_pass1<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -206,7 +206,7 @@ pub fn mt_sdpa_decode_2pass_pass1<T>(
 // n_kv/blocks is not divisible by 4.
 
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1_bc4<T>(
+pub fn ffai_sdpa_decode_2pass_pass1_bc4<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -465,7 +465,7 @@ pub fn mt_sdpa_decode_2pass_pass1_bc4<T>(
 // ── Pass 2: 32-sg × 32-lane merge, MLX-style ─────────────────────────────
 
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass2<T>(
+pub fn ffai_sdpa_decode_2pass_pass2<T>(
     partial_o: Tensor<T>,
     partial_m: Tensor<f32>,
     partial_l: Tensor<f32>,
@@ -555,7 +555,7 @@ pub fn mt_sdpa_decode_2pass_pass2<T>(
 
 // ── Pass 1 TILED: contiguous-chunk access pattern ────────────────────────
 //
-// The strided access pattern in `mt_sdpa_decode_2pass_pass1` (each block reads
+// The strided access pattern in `ffai_sdpa_decode_2pass_pass1` (each block reads
 // every N-th position: 0, N, 2N, ...) causes L2 cache thrashing on CUDA:
 // all 512 concurrent TGs are reading from non-overlapping strided positions
 // in the same KV head, so every load misses L2. Effective bandwidth ~40%.
@@ -579,7 +579,7 @@ pub fn mt_sdpa_decode_2pass_pass2<T>(
 // - For n_kv not divisible by blocks, the last block processes the remainder.
 
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1_tiled<T>(
+pub fn ffai_sdpa_decode_2pass_pass1_tiled<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -685,7 +685,7 @@ pub fn mt_sdpa_decode_2pass_pass1_tiled<T>(
 /// Pass 1 for head_dim=64. Each lane owns 2 elements (`64/32`).
 /// Grid: `[n_kv_heads, blocks, 1]`, TG: `[32, gqa_factor, 1]`.
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1_d64<T>(
+pub fn ffai_sdpa_decode_2pass_pass1_d64<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -745,7 +745,7 @@ pub fn mt_sdpa_decode_2pass_pass1_d64<T>(
 /// Pass 2 for head_dim=64. Reduce across `blocks` partials.
 /// Grid: `[n_q_heads, 1, 1]`, TG: `[1024, 1, 1]`.
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass2_d64<T>(
+pub fn ffai_sdpa_decode_2pass_pass2_d64<T>(
     partial_o: Tensor<T>,
     partial_m: Tensor<f32>,
     partial_l: Tensor<f32>,
@@ -803,7 +803,7 @@ pub fn mt_sdpa_decode_2pass_pass2_d64<T>(
 
 /// Pass 1 for head_dim=96. Each lane owns 3 elements (`96/32`).
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1_d96<T>(
+pub fn ffai_sdpa_decode_2pass_pass1_d96<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -870,7 +870,7 @@ pub fn mt_sdpa_decode_2pass_pass1_d96<T>(
 
 /// Pass 2 for head_dim=96. Three tg_out buffers, one per element.
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass2_d96<T>(
+pub fn ffai_sdpa_decode_2pass_pass2_d96<T>(
     partial_o: Tensor<T>,
     partial_m: Tensor<f32>,
     partial_l: Tensor<f32>,
@@ -935,7 +935,7 @@ pub fn mt_sdpa_decode_2pass_pass2_d96<T>(
 
 /// Pass 1 for head_dim=256. Each lane owns 8 elements (`256/32`).
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass1_d256<T>(
+pub fn ffai_sdpa_decode_2pass_pass1_d256<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -1042,9 +1042,9 @@ pub fn mt_sdpa_decode_2pass_pass1_d256<T>(
 }
 
 /// Pass 2 for head_dim=256. Four tg_out buffers, reused across two phases
-/// (dims 0..3 then 4..7) — same strategy as `mt_sdpa_decode_d256`.
+/// (dims 0..3 then 4..7) — same strategy as `ffai_sdpa_decode_d256`.
 #[kernel]
-pub fn mt_sdpa_decode_2pass_pass2_d256<T>(
+pub fn ffai_sdpa_decode_2pass_pass2_d256<T>(
     partial_o: Tensor<T>,
     partial_m: Tensor<f32>,
     partial_l: Tensor<f32>,
@@ -1151,9 +1151,9 @@ pub fn mt_sdpa_decode_2pass_pass2_d256<T>(
 // FFAI consumes the pass2 wrapper to chain pass1 → pass2 in
 // `Ops.sdpaDecode2Pass`.
 //
-// Note: only the base `mt_sdpa_decode_2pass_pass2` kernel gets a
+// Note: only the base `ffai_sdpa_decode_2pass_pass2` kernel gets a
 // dedicated emit registration — the d{64,96,256} pass2 siblings
-// added in PR #157 are reachable through the same Reduction-mode
+// are reachable through the same Reduction-mode
 // codegen path (they share the kernel body shape) and only the
 // production decode dim (d=128, the base) needs the Swift wrapper
 // at this point. Add per-dim registrations here as FFAI starts
@@ -1162,7 +1162,7 @@ pub fn mt_sdpa_decode_2pass_pass2_d256<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_decode_2pass_pass2;
+    use super::ffai_sdpa_decode_2pass_pass2;
     use crate::utils::{pack_f32, unpack_f32};
 
     // ── COMBINED two-pass correctness, exercised through pass 2 ──────────
@@ -1308,7 +1308,7 @@ pub mod kernel_tests {
         let expected =
             naive_sdpa(&q, &k, &v, n_q_heads, gqa_factor, head_dim, n_kv, kv_stride, scale);
 
-        TestSetup::new(mt_sdpa_decode_2pass_pass2::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_decode_2pass_pass2::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("partial_o", pack_f32(&partial_o, dt), dt))
             .input(TestBuffer::from_vec("partial_m", pack_f32(&partial_m, DType::F32), DType::F32))
@@ -1326,7 +1326,7 @@ pub mod kernel_tests {
 // The legacy bench (dcbe860, `subop="sdpa_decode_2pass"`, `class=SdpaVector2Pass`,
 // `mlx="sdpa_vector_{tn}_128_128"`) compared the CHAINED pass1→pass2 FINAL output
 // against MLX's SINGLE-pass `sdpa_vector`. The new `.with_reference` mechanism
-// (`run_reference_compare` in run_kernel.rs) times exactly ONE MT kernel against
+// (`run_reference_compare` in run_kernel.rs) times exactly ONE FFAI kernel against
 // ONE reference kernel, sharing inputs by name and comparing a single `.output()`
 // buffer — it cannot chain pass1→pass2 before comparing. This file registers
 // pass1 and pass2 as SEPARATE perf-only rows, neither of which has a comparable
@@ -1351,14 +1351,14 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     use super::{
-        mt_sdpa_decode_2pass_pass1,
-        mt_sdpa_decode_2pass_pass1_d64,
-        mt_sdpa_decode_2pass_pass1_d96,
-        mt_sdpa_decode_2pass_pass1_d256,
-        mt_sdpa_decode_2pass_pass2,
-        mt_sdpa_decode_2pass_pass2_d64,
-        mt_sdpa_decode_2pass_pass2_d96,
-        mt_sdpa_decode_2pass_pass2_d256,
+        ffai_sdpa_decode_2pass_pass1,
+        ffai_sdpa_decode_2pass_pass1_d64,
+        ffai_sdpa_decode_2pass_pass1_d96,
+        ffai_sdpa_decode_2pass_pass1_d256,
+        ffai_sdpa_decode_2pass_pass2,
+        ffai_sdpa_decode_2pass_pass2_d64,
+        ffai_sdpa_decode_2pass_pass2_d96,
+        ffai_sdpa_decode_2pass_pass2_d256,
     };
 
     // Shared decode shape (Qwen3-class GQA, 4096 context, 32-block 2-pass).
@@ -1413,41 +1413,41 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass1(dt: DType) -> BenchSetup {
-        pass1(mt_sdpa_decode_2pass_pass1::kernel_ir_for(dt), 128, dt)
+        pass1(ffai_sdpa_decode_2pass_pass1::kernel_ir_for(dt), 128, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass2(dt: DType) -> BenchSetup {
-        pass2(mt_sdpa_decode_2pass_pass2::kernel_ir_for(dt), 128, dt)
+        pass2(ffai_sdpa_decode_2pass_pass2::kernel_ir_for(dt), 128, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass1_d64(dt: DType) -> BenchSetup {
-        pass1(mt_sdpa_decode_2pass_pass1_d64::kernel_ir_for(dt), 64, dt)
+        pass1(ffai_sdpa_decode_2pass_pass1_d64::kernel_ir_for(dt), 64, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass2_d64(dt: DType) -> BenchSetup {
-        pass2(mt_sdpa_decode_2pass_pass2_d64::kernel_ir_for(dt), 64, dt)
+        pass2(ffai_sdpa_decode_2pass_pass2_d64::kernel_ir_for(dt), 64, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass1_d96(dt: DType) -> BenchSetup {
-        pass1(mt_sdpa_decode_2pass_pass1_d96::kernel_ir_for(dt), 96, dt)
+        pass1(ffai_sdpa_decode_2pass_pass1_d96::kernel_ir_for(dt), 96, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass2_d96(dt: DType) -> BenchSetup {
-        pass2(mt_sdpa_decode_2pass_pass2_d96::kernel_ir_for(dt), 96, dt)
+        pass2(ffai_sdpa_decode_2pass_pass2_d96::kernel_ir_for(dt), 96, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass1_d256(dt: DType) -> BenchSetup {
-        pass1(mt_sdpa_decode_2pass_pass1_d256::kernel_ir_for(dt), 256, dt)
+        pass1(ffai_sdpa_decode_2pass_pass1_d256::kernel_ir_for(dt), 256, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pass2_d256(dt: DType) -> BenchSetup {
-        pass2(mt_sdpa_decode_2pass_pass2_d256::kernel_ir_for(dt), 256, dt)
+        pass2(ffai_sdpa_decode_2pass_pass2_d256::kernel_ir_for(dt), 256, dt)
     }
 }

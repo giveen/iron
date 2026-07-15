@@ -2,20 +2,20 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Gated DeltaNet — **fused** prep + chunked-prefill kernel.
 //!
-//! `mt_gated_delta_prep_chunk` extends
-//! [`mt_gated_delta_prep_step`](super::gated_delta_prep::mt_gated_delta_prep_step)
+//! `ffai_gated_delta_prep_chunk` extends
+//! [`ffai_gated_delta_prep_step`](super::gated_delta_prep::ffai_gated_delta_prep_step)
 //! over a chunk of `T` tokens, mirroring the relationship between
-//! [`mt_gated_delta_step`](super::gated_delta::mt_gated_delta_step) and
-//! [`mt_gated_delta_chunk`](super::gated_delta::mt_gated_delta_chunk).
+//! [`ffai_gated_delta_step`](super::gated_delta::ffai_gated_delta_step) and
+//! [`ffai_gated_delta_chunk`](super::gated_delta::ffai_gated_delta_chunk).
 //!
 //! State stays register-resident across the entire `T`-loop — one
 //! load_state at entry and one store_state at exit, regardless of `T`.
-//! This collapses the dominant `mt_gated_delta_prep_step`-per-token T-loop
+//! This collapses the dominant `ffai_gated_delta_prep_step`-per-token T-loop
 //! in `Qwen35GDNMixer.forwardMany` to a single dispatch per layer.
 //!
 //! The per-head RMSNorm of q/k (state-independent) is **not** computed
 //! here — it's hoisted into
-//! [`mt_gated_delta_qknorm_prepass`](super::gated_delta_qknorm_prepass),
+//! [`ffai_gated_delta_qknorm_prepass`](super::gated_delta_qknorm_prepass),
 //! run once per `(b, t, hk_idx)` ahead of this kernel, because this
 //! kernel's own grid (`[Dv, B·Hv, 1]`) would otherwise redundantly
 //! recompute the identical q/k norm `Dv · (Hv/Hk)` times per token. This
@@ -27,8 +27,8 @@
 //!   - `dt_bias`   : Tensor<T> [Hv]
 //!   - `a_raw`     : Tensor<T> [B, T, Hv]
 //!   - `b_raw`     : Tensor<T> [B, T, Hv]
-//!   - `q_normed`  : Tensor<T> [B, T, Hk, Dk]   from `mt_gated_delta_qknorm_prepass`
-//!   - `k_normed`  : Tensor<T> [B, T, Hk, Dk]   from `mt_gated_delta_qknorm_prepass`
+//!   - `q_normed`  : Tensor<T> [B, T, Hk, Dk]   from `ffai_gated_delta_qknorm_prepass`
+//!   - `k_normed`  : Tensor<T> [B, T, Hk, Dk]   from `ffai_gated_delta_qknorm_prepass`
 //!   - `state_in`  : Tensor<T> [B, Hv, Dv, Dk]           (one state per (b, hv))
 //!   - `t_len`     : Tensor<u32> [1]                     runtime chunk length
 //!
@@ -36,14 +36,14 @@
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
 //!   - `y`            : Tensor<T> [B, T, Hv, Dv]
 //!
-//! ## DISPATCH INVARIANTS (identical to `mt_gated_delta_prep_step`)
+//! ## DISPATCH INVARIANTS (identical to `ffai_gated_delta_prep_step`)
 //!
 //! - **Mode: Reduction.** Each TG is one simdgroup (32 threads).
 //! - **Grid: `[Dv, B·Hv, 1]`, TG: `[32, 1, 1]`.**
 //! - **`Dk % 32 == 0`.** Each lane owns `n_per_t = Dk / 32` slots.
 //! - **Hv divisible by Hk.** GQA: `hk_idx = hv_idx / (Hv/Hk)`.
 //! - **`t_len` is runtime u32** so a single PSO compiles for every chunk size.
-//! - **Must run after `mt_gated_delta_qknorm_prepass`** on the same
+//! - **Must run after `ffai_gated_delta_qknorm_prepass`** on the same
 //!   `conv_out` / `t_len` — this kernel does not validate that `q_normed`
 //!   / `k_normed` were populated for the same chunk.
 //!
@@ -67,14 +67,14 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gated_delta_prep_chunk<T>(
+pub fn ffai_gated_delta_prep_chunk<T>(
     conv_out: Tensor<T>, // [B, T, 2·Hk·Dk + Hv·Dv]  (v slab; q/k slabs unused here)
     a_log: Tensor<T>,    // [Hv]
     dt_bias: Tensor<T>,  // [Hv]
     a_raw: Tensor<T>,    // [B, T, Hv]
     b_raw: Tensor<T>,    // [B, T, Hv]
-    q_normed: Tensor<T>, // [B, T, Hk, Dk]  from mt_gated_delta_qknorm_prepass
-    k_normed: Tensor<T>, // [B, T, Hk, Dk]  from mt_gated_delta_qknorm_prepass
+    q_normed: Tensor<T>, // [B, T, Hk, Dk]  from ffai_gated_delta_qknorm_prepass
+    k_normed: Tensor<T>, // [B, T, Hk, Dk]  from ffai_gated_delta_qknorm_prepass
     state_in: Tensor<T>, // [B, Hv, Dv, Dk]
     mut state_out: Tensor<T>, // [B, Hv, Dv, Dk]
     mut y: Tensor<T>,    // [B, T, Hv, Dv]
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn dump() {
         use ffai_kernels::codegen::msl::MslGenerator;
-        let mut k = mt_gated_delta_prep_chunk::kernel_ir_for(DType::F32);
+        let mut k = ffai_gated_delta_prep_chunk::kernel_ir_for(DType::F32);
         k.mode = KernelMode::Reduction;
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
@@ -182,7 +182,7 @@ mod tests {
 }
 
 /// New-syntax correctness for the fused chunked GDN prep+recurrence kernel
-/// (`mt_gated_delta_prep_chunk`). Oracle is the per-token prep + sequential GDN
+/// (`ffai_gated_delta_prep_chunk`). Oracle is the per-token prep + sequential GDN
 /// recurrence with state carried across the T-loop (state_out of token t is
 /// state_in of token t+1) — the legacy `gated_delta_prep_step` oracle composed
 /// over T tokens, which is exactly the recurrence the kernel runs register-
@@ -194,14 +194,14 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gated_delta_prep_chunk;
+    use super::ffai_gated_delta_prep_chunk;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn softplus_unclamped(x: f32) -> f32 { (x.exp() + 1.0).ln() }
     fn sigmoid(x: f32) -> f32 { 1.0 / (1.0 + (-x).exp()) }
 
     /// Per-head RMSNorm of q/k — the same math
-    /// `mt_gated_delta_qknorm_prepass` computes, evaluated once per
+    /// `ffai_gated_delta_qknorm_prepass` computes, evaluated once per
     /// `(b, t, hk_idx)`. Returns dense `(q_normed, k_normed)` [B,T,Hk,Dk],
     /// mirroring what that kernel writes.
     #[allow(clippy::too_many_arguments)]
@@ -359,7 +359,7 @@ pub mod kernel_tests {
         // Dtype-round inputs so the oracle sees the GPU's load precision.
         // q_normed/k_normed are additionally dtype-rounded a *second* time
         // here (post-qk_norm) because in production they round-trip through
-        // a real Tensor<T> buffer written by mt_gated_delta_qknorm_prepass —
+        // a real Tensor<T> buffer written by ffai_gated_delta_qknorm_prepass —
         // this kernel never sees f32 q/k norm results.
         let r = |xs: &[f32]| unpack_f32(&pack_f32(xs, dt), dt);
         let (q_normed, k_normed) = qk_norm(
@@ -391,7 +391,7 @@ pub mod kernel_tests {
             dk,
         );
 
-        TestSetup::new(mt_gated_delta_prep_chunk::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_prep_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -423,7 +423,7 @@ pub mod kernel_tests {
     // bound y to O(1) — see `setup` doc. This keeps the dtype-store error well
     // inside tol across f32/f16/bf16 while still exercising GQA head-sharing.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_prep_chunk_gqa(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_prep_chunk_gqa(dt: DType) -> TestSetup {
         setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, dt)
     }
 
@@ -450,7 +450,7 @@ pub mod kernel_tests {
     // at bf16 (Qwen3.6 GDN prep always runs the f32 shadow path), so this
     // is a synthetic-fixture-only concern, not a production one.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 3.0])]
-    fn test_mt_gated_delta_prep_chunk_no_gqa(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_prep_chunk_no_gqa(dt: DType) -> TestSetup {
         setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, dt)
     }
 }
@@ -458,7 +458,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_delta_prep_chunk;
+    use super::ffai_gated_delta_prep_chunk;
 
     // Grid `[dv, b*hv, 1]`, TG `[32,1,1]`, Reduction. conv_out gains a T
     // dimension: `[B, T, 2·Hk·Dk + Hv·Dv]`. `t_len` is a runtime u32 scalar.
@@ -467,7 +467,7 @@ pub mod kernel_benches {
         let (b, t, hv, hk, dv, dk) = (1usize, 64usize, 4usize, 2usize, 8usize, 64usize);
         let n_total = b * hv;
         let conv_w = 2 * hk * dk + hv * dv;
-        BenchSetup::new(mt_gated_delta_prep_chunk::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_prep_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
             .buffer(BenchBuffer::random("a_log", hv, dt))

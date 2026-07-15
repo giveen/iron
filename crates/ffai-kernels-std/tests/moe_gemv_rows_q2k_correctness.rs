@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_gemv_rows_q2k` — proves it matches the
-//! PROVEN pool bgemm `mt_moe_gather_bgemm_q2k_mpp` on identical weights +
+//! GPU correctness for `ffai::ffai_moe_gemv_rows_q2k` — proves it matches the
+//! PROVEN pool bgemm `ffai_moe_gather_bgemm_q2k_mpp` on identical weights +
 //! per-row x (same canonical Q2_K dequant; only the GEMM structure differs).
 //! cosine ≥ 0.999. NO 86GB model load.
 #![cfg(target_os = "macos")]
@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::{
-    moe_bgemm_q2k_mpp::mt_moe_gather_bgemm_q2k_mpp,
-    moe_gemv_rows_q2k::mt_moe_gemv_rows_q2k,
+    moe_bgemm_q2k_mpp::ffai_moe_gather_bgemm_q2k_mpp,
+    moe_gemv_rows_q2k::ffai_moe_gemv_rows_q2k,
 };
 
 fn xorshift(s: &mut u32) -> u32 {
@@ -71,7 +71,7 @@ fn gemv_rows_q2k_matches_pool_kernel() {
     pool.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
     pool.insert("n_out".into(), (m_out as u32).to_le_bytes().to_vec());
     pool.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
-    let mut kp = mt_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kp = ffai_moe_gather_bgemm_q2k_mpp::kernel_ir_for(Dt::F32.to_dtype());
     kp.mode = KernelMode::Reduction;
     let rp = ctx
         .dispatch_with_grid(&kp, &pool, &BTreeMap::new(), [m_out / 32, t_rows.div_ceil(16), 1], [
@@ -92,7 +92,7 @@ fn gemv_rows_q2k_matches_pool_kernel() {
     gv.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     gv.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
     gv.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
-    let mut kv = mt_moe_gemv_rows_q2k::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kv = ffai_moe_gemv_rows_q2k::kernel_ir_for(Dt::F32.to_dtype());
     kv.mode = KernelMode::Reduction;
     let rv =
         ctx.dispatch_with_grid(&kv, &gv, &BTreeMap::new(), [m_out, t_rows, 1], [32, 1, 1]).unwrap();

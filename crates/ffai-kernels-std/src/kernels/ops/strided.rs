@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_strided_copy<T>(#[strided] src: Tensor<T>, out: Tensor<T>, #[constexpr] cols: u32) {
+pub fn ffai_strided_copy<T>(#[strided] src: Tensor<T>, out: Tensor<T>, #[constexpr] cols: u32) {
     let row = program_id::<0>();
     let col = program_id::<1>();
     let flat_out = row * cols + col;
@@ -13,10 +13,10 @@ pub fn mt_strided_copy<T>(#[strided] src: Tensor<T>, out: Tensor<T>, #[constexpr
     store(out[flat_out], val);
 }
 
-// ─── mt_strided_copy_nd ──────────────────────────────────────────────────
+// ─── ffai_strided_copy_nd ──────────────────────────────────────────────────
 //
 // General N-D strided copy — the MLX `copy_g` / `copy_g_nd{1,2,3}`
-// counterpart. The 2-D `mt_strided_copy` above only handles a
+// counterpart. The 2-D `ffai_strided_copy` above only handles a
 // row-major-padded `[rows, cols]` source; this kernel copies an
 // arbitrary-rank logical tensor out of a source buffer whose physical
 // layout is described by per-dimension `shape` + `strides` arrays.
@@ -29,7 +29,7 @@ pub fn mt_strided_copy<T>(#[strided] src: Tensor<T>, out: Tensor<T>, #[constexpr
 //
 // Because the source strides are *arbitrary* (not necessarily a
 // padded row-major view), this generalises:
-//   - padded copies         (the 2-D `mt_strided_copy` case),
+//   - padded copies         (the 2-D `ffai_strided_copy` case),
 //   - transposes            (strides permuted vs shape),
 //   - broadcasts            (a stride of 0 on a broadcast axis),
 //   - any slice / dilation  (non-unit innermost stride).
@@ -57,7 +57,7 @@ pub fn mt_strided_copy<T>(#[strided] src: Tensor<T>, out: Tensor<T>, #[constexpr
 //   so `strides` is interpreted in the same major-to-minor order as
 //   `shape` (row-major logical indexing).
 #[kernel]
-pub fn mt_strided_copy_nd<T>(
+pub fn ffai_strided_copy_nd<T>(
     src: Tensor<T>,
     shape: Tensor<u32>,
     strides: Tensor<u32>,
@@ -86,13 +86,13 @@ pub fn mt_strided_copy_nd<T>(
 
 /// New-syntax correctness + benchmarks for the strided-copy kernels. Both are
 /// exact gathers (`tol = 0`): the oracle replays the same unravel / submatrix
-/// index math the kernel uses. `mt_strided_copy` exercises the `#[strided]`
+/// index math the kernel uses. `ffai_strided_copy` exercises the `#[strided]`
 /// metadata ABI — the runtime (test path) and the in-process bench runner both
 /// bind the `src_shape` / `src_strides` companion buffers the author supplies.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_strided_copy, mt_strided_copy_nd};
+    use super::{ffai_strided_copy, ffai_strided_copy_nd};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u8u32(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -128,7 +128,7 @@ pub mod kernel_tests {
         let src = unpack_f32(&pack_f32(&src_f, dt), dt);
         let expected = nd_oracle(&src, &shape, &strides);
         let n_out = (shape[0] * shape[1]) as usize;
-        TestSetup::new(mt_strided_copy_nd::kernel_ir_for(dt))
+        TestSetup::new(ffai_strided_copy_nd::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec("shape", u8u32(&shape), DType::U32))
@@ -146,7 +146,7 @@ pub mod kernel_tests {
         let src = unpack_f32(&pack_f32(&src_f, dt), dt);
         let expected = nd_oracle(&src, shape, strides);
         let n_out: usize = shape.iter().map(|&s| s as usize).product();
-        TestSetup::new(mt_strided_copy_nd::kernel_ir_for(dt))
+        TestSetup::new(ffai_strided_copy_nd::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec("shape", u8u32(shape), DType::U32))
@@ -186,7 +186,7 @@ pub mod kernel_tests {
         for r in 0..rows {
             expected.extend_from_slice(&src[r * src_cols..r * src_cols + dest_cols]);
         }
-        TestSetup::new(mt_strided_copy::kernel_ir_for(dt))
+        TestSetup::new(ffai_strided_copy::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec(
@@ -206,7 +206,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_strided_copy, mt_strided_copy_nd};
+    use super::{ffai_strided_copy, ffai_strided_copy_nd};
     use crate::utils::{dtype_tol, mlx_tname};
 
     fn u8u32(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -236,13 +236,13 @@ pub mod kernel_benches {
     /// `strides = [src_cols, 1]` (row stride, col stride). With `dispatchThreadgroups`,
     /// `threads_per_grid = groups × tpg`, so dispatching `[dest_cols, rows, 1]`
     /// groups at a `[1,1,1]` tpg gives `grid_dim.x = dest_cols`. `src` is shared
-    /// by name with the MT `#[strided]` source.
+    /// by name with the FFAI `#[strided]` source.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_strided_copy(dt: DType) -> BenchSetup {
         let (rows, dest_cols, pad) = (1024usize, 4096usize, 128usize);
         let src_cols = dest_cols + pad;
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_strided_copy::kernel_ir_for(dt))
+        BenchSetup::new(ffai_strided_copy::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("src", rows * src_cols, dt))
             .buffer(BenchBuffer::from_vec(
@@ -268,7 +268,7 @@ pub mod kernel_benches {
                     format!("g2_copy{tn}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/copy.metal")),
                 )
-                // src[0] shared by name with the MT `#[strided] src` above.
+                // src[0] shared by name with the FFAI `#[strided] src` above.
                 .buffer(BenchBuffer::zeros("src", rows * src_cols, dt))
                 // dst[1] — the compared output.
                 .buffer(BenchBuffer::zeros("out", rows * dest_cols, dt).output())
@@ -296,7 +296,7 @@ pub mod kernel_benches {
     fn bench_strided_copy_nd(dt: DType) -> BenchSetup {
         let (d0, d1) = (1024usize, 4096usize);
         let n_out = d0 * d1;
-        BenchSetup::new(mt_strided_copy_nd::kernel_ir_for(dt))
+        BenchSetup::new(ffai_strided_copy_nd::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("src", n_out, dt))
             .buffer(BenchBuffer::from_vec("shape", u8u32(&[d0 as u32, d1 as u32]), DType::U32))

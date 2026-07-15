@@ -3,7 +3,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Vulkan/RDNA4 correctness for the multi-position flash-attention kernel
-//! `mt_sdpa_multi` (the prefill attention kernel). The existing
+//! `ffai_sdpa_multi` (the prefill attention kernel). The existing
 //! `#[test_kernel]` corpus exercises a small (n_query=8, kv_stride=64,
 //! GQA 8/4) shape; this test pins the *prefill-realistic* shapes the
 //! FFAI consumer dispatches — large `kv_stride` (cache capacity), a real
@@ -14,7 +14,7 @@
 //! The kernel is a Reduction-mode kernel: 1024-thread workgroup, one
 //! workgroup per (query, q_head). On RDNA4 the device pins
 //! `requiredSubgroupSize=32` so the in-kernel 32-lane simd-group
-//! partition (and `mt_subgroup_add` / `subgroupMax` reductions) line up
+//! partition (and `ffai_subgroup_add` / `subgroupMax` reductions) line up
 //! with the hardware subgroup; this test is the regression guard for
 //! that contract holding at scale.
 //!
@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 
 use ffai_kernels::{VulkanDevice, core::dtype::DType};
-use ffai_kernels_std::kernels::sdpa::sdpa_multi::mt_sdpa_multi;
+use ffai_kernels_std::kernels::sdpa::sdpa_multi::ffai_sdpa_multi;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -125,7 +125,7 @@ fn run_case(
     );
 
     let dt = DType::F32;
-    let mut kernel = mt_sdpa_multi::kernel_ir_for(dt);
+    let mut kernel = ffai_sdpa_multi::kernel_ir_for(dt);
     kernel.mode = ffai_kernels::core::ir::KernelMode::Reduction;
 
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();

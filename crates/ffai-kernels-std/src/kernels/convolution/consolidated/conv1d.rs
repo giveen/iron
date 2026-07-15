@@ -5,31 +5,31 @@
 //! Two `#[kernel(variants(...))]` blocks cover all 1D conv kernels in this
 //! crate:
 //!
-//! * [`mt_conv1d_dense`](self::mt_conv1d_dense) — the four dense 1D convs
+//! * [`ffai_conv1d_dense`](self::ffai_conv1d_dense) — the four dense 1D convs
 //!   (direct with/without dilation, transpose full/depthwise) in one
 //!   function. Four named variants via `VARIANT` axis:
-//!   `mt_conv1d_dense_direct` (audio_conv1d),
-//!   `mt_conv1d_dense_dilated` (conv1d_dilated),
-//!   `mt_conv1d_dense_transpose` (conv1d_transpose),
-//!   `mt_conv1d_dense_depthwise` (ffai_conv1d_transpose_depthwise).
+//!   `ffai_conv1d_dense_direct` (audio_conv1d),
+//!   `ffai_conv1d_dense_dilated` (conv1d_dilated),
+//!   `ffai_conv1d_dense_transpose` (conv1d_transpose),
+//!   `ffai_conv1d_dense_depthwise` (ffai_conv1d_transpose_depthwise).
 //!   The `dilation` constexpr is OPTIONAL — stripped from the MSL signature
 //!   for the direct variant where the body does not reference it, so the
 //!   host doesn't need to bind a buffer slot for that one kernel.
 //!
-//! * [`mt_conv1d_quant`](self::mt_conv1d_quant) — the 19
+//! * [`ffai_conv1d_quant`](self::ffai_conv1d_quant) — the 19
 //!   block-scaled quantised-weight formats applied to both the direct
 //!   (audio) and dilated (fishspeech) paths. Axes `DILATED × FMT`
 //!   (38-row) generate the 38 kernels
-//!   `mt_conv1d_quant_{audio,fishspeech}_{mxfp4,nvfp4,…,int8}`. The `dilation` constexpr is
+//!   `ffai_conv1d_quant_{audio,fishspeech}_{mxfp4,nvfp4,…,int8}`. The `dilation` constexpr is
 //!   OPTIONAL — stripped for DILATED=audio and kept for DILATED=fishspeech
 //!   (fishspeech). FMT/BITS/WT/ST co-vary across the 19 formats; type
 //!   variants cannot gate compile-time `if` (per the variants macro's
 //!   design), so the FMT int is the gating discriminant and the body has a
 //!   deep `if FMT == N { }` tree pruned at variants-substitution time.
 //!
-//! The decode primitives (`mt_decode_e2m1`, `mt_decode_e4m3`,
-//! `mt_decode_e5m2`, `mt_decode_int8`, `mt_decode_e8m0`,
-//! `mt_unpack_nbit`) live in `crate::kernels::primitives` and are inlined at
+//! The decode primitives (`ffai_decode_e2m1`, `ffai_decode_e4m3`,
+//! `ffai_decode_e5m2`, `ffai_decode_int8`, `ffai_decode_e8m0`,
+//! `ffai_unpack_nbit`) live in `crate::kernels::primitives` and are inlined at
 //! codegen by `KernelInlinePass`. The body parser lowers `if` to
 //! `Op::If` (no value), so the active branch updates a pre-declared
 //! mutable accumulator (`let mut acc: f32 = 0.0; ... acc = ...;`) rather
@@ -54,7 +54,7 @@
 //! Sub-byte ints (FMT 2-6, 8-12) and nibble formats (FMT 0,1,7) all share the
 //! same bitstream view: a per-row word base of `oc * (c_dim * BITS / 32)` with
 //! `bit_off = col * BITS`. Nibbles are BITS=4 byte-aligned codes — `spill` is
-//! always 0 in that case. The straddle-aware `mt_unpack_nbit` primitive
+//! always 0 in that case. The straddle-aware `ffai_unpack_nbit` primitive
 //! handles the generic int2/3/5/6 case where codes straddle word
 //! boundaries.
 
@@ -102,7 +102,7 @@ use ffai_kernels::kernel;
     suffix = "{VARIANT}",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_conv1d_dense<T>(
+pub fn ffai_conv1d_dense<T>(
     input: Tensor<T>,
     weight: Tensor<T>,
     bias: Tensor<T>,
@@ -218,7 +218,7 @@ pub fn mt_conv1d_dense<T>(
 
 #[kernel(variants(
     // (FMT, BITS, WT, ST) co-vary; DILATED is a cross axis producing 19×2=38 kernels.
-    // Named labels give readable names: mt_conv1d_quant_audio_mxfp4, …fishspeech_int8.
+    // Named labels give readable names: ffai_conv1d_quant_audio_mxfp4, …fishspeech_int8.
     // FMT integer (0–18, position-based) gates the compile-time if dispatch tree.
     // DILATED: audio=0, fishspeech=1 — matches `if DILATED == 0u32 / 1u32` in body.
     (FMT,         BITS,  WT,  ST ) = [
@@ -252,7 +252,7 @@ pub fn mt_conv1d_dense<T>(
 /// tree pruned at variants-substitution time since type-params (WT, ST)
 /// cannot appear in compile-time `if` conditions.
 #[allow(clippy::too_many_arguments)]
-pub fn mt_conv1d_quant<T>(
+pub fn ffai_conv1d_quant<T>(
     input: Tensor<T>,
     weight: Tensor<WT>,
     scales: Tensor<ST>,
@@ -286,8 +286,8 @@ pub fn mt_conv1d_quant<T>(
     // Sign-extend constants for sub-byte ints (FMT 2-6, 8-12). For nibble/byte
     // formats (FMT 0,1,7 BITS=4; FMT 13-18 BITS=8) the sign-extend path is
     // dead — those formats bypass the bitstream decode and go through the
-    // dedicated `mt_decode_e2m1` / `mt_decode_e4m3` / `mt_decode_e5m2` /
-    // `mt_decode_int8` primitives instead. The half/full terms remain live but
+    // dedicated `ffai_decode_e2m1` / `ffai_decode_e4m3` / `ffai_decode_e5m2` /
+    // `ffai_decode_int8` primitives instead. The half/full terms remain live but
     // the optimizer DCEs them.
     let half = 1u32 << (BITS - 1u32);
     let full = (1u32 << BITS).cast::<f32>();
@@ -305,11 +305,11 @@ pub fn mt_conv1d_quant<T>(
             // Element decode — two families selected by FMT:
             //   * FMT 0..12: u32 weight, BITS-bit codes (nibbles for BITS=4,
             //     sub-byte ints for BITS=2..6). The straddle-aware
-            //     `mt_unpack_nbit` extracts the BITS-wide code; nibble formats
-            //     (FMT 0,1,7) then go through `mt_decode_e2m1`, sub-byte ints
+            //     `ffai_unpack_nbit` extracts the BITS-wide code; nibble formats
+            //     (FMT 0,1,7) then go through `ffai_decode_e2m1`, sub-byte ints
             //     sign-extend via `half`/`full` below.
             //   * FMT 13..18: u8 weight, one code per byte. Routed to
-            //     `mt_decode_e4m3` / `mt_decode_e5m2` / `mt_decode_int8` by
+            //     `ffai_decode_e4m3` / `ffai_decode_e5m2` / `ffai_decode_int8` by
             //     FMT.
             let elem = if FMT <= 12u32 {
                 let bit_off = col * BITS;
@@ -320,10 +320,10 @@ pub fn mt_conv1d_quant<T>(
                 let w0 = load(weight[w_row_word_base + word_idx]);
                 let w1 =
                     load(weight[w_row_word_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 if FMT <= 1u32 || FMT == 7u32 {
                     // Nibble E2M1 (BITS=4, byte-aligned, spill=0).
-                    mt_decode_e2m1(q)
+                    ffai_decode_e2m1(q)
                 } else {
                     // Sub-byte int: sign-extend via half/full.
                     let qf = q.cast::<f32>();
@@ -337,29 +337,29 @@ pub fn mt_conv1d_quant<T>(
                 // the formula `c_dim * BITS / 32 = c_dim / 4` and is 4× too small.
                 let raw = load(weight[oc * c_dim + col]).cast::<u32>();
                 if FMT == 13u32 || FMT == 17u32 {
-                    mt_decode_e4m3(raw)
+                    ffai_decode_e4m3(raw)
                 } else if FMT == 14u32 || FMT == 16u32 {
-                    mt_decode_e5m2(raw)
+                    ffai_decode_e5m2(raw)
                 } else {
-                    mt_decode_int8(raw)
+                    ffai_decode_int8(raw)
                 }
             };
 
             // Scale decode — ST=u8 (E8M0 or E4M3) vs ST=f32 (direct load).
             //   * ST=u8, FMT 1 (nvfp4): E4M3 micro-scale × `global` constexpr.
             //   * ST=u8, FMT 0 or 2-6 (mxfp4 / mxintN): E8M0 pow-2 scale
-            //     (`mt_decode_e8m0` → 2^(b-127)).
+            //     (`ffai_decode_e8m0` → 2^(b-127)).
             //   * ST=u8, FMT 13-15 (mxfp8 / mxint8): E8M0.
             //   * ST=f32 (FMT 7-12, 16-18): direct load, no decode.
             let scale = if FMT <= 6u32 {
                 if FMT == 1u32 {
-                    mt_decode_e4m3(load(scales[w_row_blk + col / block_size]).cast::<u32>())
+                    ffai_decode_e4m3(load(scales[w_row_blk + col / block_size]).cast::<u32>())
                         * global
                 } else {
-                    mt_decode_e8m0(load(scales[w_row_blk + col / block_size]).cast::<u32>())
+                    ffai_decode_e8m0(load(scales[w_row_blk + col / block_size]).cast::<u32>())
                 }
             } else if FMT >= 13u32 && FMT <= 15u32 {
-                mt_decode_e8m0(load(scales[w_row_blk + col / block_size]).cast::<u32>())
+                ffai_decode_e8m0(load(scales[w_row_blk + col / block_size]).cast::<u32>())
             } else {
                 load(scales[w_row_blk + col / block_size])
             };
@@ -484,7 +484,7 @@ pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
     // `use super::*;` brings the kernel modules from the parent scope
-    // (`mt_conv1d_dense_fmt*`, `mt_conv1d_block_scaled_*`) into the test
+    // (`ffai_conv1d_dense_fmt*`, `ffai_conv1d_block_scaled_*`) into the test
     // setup's namespace so the per-variant kernel references below resolve.
     use super::*;
 
@@ -859,11 +859,11 @@ pub mod kernel_tests {
         if TRANSPOSE == 0u32 {
             if DILATED == 0u32 {
                 // direct — no dilation. Whisper stem conv #1.
-                direct_setup(mt_conv1d_dense_direct::kernel_ir_for(dt), 1, 8, 50, 16, 3, 1, 1, dt)
+                direct_setup(ffai_conv1d_dense_direct::kernel_ir_for(dt), 1, 8, 50, 16, 3, 1, 1, dt)
             } else {
                 // dilated — MRF ResBlock, dilation 3.
                 dilated_setup(
-                    mt_conv1d_dense_dilated::kernel_ir_for(dt),
+                    ffai_conv1d_dense_dilated::kernel_ir_for(dt),
                     1,
                     12,
                     60,
@@ -878,7 +878,7 @@ pub mod kernel_tests {
         } else if DEPTHWISE == 0u32 {
             // transpose — HiFi-GAN 8× upsample.
             transpose_setup(
-                mt_conv1d_dense_transpose::kernel_ir_for(dt),
+                ffai_conv1d_dense_transpose::kernel_ir_for(dt),
                 1,
                 8,
                 16,
@@ -892,7 +892,7 @@ pub mod kernel_tests {
             )
         } else {
             // depthwise transpose — StyleTTS2 pool.
-            depthwise_setup(mt_conv1d_dense_depthwise::kernel_ir_for(dt), 6, 13, 3, 2, 1, dt)
+            depthwise_setup(ffai_conv1d_dense_depthwise::kernel_ir_for(dt), 6, 13, 3, 2, 1, dt)
         }
     }
 
@@ -921,23 +921,23 @@ pub mod kernel_tests {
         };
         let kernel = if DIL == 0u32 {
             if FMT == 0u32 {
-                mt_conv1d_quant_audio_mxfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_mxfp4::kernel_ir_for(dt)
             } else if FMT == 1u32 {
-                mt_conv1d_quant_audio_nvfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_nvfp4::kernel_ir_for(dt)
             } else if FMT == 2u32 {
-                mt_conv1d_quant_audio_fp8_e5m2::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_fp8_e5m2::kernel_ir_for(dt)
             } else {
-                mt_conv1d_quant_audio_int8::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_int8::kernel_ir_for(dt)
             }
         } else {
             if FMT == 0u32 {
-                mt_conv1d_quant_fishspeech_mxfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_mxfp4::kernel_ir_for(dt)
             } else if FMT == 1u32 {
-                mt_conv1d_quant_fishspeech_nvfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_nvfp4::kernel_ir_for(dt)
             } else if FMT == 2u32 {
-                mt_conv1d_quant_fishspeech_fp8_e5m2::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_fp8_e5m2::kernel_ir_for(dt)
             } else {
-                mt_conv1d_quant_fishspeech_int8::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_int8::kernel_ir_for(dt)
             }
         };
         let dilation = if DIL == 1u32 { 2usize } else { 1usize };
@@ -973,14 +973,14 @@ pub mod kernel_benches {
         let n_out = batch * ch * out_len;
         let kernel = if TRANSPOSE == 0u32 {
             if DILATED == 0u32 {
-                mt_conv1d_dense_direct::kernel_ir_for(dt)
+                ffai_conv1d_dense_direct::kernel_ir_for(dt)
             } else {
-                mt_conv1d_dense_dilated::kernel_ir_for(dt)
+                ffai_conv1d_dense_dilated::kernel_ir_for(dt)
             }
         } else if DEPTHWISE == 0u32 {
-            mt_conv1d_dense_transpose::kernel_ir_for(dt)
+            ffai_conv1d_dense_transpose::kernel_ir_for(dt)
         } else {
-            mt_conv1d_dense_depthwise::kernel_ir_for(dt)
+            ffai_conv1d_dense_depthwise::kernel_ir_for(dt)
         };
         let s = BenchSetup::new(kernel)
             .mode(KernelMode::Grid3D)
@@ -1051,23 +1051,23 @@ pub mod kernel_benches {
             + n_out * sz;
         let kernel = if DIL == 0u32 {
             if FMT == 0u32 {
-                mt_conv1d_quant_audio_mxfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_mxfp4::kernel_ir_for(dt)
             } else if FMT == 1u32 {
-                mt_conv1d_quant_audio_nvfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_nvfp4::kernel_ir_for(dt)
             } else if FMT == 2u32 {
-                mt_conv1d_quant_audio_fp8_e5m2::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_fp8_e5m2::kernel_ir_for(dt)
             } else {
-                mt_conv1d_quant_audio_int8::kernel_ir_for(dt)
+                ffai_conv1d_quant_audio_int8::kernel_ir_for(dt)
             }
         } else {
             if FMT == 0u32 {
-                mt_conv1d_quant_fishspeech_mxfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_mxfp4::kernel_ir_for(dt)
             } else if FMT == 1u32 {
-                mt_conv1d_quant_fishspeech_nvfp4::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_nvfp4::kernel_ir_for(dt)
             } else if FMT == 2u32 {
-                mt_conv1d_quant_fishspeech_fp8_e5m2::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_fp8_e5m2::kernel_ir_for(dt)
             } else {
-                mt_conv1d_quant_fishspeech_int8::kernel_ir_for(dt)
+                ffai_conv1d_quant_fishspeech_int8::kernel_ir_for(dt)
             }
         };
         let mut s = BenchSetup::new(kernel)

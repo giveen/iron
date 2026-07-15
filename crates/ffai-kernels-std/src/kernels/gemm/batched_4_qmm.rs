@@ -3,8 +3,8 @@
 //! Batched 4-output 4-bit quantized QMM (M>1) — fuses the FOUR
 //! independent A, B, C, D projection matmuls that share a single `x`
 //! activation into one dispatch. M>1 sibling of
-//! `mt_batched_4_qgemv_fast` (M=1, 4-output) and the 4-output cousin
-//! of `mt_batched_qkv_qmm_fast` (M>1, 3-output).
+//! `ffai_batched_4_qgemv_fast` (M=1, 4-output) and the 4-output cousin
+//! of `ffai_batched_qkv_qmm_fast` (M>1, 3-output).
 //!
 //! Motivation: the Qwen35 GDN `forwardManyChunked` prefill step runs
 //! FOUR independent int4 projections per chunk off the same
@@ -24,7 +24,7 @@
 //! Callers can alias all four into one backing allocation if they want;
 //! the kernel only sees four base pointers.
 //!
-//! Dispatch geometry mirrors `mt_batched_4_qgemv_fast`:
+//! Dispatch geometry mirrors `ffai_batched_4_qgemv_fast`:
 //!   * `program_id::<2>()` selects matrix (0 = A, 1 = B, 2 = C, 3 = D).
 //!   * `program_id::<1>()` selects batched row m (0..M).
 //!   * `tgid_x` selects an 8-row output tile. TPG = 64 = 2 SG × 32 lanes.
@@ -57,7 +57,7 @@ use ffai_kernels::kernel;
 /// docs for the full geometry contract. TGs past a matrix's `out_*`
 /// rows no-op.
 #[kernel]
-pub fn mt_batched_4_qmm_fast<T>(
+pub fn ffai_batched_4_qmm_fast<T>(
     x: Tensor<T>,
     w_a: Tensor<u32>,
     scales_a: Tensor<T>,
@@ -343,7 +343,7 @@ pub fn mt_batched_4_qmm_fast<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_batched_4_qmm_fast;
+    use super::ffai_batched_4_qmm_fast;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -454,7 +454,7 @@ pub mod kernel_tests {
         let ed = naive_qmm(&wd_p, &r(&sd), &r(&bd), &x, m, in_dim, gs, out_d);
 
         let n_tgs = out_a.max(out_b).max(out_c).max(out_d).div_ceil(8);
-        TestSetup::new(mt_batched_4_qmm_fast::kernel_ir_for(dt))
+        TestSetup::new(ffai_batched_4_qmm_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w_a", pack_u32(&wa_p), DType::U32))
@@ -487,12 +487,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_batched_4_qmm_fast` — MLX-less reduction
+/// New-syntax benchmark for `ffai_batched_4_qmm_fast` — MLX-less reduction
 /// kernel. M=4 prefill GDN shape (Qwen35): hidden 2048 → qkv/z/b/a projections.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_batched_4_qmm_fast;
+    use super::ffai_batched_4_qmm_fast;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_batched_4_qmm_fast(dt: DType) -> BenchSetup {
@@ -502,7 +502,7 @@ pub mod kernel_benches {
         let words = |o: usize| o * in_dim / 8;
         let total = words(out_a) + words(out_b) + words(out_c) + words(out_d);
         let n_tgs = out_a.max(out_b).max(out_c).max(out_d).div_ceil(8);
-        BenchSetup::new(mt_batched_4_qmm_fast::kernel_ir_for(dt))
+        BenchSetup::new(ffai_batched_4_qmm_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m * in_dim, dt))
             .buffer(BenchBuffer::random("w_a", words(out_a), DType::U32))

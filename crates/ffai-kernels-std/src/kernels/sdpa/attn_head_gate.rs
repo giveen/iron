@@ -40,7 +40,7 @@ use ffai_kernels::kernel;
 // fit this 3-input + 1-constexpr shape; the new declarative `#[bench]`
 // on `kernel_benches::bench_attn_head_gate` below handles registration.
 #[kernel]
-pub fn mt_attn_head_gate<T>(
+pub fn ffai_attn_head_gate<T>(
     attn: Tensor<T>,
     gate: Tensor<T>,
     out: Tensor<T>,
@@ -63,7 +63,7 @@ pub fn mt_attn_head_gate<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_attn_head_gate;
+    use super::ffai_attn_head_gate;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n_heads: usize, head_dim: usize, dt: DType) -> TestSetup {
@@ -79,7 +79,7 @@ pub mod kernel_tests {
                 expected.push(a_dt[h * head_dim + d] * s);
             }
         }
-        TestSetup::new(mt_attn_head_gate::kernel_ir_for(dt))
+        TestSetup::new(ffai_attn_head_gate::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("attn", pack_f32(&attn, dt), dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -101,14 +101,14 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_attn_head_gate;
+    use super::ffai_attn_head_gate;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_attn_head_gate(dt: DType) -> BenchSetup {
         // Step-3 full-attn shape.
         let (n_heads, head_dim) = (64usize, 128usize);
         let n = n_heads * head_dim;
-        BenchSetup::new(mt_attn_head_gate::kernel_ir_for(dt))
+        BenchSetup::new(ffai_attn_head_gate::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("attn", n, dt))
             .buffer(BenchBuffer::random("gate", n_heads, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

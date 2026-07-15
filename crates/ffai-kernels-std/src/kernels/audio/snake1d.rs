@@ -27,7 +27,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_snake1d<T>(
+pub fn ffai_snake1d<T>(
     input: Tensor<T>,
     alpha: Tensor<T>,
     mut out: Tensor<T>,
@@ -43,12 +43,12 @@ pub fn mt_snake1d<T>(
     store(out[i], y.cast::<T>());
 }
 
-/// New-syntax correctness for `mt_snake1d`. Grid3D, grid `[C·length,1,1]`,
+/// New-syntax correctness for `ffai_snake1d`. Grid3D, grid `[C·length,1,1]`,
 /// tpg `[1,1,1]`. Oracle applies snake per element with the channel's `α`.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_snake1d;
+    use super::ffai_snake1d;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
@@ -68,7 +68,7 @@ pub mod kernel_tests {
                 x + (1.0 / (a + 1e-9)) * s * s
             })
             .collect();
-        TestSetup::new(mt_snake1d::kernel_ir_for(dt))
+        TestSetup::new(ffai_snake1d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::from_vec("alpha", pack_f32(&alpha_f, dt), dt))
@@ -83,13 +83,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_snake1d;
+    use super::ffai_snake1d;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_snake1d(dt: DType) -> BenchSetup {
         let (c, length) = (128usize, 7801usize);
         let n = c * length;
-        BenchSetup::new(mt_snake1d::kernel_ir_for(dt))
+        BenchSetup::new(ffai_snake1d::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", n, dt))
             .buffer(BenchBuffer::random("alpha", c, dt))

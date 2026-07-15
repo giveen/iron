@@ -264,7 +264,7 @@ impl MslGenerator {
                 // it fires, the IR has a real `Op::Fma { a, b, c }`
                 // here.  The emit lowers it to a single `fma(a, b, c)`
                 // line; the upstream `Op::Mul` becomes dead and is
-                // swept by DCE.  Pre-#209/3 this was a textual
+                // swept by DCE.  Previously this was a textual
                 // peephole on `BinOp::Add` / `BinOp::Sub` that left
                 // the standalone Mul behind in MSL as a dead variable.
                 Op::Fma { a, b, c } => {
@@ -902,7 +902,7 @@ impl MslGenerator {
                 // `simd_prefix_{inclusive,exclusive}_{sum,product}` simdgroup
                 // intrinsics. The codegen previously emitted a `value + init`
                 // placeholder which silently returned the wrong result (no
-                // cross-lane communication at all) — `mt_scan_f32`'s
+                // cross-lane communication at all) — `ffai_scan_f32`'s
                 // hierarchical-scan pattern depended on the exclusive sum
                 // and was producing garbage on GPU dispatch. Min/Max scans
                 // aren't shipped by Metal as built-ins; emit a placeholder
@@ -1027,7 +1027,7 @@ impl MslGenerator {
                         ReduceKind::Max => wl!(out, "{pad}float {v} = simd_max(float({rv}));"),
                         ReduceKind::Min => wl!(out, "{pad}float {v} = simd_min(float({rv}));"),
                         ReduceKind::Product => {
-                            wl!(out, "{pad}float {v} = __mt_simd_product(float({rv}));")
+                            wl!(out, "{pad}float {v} = __ffai_simd_product(float({rv}));")
                         },
                     }
                 },
@@ -1186,5 +1186,5 @@ impl MslGenerator {
 }
 
 // FMA recognition lives in `passes::fma_fusion::FmaFusionPass` (IR-level
-// rewrite of `Add(Mul(a, b), c)` → `Op::Fma { a, b, c }`).  The pre-#209/3
+// rewrite of `Add(Mul(a, b), c)` → `Op::Fma { a, b, c }`).  The earlier
 // emit-time peephole + per-kernel skip-set lived here; both are deleted.

@@ -36,7 +36,7 @@ use ffai_kernels::kernel;
 /// `tg_inner`. Per-element weight decode + per-block scale by the
 /// `(BITS, WDEC, SKIND)` co-vars; buffer types by `(WT, ST)` — see
 /// `gemm/block_scaled_matmul` for the legend. Decodes through
-/// `kernels/primitives.rs`. Produces `mt_<FMT>_gated_rms_norm_qgemv`.
+/// `kernels/primitives.rs`. Produces `ffai_<FMT>_gated_rms_norm_qgemv`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -71,7 +71,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_gated_rms_norm_qgemv",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     y: Tensor<f32>,
     z: Tensor<T>,
     norm_weight: Tensor<T>,
@@ -134,14 +134,14 @@ pub fn mt<T>(
                 let scale = if SKIND == 0u32 {
                     exp2(sraw.cast::<f32>() - 127.0f32)
                 } else if SKIND == 1u32 {
-                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                    ffai_decode_e4m3(sraw.cast::<u32>()) * global
                 } else {
                     sraw.cast::<f32>()
                 };
                 let packed = load(weight[row_pack_off + pack_idx]);
                 let p_off = pack_idx * 8u32;
                 for i in range(0u32, 8u32, 1u32) {
-                    let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                    let val = ffai_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
                     let inner = threadgroup_load("tg_inner", p_off + i);
                     acc = acc + (val * scale) * inner;
                 }
@@ -175,17 +175,17 @@ pub fn mt<T>(
                     let w1 = load(
                         weight[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
-                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                    let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
                     select(q >= half, qf - full, qf)
                 } else {
                     let raw = load(weight[row_off + c]).cast::<u32>();
                     if WDEC == 2u32 {
-                        mt_decode_e4m3(raw)
+                        ffai_decode_e4m3(raw)
                     } else if WDEC == 3u32 {
-                        mt_decode_e5m2(raw)
+                        ffai_decode_e5m2(raw)
                     } else {
-                        mt_decode_int8(raw)
+                        ffai_decode_int8(raw)
                     }
                 };
                 let inner = threadgroup_load("tg_inner", c);
@@ -304,18 +304,32 @@ pub mod kernel_tests {
     // hv=4, dv=128, in_dim=512 (÷ 16/32), out_dim=4.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp4_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_mxfp4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxfp4, 4, 128, 4, dt)
+        gated_setup(
+            ffai_mxfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            4,
+            128,
+            4,
+            dt,
+        )
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp4_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_nvfp4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp4, 4, 128, 4, dt)
+        gated_setup(
+            ffai_nvfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Nvfp4,
+            4,
+            128,
+            4,
+            dt,
+        )
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxfp8_e4m3_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             4,
             128,
@@ -327,7 +341,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxfp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             4,
             128,
@@ -338,20 +352,27 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp8, 4, 128, 4, dt)
+        gated_setup(
+            ffai_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Nvfp8,
+            4,
+            128,
+            4,
+            dt,
+        )
     }
 
     // Legacy float-scale fp4 / fp8 + symmetric int8. fp8_e4m3 reuses the nvfp8
     // kernel (same 8-bit-E4M3 + f32-scale shape); the others decode here.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_fp4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4, 128, 4, dt)
+        gated_setup(ffai_fp4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4, 128, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             4,
             128,
@@ -363,7 +384,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_fp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             4,
             128,
@@ -374,7 +395,7 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int8_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4, 128, 4, dt)
+        gated_setup(ffai_int8_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4, 128, 4, dt)
     }
 
     // Symmetric sub-byte ints (FP32 group scale, group 64) + MXINT (E8M0 block
@@ -384,28 +405,28 @@ pub mod kernel_tests {
     // tracks the gated-dequant-then-dot reference to float precision.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int2_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4, 128, 4, dt)
+        gated_setup(ffai_int2_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int3_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4, 128, 4, dt)
+        gated_setup(ffai_int3_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4, 128, 4, dt)
+        gated_setup(ffai_int4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int5_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4, 128, 4, dt)
+        gated_setup(ffai_int5_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
-        gated_setup(mt_int6_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4, 128, 4, dt)
+        gated_setup(ffai_int6_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4, 128, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint2,
             4,
             128,
@@ -416,7 +437,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint3_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint3_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint3,
             4,
             128,
@@ -427,7 +448,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint4_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint4,
             4,
             128,
@@ -438,7 +459,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint5_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint5_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint5,
             4,
             128,
@@ -449,7 +470,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint6_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint6_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint6,
             4,
             128,
@@ -460,7 +481,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_mxint8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint8,
             4,
             128,
@@ -475,7 +496,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             4,
             128,
@@ -486,7 +507,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             4,
             128,
@@ -497,7 +518,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_fp4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp4F16,
             4,
             128,
@@ -508,7 +529,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_fp8_e5m2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4,
             128,
@@ -519,7 +540,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int2F16,
             4,
             128,
@@ -530,7 +551,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int3_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int3_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int3F16,
             4,
             128,
@@ -541,7 +562,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int4F16,
             4,
             128,
@@ -552,7 +573,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int5_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int5_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int5F16,
             4,
             128,
@@ -563,7 +584,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int6_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int6_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int6F16,
             4,
             128,
@@ -574,7 +595,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_gated_rms_norm_qgemv(dt: DType) -> TestSetup {
         gated_setup(
-            mt_int8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int8F16,
             4,
             128,
@@ -646,7 +667,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp4,
             16,
             128,
@@ -657,7 +678,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_nvfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp4,
             16,
             128,
@@ -668,7 +689,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxfp8_e4m3_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             16,
             128,
@@ -679,7 +700,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxfp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             16,
             128,
@@ -690,7 +711,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp8,
             16,
             128,
@@ -700,12 +721,19 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_gated(dt: DType) -> BenchSetup {
-        gated_bench(mt_fp4_gated_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 16, 128, 2048, dt)
+        gated_bench(
+            ffai_fp4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Fp4,
+            16,
+            128,
+            2048,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             16,
             128,
@@ -716,7 +744,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_fp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             16,
             128,
@@ -727,7 +755,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int8,
             16,
             128,
@@ -739,7 +767,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int2,
             16,
             128,
@@ -750,7 +778,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int3_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int3_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int3,
             16,
             128,
@@ -761,7 +789,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int4_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int4,
             16,
             128,
@@ -772,7 +800,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int5_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int5_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int5,
             16,
             128,
@@ -783,7 +811,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int6_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int6_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int6,
             16,
             128,
@@ -794,7 +822,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint2_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint2_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint2,
             16,
             128,
@@ -805,7 +833,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint3_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint3_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint3,
             16,
             128,
@@ -816,7 +844,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint4_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint4_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint4,
             16,
             128,
@@ -827,7 +855,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint5_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint5_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint5,
             16,
             128,
@@ -838,7 +866,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint6_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint6_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint6,
             16,
             128,
@@ -849,7 +877,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_mxint8_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint8_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint8,
             16,
             128,
@@ -861,7 +889,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             16,
             128,
@@ -872,7 +900,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             16,
             128,
@@ -883,7 +911,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_fp4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp4F16,
             16,
             128,
@@ -894,7 +922,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_fp8_e5m2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             16,
             128,
@@ -905,7 +933,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int2_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int2F16,
             16,
             128,
@@ -916,7 +944,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int3_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int3_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int3F16,
             16,
             128,
@@ -927,7 +955,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int4_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int4F16,
             16,
             128,
@@ -938,7 +966,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int5_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int5_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int5F16,
             16,
             128,
@@ -949,7 +977,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int6_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int6_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int6F16,
             16,
             128,
@@ -960,7 +988,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16_gated(dt: DType) -> BenchSetup {
         gated_bench(
-            mt_int8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int8_f16_gated_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int8F16,
             16,
             128,

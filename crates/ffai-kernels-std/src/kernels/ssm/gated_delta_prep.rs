@@ -2,8 +2,8 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Gated DeltaNet — **fused** prep + decode kernel.
 //!
-//! `mt_gated_delta_prep_step` extends the recurrence-only
-//! [`mt_gated_delta_step`](super::gated_delta::mt_gated_delta_step) by
+//! `ffai_gated_delta_prep_step` extends the recurrence-only
+//! [`ffai_gated_delta_step`](super::gated_delta::ffai_gated_delta_step) by
 //! absorbing every host-side prep computation Qwen3.6 / Qwen3.5 currently
 //! does between the conv1d and the GDN recurrence:
 //!
@@ -38,7 +38,7 @@
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
 //!   - `y`            : Tensor<T> [B, Hv, Dv]
 //!
-//! ## DISPATCH INVARIANTS (identical to `mt_gated_delta_step`)
+//! ## DISPATCH INVARIANTS (identical to `ffai_gated_delta_step`)
 //!
 //! - **Mode: Reduction.** Each TG is one simdgroup (32 threads).
 //! - **Grid: `[Dv, B·Hv, 1]`, TG: `[32, 1, 1]`.**
@@ -59,9 +59,9 @@ use ffai_kernels::kernel;
 
 /// Fused GDN prep + recurrence step. See module doc for layout and
 /// dispatch invariants. Drop-in replacement for the
-/// `host-prep + mt_gated_delta_step` pair in `Qwen35GDNMixer.forward`.
+/// `host-prep + ffai_gated_delta_step` pair in `Qwen35GDNMixer.forward`.
 #[kernel]
-pub fn mt_gated_delta_prep_step<T>(
+pub fn ffai_gated_delta_prep_step<T>(
     conv_out: Tensor<T>,      // [B, 2·Hk·Dk + Hv·Dv]    q | k | v
     a_log: Tensor<T>,         // [Hv]
     dt_bias: Tensor<T>,       // [Hv]
@@ -81,7 +81,7 @@ pub fn mt_gated_delta_prep_step<T>(
     let n = tgid_y;
     let dk_idx = tid;
     // GQA decomposition: n = b · Hv + hv_idx; hk_idx = hv_idx / (Hv/Hk).
-    // Mirrors `mt_gated_delta_step` exactly.
+    // Mirrors `ffai_gated_delta_step` exactly.
     let hv_idx = n - (n / hv) * hv;
     let b = n / hv;
     let hk_per_hv = hv / hk;
@@ -108,7 +108,7 @@ pub fn mt_gated_delta_prep_step<T>(
     // memory (no second load of conv_out).
     //
     // Cap = 8 (n_per_t @ Dk=256 / 32). At Dk=128, n_per_t=4 — upper 4 slots
-    // simply go unread. Same convention as `mt_gated_delta_step`.
+    // simply go unread. Same convention as `ffai_gated_delta_step`.
     stack_alloc("q_raw", 8u32, "f32");
     stack_alloc("k_raw", 8u32, "f32");
     stack_alloc("q_w", 8u32, "f32");
@@ -162,7 +162,7 @@ pub fn mt_gated_delta_prep_step<T>(
     //                  folds Activation into `FusedElementwise` and the
     //                  per-kernel feature analyzer (`needs_sigmoid`) does
     //                  not recurse into fused chains. Inlining keeps the
-    //                  emitted MSL self-contained — no `mt_sigmoid` helper
+    //                  emitted MSL self-contained — no `ffai_sigmoid` helper
     //                  required.
     let pre_softplus = a_raw_val + dt_bias_val;
     let dt_val = log(exp(pre_softplus) + 1.0f32);
@@ -172,7 +172,7 @@ pub fn mt_gated_delta_prep_step<T>(
     let v_val = load(conv_out[v_off + dv_idx]).cast::<f32>();
     // ─── Phase 1: decay + kv_mem reduction ───────────────────────────────
     //
-    // Same shape as `mt_gated_delta_step::phase_1` but reads q/k from the
+    // Same shape as `ffai_gated_delta_step::phase_1` but reads q/k from the
     // per-lane `*_normed` stash instead of global. `decayed` and `k_cache`
     // stay register-resident across phases 1/2, same convention.
     let state_base = n * dv * dk + dv_idx * dk;
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn dump() {
         use ffai_kernels::codegen::msl::MslGenerator;
-        let mut k = mt_gated_delta_prep_step::kernel_ir_for(DType::F32);
+        let mut k = ffai_gated_delta_prep_step::kernel_ir_for(DType::F32);
         k.mode = KernelMode::Reduction;
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
@@ -228,7 +228,7 @@ mod tests {
 }
 
 /// New-syntax correctness for the fused GDN prep+step kernel
-/// (`mt_gated_delta_prep_step`). Oracle is the legacy
+/// (`ffai_gated_delta_prep_step`). Oracle is the legacy
 /// `gated_delta_prep_step_correctness.rs` reference: CPU prep (conv split →
 /// per-head RMSNorm+scale of q/k → `g = exp(-exp(a_log)·softplus(a_raw+dt_bias))`
 /// → `beta = sigmoid(b_raw)`) composed with the sequential GDN recurrence. The
@@ -239,7 +239,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gated_delta_prep_step;
+    use super::ffai_gated_delta_prep_step;
     use crate::utils::pack_f32;
 
     fn softplus_unclamped(x: f32) -> f32 { (x.exp() + 1.0).ln() }
@@ -406,7 +406,7 @@ pub mod kernel_tests {
         );
         let (y_exp, state_exp) = cpu_step(&q, &k, &v, &g, &beta, &r(&state_in), b, hv, hk, dv, dk);
 
-        TestSetup::new(mt_gated_delta_prep_step::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_prep_step::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -431,11 +431,13 @@ pub mod kernel_tests {
     // RMSNorm rsqrt, softplus/exp prep, and the dependent recurrence reduction
     // all compound the mantissa noise.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_prep_step_gqa(dt: DType) -> TestSetup { setup(2, 4, 2, 8, 64, 0.7, dt) }
+    fn test_ffai_gated_delta_prep_step_gqa(dt: DType) -> TestSetup {
+        setup(2, 4, 2, 8, 64, 0.7, dt)
+    }
 
     // Hv == Hk (no key-sharing) at the minimum dk=32, single batch.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_prep_step_no_gqa(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_prep_step_no_gqa(dt: DType) -> TestSetup {
         setup(1, 4, 4, 4, 32, 1.0, dt)
     }
 }
@@ -443,17 +445,17 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_delta_prep_step;
+    use super::ffai_gated_delta_prep_step;
 
     // Grid `[dv, b*hv, 1]`, TG `[32,1,1]`, Reduction — identical geometry to
-    // `mt_gated_delta_step`. conv_out is the fused q|k|v slab of width
+    // `ffai_gated_delta_step`. conv_out is the fused q|k|v slab of width
     // `2·Hk·Dk + Hv·Dv`.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gated_delta_prep_step(dt: DType) -> BenchSetup {
         let (b, hv, hk, dv, dk) = (2usize, 4usize, 2usize, 64usize, 64usize);
         let n_total = b * hv;
         let conv_w = 2 * hk * dk + hv * dv;
-        BenchSetup::new(mt_gated_delta_prep_step::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_prep_step::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("conv_out", b * conv_w, dt))
             .buffer(BenchBuffer::random("a_log", hv, dt))

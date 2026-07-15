@@ -2,11 +2,11 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::moe_mpp_bm64::mt_moe_gather_qmm_mma_int8_bm64_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp_bm64::ffai_moe_gather_qmm_mma_int8_bm64_mpp`.
 //!
 //! BM=BN=64 MPP MoE int8 kernel — same output semantics as the int4 BM=64
 //! sibling but the weight layout changes from 8 nibbles/u32 to 4 bytes/u32.
-//! Validated against the scalar `mt_moe_gather_qmm_b8` oracle on clean-tile,
+//! Validated against the scalar `ffai_moe_gather_qmm_b8` oracle on clean-tile,
 //! multi-tile, and bf16 shapes.
 //!
 //! Requires macOS 26+ / Metal 4 for the MPP header to be available. On older
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::{moe_gather_qmm::mt_moe_gather_qmm_b8, moe_mpp_bm64};
+use ffai_kernels_std::kernels::moe::{moe_gather_qmm::ffai_moe_gather_qmm_b8, moe_mpp_bm64};
 
 /// Pack a row of int8 weight codes into uint32s (4 codes per uint, LE byte
 /// order). Code values must be in 0..=255.
@@ -112,7 +112,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_clean_tile() {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -135,7 +135,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_clean_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            moe_mpp_bm64::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
+            moe_mpp_bm64::ffai_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         // Grid: [ceil(N/64), ceil(T/64), 1]. TG: 128 lanes = 4 SGs (WM=WN=2).
         let r = ctx
@@ -228,7 +228,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_multi_tile() {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -250,7 +250,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_matches_b8_multi_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            moe_mpp_bm64::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
+            moe_mpp_bm64::ffai_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(
@@ -346,7 +346,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_bf16_matches_b8_clean_tile() {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_b8::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -369,7 +369,7 @@ fn moe_gather_qmm_mma_int8_bm64_mpp_bf16_matches_b8_clean_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            moe_mpp_bm64::mt_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
+            moe_mpp_bm64::ffai_moe_gather_qmm_mma_int8_bm64_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(

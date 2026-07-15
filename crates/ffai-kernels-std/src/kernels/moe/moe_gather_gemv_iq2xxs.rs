@@ -48,7 +48,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_moe_gather_gemv_iq2xxs<T>(
+pub fn ffai_moe_gather_gemv_iq2xxs<T>(
     x: Tensor<T>,
     qs_all: Tensor<u32>,
     d_all: Tensor<f32>,
@@ -113,12 +113,12 @@ pub fn mt_moe_gather_gemv_iq2xxs<T>(
 pub mod kernel_tests {
     use ffai_kernels::test::*;
 
-    use super::mt_moe_gather_gemv_iq2xxs;
+    use super::ffai_moe_gather_gemv_iq2xxs;
 
     #[test]
     fn codegen_gather_gemv_iq2xxs_smoke() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let ir = mt_moe_gather_gemv_iq2xxs::kernel_ir_for(dt);
+            let ir = ffai_moe_gather_gemv_iq2xxs::kernel_ir_for(dt);
             assert!(!ir.body.ops.is_empty(), "no ops for {dt:?}");
             assert!(ir.params.iter().any(|p| p.name == "qs_all"), "missing qs_all");
             assert!(ir.params.iter().any(|p| p.name == "grid"), "missing grid");
@@ -129,7 +129,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gather_gemv_iq2xxs;
+    use super::ffai_moe_gather_gemv_iq2xxs;
 
     // n_slots=6 routed experts; production gate/up dims (m_out=2048, k_in=4096).
     #[bench(dtypes = [f32, f16, bf16])]
@@ -138,7 +138,7 @@ pub mod kernel_benches {
         let m_out = 2048usize;
         let k_in = 4096usize;
         let nblk = m_out * (k_in / 256);
-        BenchSetup::new(mt_moe_gather_gemv_iq2xxs::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gather_gemv_iq2xxs::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", k_in, dt))
             .buffer(BenchBuffer::random("qs_all", n_slots * nblk * 16, DType::U32))

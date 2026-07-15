@@ -110,16 +110,16 @@ Alongside the hand-written `tests/*_gpu_correctness.rs` files, a kernel can now 
 use ffai-kernels::kernel;
 
 #[kernel]
-pub fn mt_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) { /* … */ }
+pub fn ffai_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) { /* … */ }
 
 pub mod kernel_tests {
     use ffai-kernels::{test::*, test_kernel};
-    use super::mt_arange;
+    use super::ffai_arange;
     use crate::utils::{pack_f32, scalar_bytes};
 
     fn setup(start: f32, step: f32, n: usize, dt: DType) -> TestSetup {
         let expected: Vec<f32> = (0..n).map(|i| start + i as f32 * step).collect(); // CPU oracle in f32
-        TestSetup::new(mt_arange::kernel_ir_for(dt))
+        TestSetup::new(ffai_arange::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("out", vec![0u8; n * dt.size_bytes()], dt))
             .input(TestBuffer::from_vec("start", scalar_bytes(start, dt), dt))
             .input(TestBuffer::from_vec("step", scalar_bytes(step, dt), dt))
@@ -129,22 +129,22 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
+    fn test_ffai_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
 
     // Per-dtype tolerances (order matches `dtypes`): f32, f16, bf16.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-2, 1e-1])]
-    fn test_mt_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
+    fn test_ffai_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
 }
 
 pub mod kernel_benches {
     use ffai-kernels::{bench, test::*};
-    use super::mt_arange;
+    use super::ffai_arange;
     use crate::utils::scalar_bytes;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_arange(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_arange::kernel_ir_for(dt))
+        BenchSetup::new(ffai_arange::kernel_ir_for(dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
             .buffer(BenchBuffer::from_vec("start", scalar_bytes(0.0, dt), dt))
             .buffer(BenchBuffer::from_vec("step", scalar_bytes(1.0, dt), dt))

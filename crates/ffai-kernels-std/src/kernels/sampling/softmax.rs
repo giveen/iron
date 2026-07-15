@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_softmax<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_softmax<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -55,13 +55,13 @@ pub fn mt_softmax<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     }
 }
 
-/// New-syntax correctness for `mt_softmax` (Reduction mode, one threadgroup per
+/// New-syntax correctness for `ffai_softmax` (Reduction mode, one threadgroup per
 /// row, tpg=256 — `n` must be a multiple of 1024 for the 4-elems/thread loop).
 /// Per-row oracle: `exp(x - max) / sum(exp(x - max))` over dtype-rounded inputs.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_softmax;
+    use super::ffai_softmax;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
@@ -86,7 +86,7 @@ pub mod kernel_tests {
             expected.extend(exps.iter().map(|&e| e / s));
             inp.extend_from_slice(&row);
         }
-        TestSetup::new(mt_softmax::kernel_ir_for(dt))
+        TestSetup::new(ffai_softmax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", rows * n, dt))
@@ -96,7 +96,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
-    fn test_mt_softmax(dt: DType) -> TestSetup { setup(4, 1024, dt) }
+    fn test_ffai_softmax(dt: DType) -> TestSetup { setup(4, 1024, dt) }
 
     // Large-magnitude logits (50..120): pins the max-subtraction overflow
     // guard. Without it `exp(120)` is +inf; the online-softmax running-max
@@ -106,34 +106,34 @@ pub mod kernel_tests {
     // magnitudes f16/bf16 input rounding dominates and isn't the contract
     // under test. (Ported from the legacy softmax_large_values_no_overflow.)
     #[test_kernel(dtypes = [f32], tol = [1e-4])]
-    fn test_mt_softmax_large_values(dt: DType) -> TestSetup {
+    fn test_ffai_softmax_large_values(dt: DType) -> TestSetup {
         setup_with(2, 1024, dt, |_r, i| 50.0 + (i % 7) as f32 * 10.0)
     }
 }
 
-/// New-syntax benchmark for `mt_softmax` (vs MLX `metal/softmax.metal`).
+/// New-syntax benchmark for `ffai_softmax` (vs MLX `metal/softmax.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_softmax;
+    use super::ffai_softmax;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // MLX `looped_softmax_*` buffer order: `in`[[buffer(0)]], `out`[[buffer(1)]],
-    // `axis_size`(int)[[buffer(2)]]. `inp` is shared by name with the MT input.
+    // `axis_size`(int)[[buffer(2)]]. `inp` is shared by name with the FFAI input.
     //
     // MLX dispatch geometry: one threadgroup per row (grid=[rows,1,1]) at
-    // tpg=1024 — NOT the MT tpg=256. `softmax_looped` uses
+    // tpg=1024 — NOT the FFAI tpg=256. `softmax_looped` uses
     // `threadgroup AccT local_max[32]` / `local_normalizer[32]` without
     // zero-initialising slots past `simd_group_id`; the later
     // `simd_max(local_max[simd_lane_id])` reads all 32. MLX always dispatches
-    // these at 1024 threads (n_simd==32, every slot live). At MT's tpg=256
+    // these at 1024 threads (n_simd==32, every slot live). At FFAI's tpg=256
     // (n_simd==8) the 24 stale slots produce NaN. Pin tpg=1024 (mirrors the
     // legacy RowNorm `mlx_tpg: 1024`).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_softmax(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 1024usize);
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_softmax::kernel_ir_for(dt))
+        BenchSetup::new(ffai_softmax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("inp", rows * n, dt, InputDomain::Signed))
             .buffer(BenchBuffer::zeros("out", rows * n, dt).output())
@@ -145,7 +145,7 @@ pub mod kernel_benches {
                     format!("looped_softmax_{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/softmax.metal")),
                 )
-                // `inp` shared by name with the MT input above (placeholder).
+                // `inp` shared by name with the FFAI input above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", rows * n, dt))
                 .buffer(BenchBuffer::zeros("out", rows * n, dt).output())
                 .buffer(BenchBuffer::from_vec(

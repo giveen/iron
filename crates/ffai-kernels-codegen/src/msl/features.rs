@@ -23,15 +23,15 @@ pub(super) struct KernelFeatures {
     /// Drives the `uint simd_lane [[thread_index_in_simdgroup]]`
     /// kernel-attr emission.  Set by the per-op `needs_simd_lane`
     /// OpFlag (which now lives only on `Op::SimdLaneId` after the
-    /// #209/4 tightening) plus the multi-op cases that the OpFlag
+    /// identifier-tracking tightening) plus the multi-op cases that the OpFlag
     /// can't express statically: the two-level `Op::Reduce` slow
     /// path, the matmul tiled emit (`feat.is_matmul`), and
     /// `Op::CoopTile*` / `mpp::` `Op::InlineMsl` (cooperative MMA
     /// requires the same parameter for binding-table purposes).
-    /// Pre-#209/4 the OpFlag was set by every simdgroup-related op
+    /// Previously the OpFlag was set by every simdgroup-related op
     /// regardless of whether the emit referenced the identifier; that
     /// over-broad shape produced ~200 `-Wunused-parameter` warnings
-    /// against `simd_lane` until #207 routed around it.
+    /// against `simd_lane` until a later change routed around it.
     pub needs_simd_lane: bool,
     /// Symmetric to `needs_simd_lane` for `simd_group`.  See
     /// `needs_simd_lane`'s doc for the full rationale.  Same trigger
@@ -88,7 +88,7 @@ impl MslGenerator {
 
         // Matmul tiled emit (matmul.rs:173-174,311) references both
         // `simd_group` and `simd_lane` as identifiers — gate their
-        // kernel-attr emission on `is_matmul`.  Pre-#209/4 the
+        // kernel-attr emission on `is_matmul`.  Previously the
         // signature gating lived in `msl::kernel_needs_simd_*_attr`
         // helpers that hand-rolled the same predicate; folding it
         // into `KernelFeatures` deletes those helpers.
@@ -124,7 +124,7 @@ impl MslGenerator {
     }
 
     /// Per-op feature detection. Recurses into `FusedElementwise` so that
-    /// helpers an inner op needs (e.g. `mt_silu` for an `Activation`
+    /// helpers an inner op needs (e.g. `ffai_silu` for an `Activation`
     /// folded into a fused chain) are still emitted — the fusion pass
     /// hides the standalone `Op::Activation` inside the chain.
     fn analyze_op(&self, op: &Op, feat: &mut KernelFeatures) {
@@ -165,7 +165,7 @@ impl MslGenerator {
                 // needs the attr.  `n_simd` is a *different* preamble
                 // identifier (`uint n_simd = lsize / 32u;`) derived
                 // from `lsize` only — it does NOT require the
-                // `simd_group` kernel attr.  Pre-#209/4 these were
+                // `simd_group` kernel attr.  Previously these were
                 // conflated, producing `-Wunused-parameter` warnings
                 // on every kernel that referenced `n_simd` without
                 // also using `simd_group`.
@@ -203,7 +203,7 @@ impl MslGenerator {
                 // CoopTile / MPP cooperative-matmul intrinsics use
                 // their own simdgroup binding internally and never
                 // reference `simd_lane` / `simd_group` as C
-                // identifiers in the emitted MSL.  Pre-#209/4 this
+                // identifiers in the emitted MSL.  Previously this
                 // arm set both attrs anyway, producing
                 // `-Wunused-parameter` warnings on every MPP kernel.
                 // If a CoopTile kernel ever does spell those out (via

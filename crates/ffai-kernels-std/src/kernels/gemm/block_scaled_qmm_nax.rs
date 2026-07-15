@@ -6,7 +6,7 @@
 //! spec-conformant + legacy float-scale + symmetric-int8 formats.
 //!
 //! This is the **NAX-named twin** of `mlx/block_scaled_qmm_mpp.rs`: the kernel
-//! bodies are **byte-identical**, only the `mt_<fmt>_qmm_nax` fn names differ.
+//! bodies are **byte-identical**, only the `ffai_<fmt>_qmm_nax` fn names differ.
 //! The two co-exist purely for naming compatibility (NAX = MPP, both dispatch
 //! through `mpp::tensor_ops::matmul2d`) — exactly like `quantized_nax.rs`
 //! mirrors `quantized_mpp.rs`. Consumers pick the `_nax` vs `_mpp` name in their
@@ -36,7 +36,7 @@ use ffai_kernels::kernel;
 /// cooperative tile folds onto `(BITS, WDEC, SKIND)` (buffer types `(WT, ST)`,
 /// legend in `block_scaled_matmul`); the X-staging, matmul, and write-back are
 /// format-independent. Decodes through `kernels/primitives.rs`. Produces
-/// `mt_<FMT>_qmm_nax`.
+/// `ffai_<FMT>_qmm_nax`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -71,7 +71,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_qmm_nax",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     w: Tensor<WT>,
     scales: Tensor<ST>,
     x: Tensor<T>,
@@ -136,7 +136,7 @@ pub fn mt<T>(
         let scale = if SKIND == 0u32 {
             exp2(sraw.cast::<f32>() - 127.0f32)
         } else if SKIND == 1u32 {
-            mt_decode_e4m3(sraw.cast::<u32>()) * global
+            ffai_decode_e4m3(sraw.cast::<u32>()) * global
         } else {
             sraw.cast::<f32>()
         };
@@ -145,7 +145,7 @@ pub fn mt<T>(
             let packed = load(w[w_pack_row_base + kb / 8u32 + x_k_quad]);
             for _i in range(0u32, 8u32, 1u32) {
                 let nib = (packed >> (_i * 4u32)) & 15u32;
-                threadgroup_store("Ws", x_ws_base + _i, mt_decode_e2m1(nib) * scale);
+                threadgroup_store("Ws", x_ws_base + _i, ffai_decode_e2m1(nib) * scale);
             }
         } else if WDEC == 1u32 {
             for _i in range(0u32, 8u32, 1u32) {
@@ -157,7 +157,7 @@ pub fn mt<T>(
                 let spill = BITS - lo_bits;
                 let w0 = load(w[w_word_row_base + word_idx]);
                 let w1 = load(w[w_word_row_base + select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 let qf = q.cast::<f32>();
                 let elem = select(q >= half, qf - full, qf);
                 threadgroup_store("Ws", x_ws_base + _i, elem * scale);
@@ -166,11 +166,11 @@ pub fn mt<T>(
             for _i in range(0u32, 8u32, 1u32) {
                 let raw = load(w[w_row_base + k_off + _i]).cast::<u32>();
                 let elem = if WDEC == 2u32 {
-                    mt_decode_e4m3(raw)
+                    ffai_decode_e4m3(raw)
                 } else if WDEC == 3u32 {
-                    mt_decode_e5m2(raw)
+                    ffai_decode_e5m2(raw)
                 } else {
-                    mt_decode_int8(raw)
+                    ffai_decode_int8(raw)
                 };
                 threadgroup_store("Ws", x_ws_base + _i, elem * scale);
             }
@@ -268,40 +268,40 @@ pub mod kernel_tests {
     // m=32, n=64, k=512 (divisible by 16/32/64) — mirrors the int8 NAX test.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxfp4_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxfp4_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp4, 32, 64, 512, dt)
+        nax_setup(ffai_mxfp4_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_nvfp4_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_nvfp4_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp4, 32, 64, 512, dt)
+        nax_setup(ffai_nvfp4_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_fp4_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_fp4_qmm_nax::kernel_ir_for(dt), QFormat::Fp4, 32, 64, 512, dt)
+        nax_setup(ffai_fp4_qmm_nax::kernel_ir_for(dt), QFormat::Fp4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxfp8_e4m3_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E4, 32, 64, 512, dt)
+        nax_setup(ffai_mxfp8_e4m3_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxfp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E5, 32, 64, 512, dt)
+        nax_setup(ffai_mxfp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E5, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_fp8_e5m2_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_fp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E5m2, 32, 64, 512, dt)
+        nax_setup(ffai_fp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E5m2, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_nvfp8_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8, 32, 64, 512, dt)
+        nax_setup(ffai_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8, 32, 64, 512, dt)
     }
     // fp8_e4m3 reuses the nvfp8 kernel (8-bit E4M3 + f32 scale, block 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_fp8_e4m3_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E4m3, 32, 64, 512, dt)
+        nax_setup(ffai_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E4m3, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int8_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int8_qmm_nax::kernel_ir_for(dt), QFormat::Int8, 32, 64, 512, dt)
+        nax_setup(ffai_int8_qmm_nax::kernel_ir_for(dt), QFormat::Int8, 32, 64, 512, dt)
     }
 
     // Symmetric sub-byte ints (FP32 group scale, group 64) + MXINT (E8M0 block
@@ -311,47 +311,47 @@ pub mod kernel_tests {
     // reference to float precision.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int2_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int2_qmm_nax::kernel_ir_for(dt), QFormat::Int2, 32, 64, 512, dt)
+        nax_setup(ffai_int2_qmm_nax::kernel_ir_for(dt), QFormat::Int2, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int3_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int3_qmm_nax::kernel_ir_for(dt), QFormat::Int3, 32, 64, 512, dt)
+        nax_setup(ffai_int3_qmm_nax::kernel_ir_for(dt), QFormat::Int3, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int4_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int4_qmm_nax::kernel_ir_for(dt), QFormat::Int4, 32, 64, 512, dt)
+        nax_setup(ffai_int4_qmm_nax::kernel_ir_for(dt), QFormat::Int4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int5_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int5_qmm_nax::kernel_ir_for(dt), QFormat::Int5, 32, 64, 512, dt)
+        nax_setup(ffai_int5_qmm_nax::kernel_ir_for(dt), QFormat::Int5, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_int6_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int6_qmm_nax::kernel_ir_for(dt), QFormat::Int6, 32, 64, 512, dt)
+        nax_setup(ffai_int6_qmm_nax::kernel_ir_for(dt), QFormat::Int6, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint2_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint2_qmm_nax::kernel_ir_for(dt), QFormat::Mxint2, 32, 64, 512, dt)
+        nax_setup(ffai_mxint2_qmm_nax::kernel_ir_for(dt), QFormat::Mxint2, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint3_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint3_qmm_nax::kernel_ir_for(dt), QFormat::Mxint3, 32, 64, 512, dt)
+        nax_setup(ffai_mxint3_qmm_nax::kernel_ir_for(dt), QFormat::Mxint3, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint4_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint4_qmm_nax::kernel_ir_for(dt), QFormat::Mxint4, 32, 64, 512, dt)
+        nax_setup(ffai_mxint4_qmm_nax::kernel_ir_for(dt), QFormat::Mxint4, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint5_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint5_qmm_nax::kernel_ir_for(dt), QFormat::Mxint5, 32, 64, 512, dt)
+        nax_setup(ffai_mxint5_qmm_nax::kernel_ir_for(dt), QFormat::Mxint5, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint6_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint6_qmm_nax::kernel_ir_for(dt), QFormat::Mxint6, 32, 64, 512, dt)
+        nax_setup(ffai_mxint6_qmm_nax::kernel_ir_for(dt), QFormat::Mxint6, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
     fn test_mxint8_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_mxint8_qmm_nax::kernel_ir_for(dt), QFormat::Mxint8, 32, 64, 512, dt)
+        nax_setup(ffai_mxint8_qmm_nax::kernel_ir_for(dt), QFormat::Mxint8, 32, 64, 512, dt)
     }
 
     // FP16-scale twins of the FP32-scaled formats. `fp8_e4m3_f16` reuses the
@@ -360,44 +360,51 @@ pub mod kernel_tests {
     // tensor binds as native half.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8F16, 32, 64, 512, dt)
+        nax_setup(ffai_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8F16, 32, 64, 512, dt)
     }
     // fp8_e4m3_f16 reuses the nvfp8_f16 kernel (8-bit E4M3 + f16 scale, block 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 32, 64, 512, dt)
+        nax_setup(ffai_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_fp4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp4F16, 32, 64, 512, dt)
+        nax_setup(ffai_fp4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp4F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_fp8_e5m2_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E5m2F16, 32, 64, 512, dt)
+        nax_setup(
+            ffai_fp8_e5m2_f16_qmm_nax::kernel_ir_for(dt),
+            QFormat::Fp8E5m2F16,
+            32,
+            64,
+            512,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int2_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int2F16, 32, 64, 512, dt)
+        nax_setup(ffai_int2_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int2F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int3_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int3F16, 32, 64, 512, dt)
+        nax_setup(ffai_int3_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int3F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int4F16, 32, 64, 512, dt)
+        nax_setup(ffai_int4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int4F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int5_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int5F16, 32, 64, 512, dt)
+        nax_setup(ffai_int5_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int5F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int6_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int6F16, 32, 64, 512, dt)
+        nax_setup(ffai_int6_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int6F16, 32, 64, 512, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_qmm_nax(dt: DType) -> TestSetup {
-        nax_setup(mt_int8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int8F16, 32, 64, 512, dt)
+        nax_setup(ffai_int8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int8F16, 32, 64, 512, dt)
     }
 }
 
@@ -456,100 +463,107 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxfp4_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp4, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxfp4_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4(dt: DType) -> BenchSetup {
-        nax_bench(mt_nvfp4_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp4, 128, 4096, 4096, dt)
+        nax_bench(ffai_nvfp4_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4(dt: DType) -> BenchSetup {
-        nax_bench(mt_fp4_qmm_nax::kernel_ir_for(dt), QFormat::Fp4, 128, 4096, 4096, dt)
+        nax_bench(ffai_fp4_qmm_nax::kernel_ir_for(dt), QFormat::Fp4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxfp8_e4m3_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E4, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxfp8_e4m3_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxfp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E5, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxfp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Mxfp8E5, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2(dt: DType) -> BenchSetup {
-        nax_bench(mt_fp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E5m2, 128, 4096, 4096, dt)
+        nax_bench(ffai_fp8_e5m2_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E5m2, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8(dt: DType) -> BenchSetup {
-        nax_bench(mt_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8, 128, 4096, 4096, dt)
+        nax_bench(ffai_nvfp8_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8(dt: DType) -> BenchSetup {
-        nax_bench(mt_int8_qmm_nax::kernel_ir_for(dt), QFormat::Int8, 128, 4096, 4096, dt)
+        nax_bench(ffai_int8_qmm_nax::kernel_ir_for(dt), QFormat::Int8, 128, 4096, 4096, dt)
     }
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale) +
     // MXINT8 (8-bit, E8M0).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2(dt: DType) -> BenchSetup {
-        nax_bench(mt_int2_qmm_nax::kernel_ir_for(dt), QFormat::Int2, 128, 4096, 4096, dt)
+        nax_bench(ffai_int2_qmm_nax::kernel_ir_for(dt), QFormat::Int2, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3(dt: DType) -> BenchSetup {
-        nax_bench(mt_int3_qmm_nax::kernel_ir_for(dt), QFormat::Int3, 128, 4096, 4096, dt)
+        nax_bench(ffai_int3_qmm_nax::kernel_ir_for(dt), QFormat::Int3, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4(dt: DType) -> BenchSetup {
-        nax_bench(mt_int4_qmm_nax::kernel_ir_for(dt), QFormat::Int4, 128, 4096, 4096, dt)
+        nax_bench(ffai_int4_qmm_nax::kernel_ir_for(dt), QFormat::Int4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5(dt: DType) -> BenchSetup {
-        nax_bench(mt_int5_qmm_nax::kernel_ir_for(dt), QFormat::Int5, 128, 4096, 4096, dt)
+        nax_bench(ffai_int5_qmm_nax::kernel_ir_for(dt), QFormat::Int5, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6(dt: DType) -> BenchSetup {
-        nax_bench(mt_int6_qmm_nax::kernel_ir_for(dt), QFormat::Int6, 128, 4096, 4096, dt)
+        nax_bench(ffai_int6_qmm_nax::kernel_ir_for(dt), QFormat::Int6, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint2_qmm_nax::kernel_ir_for(dt), QFormat::Mxint2, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint2_qmm_nax::kernel_ir_for(dt), QFormat::Mxint2, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint3_qmm_nax::kernel_ir_for(dt), QFormat::Mxint3, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint3_qmm_nax::kernel_ir_for(dt), QFormat::Mxint3, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint4_qmm_nax::kernel_ir_for(dt), QFormat::Mxint4, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint4_qmm_nax::kernel_ir_for(dt), QFormat::Mxint4, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint5_qmm_nax::kernel_ir_for(dt), QFormat::Mxint5, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint5_qmm_nax::kernel_ir_for(dt), QFormat::Mxint5, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint6_qmm_nax::kernel_ir_for(dt), QFormat::Mxint6, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint6_qmm_nax::kernel_ir_for(dt), QFormat::Mxint6, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8(dt: DType) -> BenchSetup {
-        nax_bench(mt_mxint8_qmm_nax::kernel_ir_for(dt), QFormat::Mxint8, 128, 4096, 4096, dt)
+        nax_bench(ffai_mxint8_qmm_nax::kernel_ir_for(dt), QFormat::Mxint8, 128, 4096, 4096, dt)
     }
     // FP16-scale twins of the FP32-scaled formats. `fp8_e4m3_f16` reuses the
     // `nvfp8_f16` kernel (same 8-bit-E4M3 + scale shape).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Nvfp8F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_nvfp8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 128, 4096, 4096, dt)
+        nax_bench(
+            ffai_nvfp8_f16_qmm_nax::kernel_ir_for(dt),
+            QFormat::Fp8E4m3F16,
+            128,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_fp4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp4F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_fp4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Fp4F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16(dt: DType) -> BenchSetup {
         nax_bench(
-            mt_fp8_e5m2_f16_qmm_nax::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_qmm_nax::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             128,
             4096,
@@ -559,26 +573,26 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int2_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int2F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int2_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int2F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int3_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int3F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int3_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int3F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int4F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int4_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int4F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int5_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int5F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int5_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int5F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int6_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int6F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int6_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int6F16, 128, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16(dt: DType) -> BenchSetup {
-        nax_bench(mt_int8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int8F16, 128, 4096, 4096, dt)
+        nax_bench(ffai_int8_f16_qmm_nax::kernel_ir_for(dt), QFormat::Int8F16, 128, 4096, 4096, dt)
     }
 }

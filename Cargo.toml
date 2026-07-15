@@ -83,6 +83,16 @@ insta = { version = "1.43", default-features = false }
 [workspace.lints.clippy]
 arc_with_non_send_sync = "warn"
 
+# Dev/test builds default to full DWARF, which balloons `target/debug` — the
+# hundreds of per-kernel test binaries in `deps/` alone push it into the
+# multi-GB range. `line-tables-only` keeps file:line panic backtraces (all a
+# failing test needs) while dropping the bulky variable/type DWARF, roughly
+# halving the `target/debug` footprint. `[profile.test]` inherits this; the
+# `[profile.bench]` below keeps full `debug = true` for Instruments / Metal
+# Frame Capture.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 # ffai-kernels-std is `publish = true`, so workspace-wide `lto = "fat"` +
 # `codegen-units = 1` would balloon downstream caller build times 5-10×

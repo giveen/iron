@@ -87,9 +87,9 @@ const KNOWN_HARD: &[(&str, &str)] = &[
     // was already loosened 5e-3 → 1e-2 for the same drift). The f16-rounded
     // input set hits a `(v - kv_mem)` cancellation that amplifies CUDA-vs-
     // oracle transcendental rounding (exp/log/rsqrt ulp differences — NOT FMA
-    // contraction: identical with MT_FMAD=0). f32, bf16, and the gqa fixture
+    // contraction: identical with FFAI_FMAD=0). f32, bf16, and the gqa fixture
     // all pass on the same kernel.
-    ("test_mt_gated_delta_prep_chunk_no_gqa [f16]", "cancellation-amplified rounding"),
+    ("test_ffai_gated_delta_prep_chunk_no_gqa [f16]", "cancellation-amplified rounding"),
 ];
 
 fn known_hard(name: &str) -> bool { KNOWN_HARD.iter().any(|(k, _)| name.contains(k)) }

@@ -28,7 +28,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gemv_q8<T>(
+pub fn ffai_gemv_q8<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -69,7 +69,7 @@ pub fn mt_gemv_q8<T>(
 /// [1024,4096] Q8 slice, each on a different 4096-slice of the attention
 /// output) into a SINGLE dispatch instead of 8.
 #[kernel]
-pub fn mt_grouped_gemv_q8<T>(
+pub fn ffai_grouped_gemv_q8<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -103,13 +103,13 @@ pub fn mt_grouped_gemv_q8<T>(
     }
 }
 
-/// COALESCED per-token grouped Q8 gemv — same math as `mt_grouped_gemv_q8`
+/// COALESCED per-token grouped Q8 gemv — same math as `ffai_grouped_gemv_q8`
 /// but the warp walks the row's `u32` words contiguously (lane j, j+32, …) so
 /// consecutive lanes hit consecutive addresses. The original strided by 8 u32
 /// per lane (each lane owned a whole 32-int8 block), which only reached ~45% of
 /// DRAM bandwidth on GB10; this coalesced pattern is the decode-GEMV fast path.
 #[kernel]
-pub fn mt_gemv_q8_coalesced<T>(
+pub fn ffai_gemv_q8_coalesced<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -148,7 +148,7 @@ pub fn mt_gemv_q8_coalesced<T>(
 /// Fuses a MoE expert's `up` projection and its activation into one dispatch
 /// (was gemv + a separate relu² kernel), keeping per-row occupancy.
 #[kernel]
-pub fn mt_gemv_q8_coalesced_relu2<T>(
+pub fn ffai_gemv_q8_coalesced_relu2<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -191,7 +191,7 @@ pub fn mt_gemv_q8_coalesced_relu2<T>(
 /// device buffer (the router weight); loaded once per output row.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_gemv_q8_coalesced_accum<T>(
+pub fn ffai_gemv_q8_coalesced_accum<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -236,7 +236,7 @@ pub fn mt_gemv_q8_coalesced_accum<T>(
 
 /// Plain Q4 coalesced matvec: `out[r] = Σ_k dequant4(W[r,k]) · x[...]`.
 #[kernel]
-pub fn mt_gemv_q4_coalesced<T>(
+pub fn ffai_gemv_q4_coalesced<T>(
     qs: Tensor<u32>,
     // f16 scales (half the bytes — the resident-weight decode/prefill path uploads
     // them as f16). Param name is historical; do NOT change to Tensor<f32> — the
@@ -292,7 +292,7 @@ pub fn mt_gemv_q4_coalesced<T>(
 /// stalls (ncu: the latency-bound GEMV's actual bottleneck). Coalesced: adjacent
 /// lanes read adjacent 16-byte blocks.
 #[kernel]
-pub fn mt_gemv_q4_vec<T>(
+pub fn ffai_gemv_q4_vec<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -366,7 +366,7 @@ pub fn mt_gemv_q4_vec<T>(
 /// fall between the even/odd row pair. Odd `m_out` is safe: the dangling
 /// `row_b` clamps its weight reads to `row_a` and skips its store.
 #[kernel]
-pub fn mt_gemv_q4_coalesced_2row<T>(
+pub fn ffai_gemv_q4_coalesced_2row<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -433,7 +433,7 @@ pub fn mt_gemv_q4_coalesced_2row<T>(
 /// global Q4 loads in flight to hide that latency. `rows_per_tg=1` is
 /// bit-identical to the original (warp=0, lane=tid, row=tgid_x).
 #[kernel]
-pub fn mt_gemv_q4_coalesced_relu2<T>(
+pub fn ffai_gemv_q4_coalesced_relu2<T>(
     qs: Tensor<u32>,
     // f16 scales (half the bytes — the resident-weight decode/prefill path uploads
     // them as f16). Param name is historical; do NOT change to Tensor<f32> — the
@@ -486,7 +486,7 @@ pub fn mt_gemv_q4_coalesced_relu2<T>(
 /// hiding rationale as the relu2 variant; `rows_per_tg=1` is bit-identical.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_gemv_q4_coalesced_accum<T>(
+pub fn ffai_gemv_q4_coalesced_accum<T>(
     qs: Tensor<u32>,
     // f16 scales (half the bytes — the resident-weight decode/prefill path uploads
     // them as f16). Param name is historical; do NOT change to Tensor<f32> — the
@@ -536,14 +536,14 @@ pub fn mt_gemv_q4_coalesced_accum<T>(
     }
 }
 
-/// BATCHED grouped Q8_0 gemv — mt_grouped_gemv_q8 over `n_tokens` rows in
+/// BATCHED grouped Q8_0 gemv — ffai_grouped_gemv_q8 over `n_tokens` rows in
 /// ONE dispatch (grid z/y = token). Prefill O-LoRA looped the per-token
 /// grouped gemv N times; this folds it. x is [n_tokens, n_groups*k_in],
 /// out is [n_tokens, m_out]; n_groups = m_out/rows_per_group.
 /// Grid (Reduction): [m_out, n_tokens, 1], tg=[32,1,1].
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_grouped_gemv_q8_rows<T>(
+pub fn ffai_grouped_gemv_q8_rows<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -580,7 +580,7 @@ pub fn mt_grouped_gemv_q8_rows<T>(
 }
 
 /// TOKEN-TILED grouped Q8 gemv — the amortized fix for the prefill O-LoRA-A
-/// hotspot. `mt_grouped_gemv_q8_rows` re-reads each weight row from DRAM
+/// hotspot. `ffai_grouped_gemv_q8_rows` re-reads each weight row from DRAM
 /// once PER TOKEN (no amortization); at N=512 that's the single biggest
 /// op in the attention block (~47 ms/layer). Here each threadgroup owns one
 /// output row and a TILE of `tokens_per_tile` tokens: the Q8 weight block
@@ -589,7 +589,7 @@ pub fn mt_grouped_gemv_q8_rows<T>(
 /// grid (threadgroups) = [m_out, ceil(n_tokens/T), 1], threadgroup [32,1,1].
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_grouped_gemv_q8_rows_tiled<T>(
+pub fn ffai_grouped_gemv_q8_rows_tiled<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -651,10 +651,10 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     use super::{
-        mt_gemv_q8,
-        mt_grouped_gemv_q8,
-        mt_grouped_gemv_q8_rows,
-        mt_grouped_gemv_q8_rows_tiled,
+        ffai_gemv_q8,
+        ffai_grouped_gemv_q8,
+        ffai_grouped_gemv_q8_rows,
+        ffai_grouped_gemv_q8_rows_tiled,
     };
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -662,7 +662,7 @@ pub mod kernel_benches {
         let m_out = 4096usize;
         let k_in = 8192usize;
         let bpr = k_in / 32;
-        BenchSetup::new(mt_gemv_q8::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gemv_q8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", m_out * bpr * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F32))
@@ -679,7 +679,7 @@ pub mod kernel_benches {
         let m_out = 8192usize;
         let k_in = 4096usize;
         let bpr = k_in / 32;
-        BenchSetup::new(mt_grouped_gemv_q8::kernel_ir_for(dt))
+        BenchSetup::new(ffai_grouped_gemv_q8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", m_out * bpr * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F32))
@@ -699,7 +699,7 @@ pub mod kernel_benches {
         let n_tokens = 256usize;
         let n_groups = m_out / 1024;
         let bpr = k_in / 32;
-        BenchSetup::new(mt_grouped_gemv_q8_rows::kernel_ir_for(dt))
+        BenchSetup::new(ffai_grouped_gemv_q8_rows::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", m_out * bpr * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F32))
@@ -720,7 +720,7 @@ pub mod kernel_benches {
         let tokens_per_tile = 8usize;
         let n_groups = m_out / 1024;
         let bpr = k_in / 32;
-        BenchSetup::new(mt_grouped_gemv_q8_rows_tiled::kernel_ir_for(dt))
+        BenchSetup::new(ffai_grouped_gemv_q8_rows_tiled::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("qs", m_out * bpr * 8, DType::U32))
             .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F32))

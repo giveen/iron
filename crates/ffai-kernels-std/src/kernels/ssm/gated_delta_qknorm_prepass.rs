@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Gated DeltaNet — q/k RMSNorm pre-pass for the chunked prep kernel.
 //!
-//! `mt_gated_delta_prep_chunk`'s "Phase 0a" (per-head RMSNorm of q/k) does
+//! `ffai_gated_delta_prep_chunk`'s "Phase 0a" (per-head RMSNorm of q/k) does
 //! not depend on recurrent state — only on `conv_out` for that token. But
 //! the chunk kernel's dispatch grid is `[Dv, B·Hv, 1]`: every one of the
 //! `Dv` threadgroups sharing a given `(b, hv_idx)` redundantly recomputes
@@ -31,14 +31,14 @@
 //! - **Grid: `[T, B·Hk, 1]`, TG: `[32, 1, 1]`.**
 //! - **`Dk % 32 == 0`.** Each lane owns `n_per_t = Dk / 32` slots.
 //! - **`t_len` is runtime u32** so a single PSO compiles for every chunk size,
-//!   matching `mt_gated_delta_prep_chunk`.
+//!   matching `ffai_gated_delta_prep_chunk`.
 //! - `hv` / `dv` are constexpr purely to reconstruct `conv_out`'s per-token
 //!   stride (`2·Hk·Dk + Hv·Dv`) — this kernel never indexes by `hv_idx`/`dv_idx`.
 
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gated_delta_qknorm_prepass<T>(
+pub fn ffai_gated_delta_qknorm_prepass<T>(
     conv_out: Tensor<T>,      // [B, T, 2·Hk·Dk + Hv·Dv]
     q_norm_weight: Tensor<T>, // [Hk·Dk]
     k_norm_weight: Tensor<T>, // [Hk·Dk]
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn dump() {
         use ffai_kernels::codegen::msl::MslGenerator;
-        let mut k = mt_gated_delta_qknorm_prepass::kernel_ir_for(DType::F32);
+        let mut k = ffai_gated_delta_qknorm_prepass::kernel_ir_for(DType::F32);
         k.mode = KernelMode::Reduction;
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
@@ -113,7 +113,7 @@ mod tests {
 }
 
 /// Correctness for the q/k RMSNorm pre-pass. Oracle is the same per-head
-/// RMSNorm math as `mt_gated_delta_prep_chunk`'s Phase 0a, evaluated once
+/// RMSNorm math as `ffai_gated_delta_prep_chunk`'s Phase 0a, evaluated once
 /// per `(b, t, hk_idx)` instead of redundantly per `(b, t, hv_idx, dv_idx)`.
 ///
 /// Grid (Reduction, 1 simdgroup per TG): `grid_3d(t_total, b*hk, 1, [32,1,1])`;
@@ -121,7 +121,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gated_delta_qknorm_prepass;
+    use super::ffai_gated_delta_qknorm_prepass;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// CPU oracle for the q/k RMSNorm pre-pass. Layout matches the kernel:
@@ -205,7 +205,7 @@ pub mod kernel_tests {
             dk,
         );
 
-        TestSetup::new(mt_gated_delta_qknorm_prepass::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_qknorm_prepass::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
             .input(TestBuffer::from_vec("q_norm_weight", pack_f32(&q_norm_weight, dt), dt))
@@ -228,13 +228,13 @@ pub mod kernel_tests {
 
     // GQA (Hv = 2·Hk), T=4 tokens.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_qknorm_prepass_gqa(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_qknorm_prepass_gqa(dt: DType) -> TestSetup {
         setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, dt)
     }
 
     // Hv == Hk (no key-sharing) at minimum dk=32, T=3 tokens.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_qknorm_prepass_no_gqa(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_qknorm_prepass_no_gqa(dt: DType) -> TestSetup {
         setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, dt)
     }
 }
@@ -242,7 +242,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_delta_qknorm_prepass;
+    use super::ffai_gated_delta_qknorm_prepass;
 
     // Grid `[t, b*hk, 1]`, TG `[32,1,1]`, Reduction. `t_len` is a runtime
     // u32 scalar. Shape mirrors `bench_gated_delta_prep_chunk`.
@@ -250,7 +250,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_qknorm_prepass(dt: DType) -> BenchSetup {
         let (b, t, hv, hk, dv, dk) = (1usize, 64usize, 4usize, 2usize, 8usize, 64usize);
         let conv_w = 2 * hk * dk + hv * dv;
-        BenchSetup::new(mt_gated_delta_qknorm_prepass::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_qknorm_prepass::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
             .buffer(BenchBuffer::random("q_norm_weight", hk * dk, dt))

@@ -74,8 +74,8 @@ impl super::Pass for LicmPass {
         // Process nested blocks first (inside-out / post-order), then kernel.body last.
         // BlockIds are allocated in order, so higher IDs are deeper-nested children.
         // Sorting descending ensures children are processed before their parents,
-        // allowing multi-level hoisting (e.g. b3→b2→b1→b0) in a single pass.  Post
-        // #209/2, `kernel.blocks` holds nested blocks only — the entry block lives
+        // allowing multi-level hoisting (e.g. b3→b2→b1→b0) in a single pass.  Now
+        // `kernel.blocks` holds nested blocks only — the entry block lives
         // at `kernel.body`, processed explicitly after the inner loop below.
         let mut block_ids: Vec<BlockId> = blocks.keys().copied().collect();
         block_ids.sort_by_key(|bid| -(bid.as_u32() as i32));
@@ -480,7 +480,7 @@ mod tests {
         assert!(!has_load, "Load from read-only param should be hoisted");
     }
 
-    /// Regression test for the bug that broke `mt_sdpa_prefill_mma`'s
+    /// Regression test for the bug that broke `ffai_sdpa_prefill_mma`'s
     /// accumulator chain: `SimdgroupElemLoad` reads from a per-thread
     /// `simdgroup_matrix` register that gets MUTATED inside the loop by
     /// `SimdgroupMatMul`. If LICM hoists the load, the in-loop scale

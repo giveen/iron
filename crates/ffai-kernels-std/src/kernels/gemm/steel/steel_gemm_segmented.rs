@@ -55,7 +55,7 @@ use ffai_kernels::kernel;
 
 /// Segmented GEMM, both `(BM, BN, WM, WN)` block-shape instantiations.
 ///
-/// Produces: `mt_steel_gemm_segmented_64x64x16_2x2`, `_32x32x16_2x2`.
+/// Produces: `ffai_steel_gemm_segmented_64x64x16_2x2`, `_32x32x16_2x2`.
 #[kernel(variants(
     BM = [64u32, 32u32],
     BN = [64u32, 32u32],
@@ -63,7 +63,7 @@ use ffai_kernels::kernel;
     WN = [2u32,  2u32],
     suffix = "{BM}x{BN}x16_{WM}x{WN}"
 ))]
-pub fn mt_steel_gemm_segmented<T>(
+pub fn ffai_steel_gemm_segmented<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     segments: Tensor<u32>,
@@ -229,17 +229,17 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_segmented_64x64x16_2x2(dt: DType) -> BenchSetup {
-        sb(mt_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        sb(ffai_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_segmented_32x32x16_2x2(dt: DType) -> BenchSetup {
-        sb(mt_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        sb(ffai_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }
 
 /// New-syntax correctness tests for the segmented (ragged-K batched)
 /// steel GEMM — ports the oracle from the legacy
-/// `tests/steel_gemm_segmented_gpu_correctness.rs` (removed in #240). For
+/// `tests/steel_gemm_segmented_gpu_correctness.rs` (since removed). For
 /// segment `seg`
 /// with K-range `[segments[2·seg], segments[2·seg+1])`:
 ///   `out[seg, r, c] = Σ_{k in range} a[r, k] · b[k, c]`,
@@ -313,10 +313,10 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_segmented_64x64x16_2x2(dt: DType) -> TestSetup {
-        segmented_setup(mt_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        segmented_setup(ffai_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_segmented_32x32x16_2x2(dt: DType) -> TestSetup {
-        segmented_setup(mt_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        segmented_setup(ffai_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }

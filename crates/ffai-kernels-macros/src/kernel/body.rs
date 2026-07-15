@@ -201,7 +201,7 @@ impl DslBodyParser {
                 // The proc-macro does NOT expand declarative macros inside the
                 // kernel body — they're seen as opaque tokens and would
                 // silently produce no IR. Fail loudly so future contributors
-                // can't ship a kernel with a dropped body (PR #19 shipped 25+
+                // can't ship a kernel with a dropped body (an earlier refactor shipped 25+
                 // such kernels before this guard existed).
                 //
                 // Workarounds: (1) wrap the entire `#[kernel] fn …` declaration
@@ -463,7 +463,7 @@ impl DslBodyParser {
             // `if` wrapper and the selected branch is a braced block, e.g.:
             //   `let elem = if FMT <= 12u32 { ... } else { ... }`
             // After variants substitution (compile-time if stripped):
-            //   `let elem = { let raw = ...; mt_decode_e4m3(raw) }`
+            //   `let elem = { let raw = ...; ffai_decode_e4m3(raw) }`
             // Without this arm, `parse_expr` falls through to `_ => alloc_vid()`
             // and silently drops all ops inside the block.
             Expr::Block(block_expr) => {
@@ -676,17 +676,17 @@ impl DslBodyParser {
                     ));
                 }
                 // Only treat as a cross-kernel call if the name follows the
-                // registered kernel naming convention (mt_* or ffai_* prefix).
+                // registered kernel naming convention (ffai_* or ffai_* prefix).
                 // Anything else is almost certainly a typo of a DSL builtin
                 // and should fail at the call site with a span-accurate error,
                 // just as it did before cross-kernel calling was introduced.
-                if !path.starts_with("mt_") && !path.starts_with("ffai_") {
+                if !path.starts_with("ffai_") && !path.starts_with("ffai_") {
                     return self.push_error_value(syn::Error::new_spanned(
                         &call.func,
                         format!(
                             "unrecognized FFAI Kernels DSL function `{path}`. \
                              Cross-kernel callees must be registered via \
-                             #[kernel] and their names must start with `mt_` \
+                             #[kernel] and their names must start with `ffai_` \
                              or `ffai_`."
                         ),
                     ));
@@ -2320,24 +2320,24 @@ mod tests {
     }
 
     #[test]
-    fn mt_prefixed_calls_emit_kernel_call() {
-        // Names starting with `mt_` are treated as cross-kernel calls.
+    fn ffai_prefixed_calls_emit_kernel_call() {
+        // Names starting with `ffai_` are treated as cross-kernel calls.
         // KernelInlinePass resolves them at compile time; unregistered
         // callees produce a codegen error (not a proc-macro error).
         let body: Block = parse_quote!({
-            let y = mt_silu(x);
+            let y = ffai_silu(x);
         });
 
         let tokens =
             DslBodyParser::parse_with_type_vars(&body, &[], &[], &Default::default()).to_string();
 
         assert!(tokens.contains("KernelCall"), "{tokens}");
-        assert!(tokens.contains("\"mt_silu\""), "{tokens}");
+        assert!(tokens.contains("\"ffai_silu\""), "{tokens}");
     }
 
     #[test]
     fn non_prefixed_unknown_calls_emit_compile_error() {
-        // Names that don't start with `mt_` or `ffai_` and don't match
+        // Names that don't start with `ffai_` or `ffai_` and don't match
         // any DSL builtin emit a compile_error token (not a KernelCall),
         // restoring the pre-cross-kernel-calling behaviour for typos.
         let body: Block = parse_quote!({

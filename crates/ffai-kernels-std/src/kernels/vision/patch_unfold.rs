@@ -38,7 +38,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_patch_unfold<T>(
+pub fn ffai_patch_unfold<T>(
     frames: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] channels: u32,
@@ -88,7 +88,7 @@ pub fn mt_patch_unfold<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_patch_unfold;
+    use super::ffai_patch_unfold;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -179,7 +179,7 @@ pub mod kernel_tests {
             grid_t,
             is_image,
         );
-        TestSetup::new(mt_patch_unfold::kernel_ir_for(dt))
+        TestSetup::new(ffai_patch_unfold::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("frames", pack_f32(&frames_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
@@ -210,7 +210,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_patch_unfold;
+    use super::ffai_patch_unfold;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_patch_unfold(dt: DType) -> BenchSetup {
@@ -222,7 +222,7 @@ pub mod kernel_benches {
         let patch_dim_padded = patch_dim.div_ceil(16) * 16;
         let n_patches = side * side;
         let n_out = n_patches * patch_dim_padded;
-        BenchSetup::new(mt_patch_unfold::kernel_ir_for(dt))
+        BenchSetup::new(ffai_patch_unfold::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("frames", channels * img_side * img_side, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())

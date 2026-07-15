@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_gather_gemv_iq2xxs::mt_moe_gather_gemv_iq2xxs;
+use ffai_kernels_std::kernels::moe::moe_gather_gemv_iq2xxs::ffai_moe_gather_gemv_iq2xxs;
 
 const N_SLOTS: usize = 6;
 
@@ -39,7 +39,7 @@ fn frand(state: &mut u32) -> f32 {
 
 /// CPU reference: dequant the IQ2_XXS split buffers and dot each
 /// expert/row against `x`. Mirrors
-/// `mt_gguf_dequant_iq2_xxs` exactly.
+/// `ffai_gguf_dequant_iq2_xxs` exactly.
 fn reference(
     x: &[f32],
     qs_all: &[u32],
@@ -109,7 +109,7 @@ fn run_gpu(
     buffers.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let mut kernel = mt_moe_gather_gemv_iq2xxs::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_moe_gather_gemv_iq2xxs::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     // grid (threadgroups) = [m_out, n_slots, 1], one 32-lane simdgroup each.

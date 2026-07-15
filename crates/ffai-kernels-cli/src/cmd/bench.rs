@@ -81,7 +81,7 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
     // Spawn __ffai_runner bench and stream protocol results. Name/group
     // filters are forwarded so the runner skips non-matching kernels
     // *before* GPU work — keeping them CLI-side meant a `--match-name` run
-    // benched the entire corpus while printing nothing (#279).
+    // benched the entire corpus while printing nothing.
     let inv = RunnerInvocation {
         command: "bench".into(),
         filter: filter_args.filter.clone(),
@@ -186,12 +186,12 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
     printer.finish();
 
     // Counters derived from protocol BenchResult.
-    let impl_count = all.iter().filter(|r| r.mt_gbps > 0.0).count();
+    let impl_count = all.iter().filter(|r| r.ffai_gbps > 0.0).count();
     let equiv_fail = all.iter().filter(|r| !r.correct).count();
     let checked_count = all.len();
     let equiv_pass = all.iter().filter(|r| r.correct).count();
     let avg_pct: Option<f64> = {
-        let valid: Vec<f64> = all.iter().filter_map(|r| r.mt_pct).collect();
+        let valid: Vec<f64> = all.iter().filter_map(|r| r.ffai_pct).collect();
         if valid.is_empty() { None } else { Some(valid.iter().sum::<f64>() / valid.len() as f64) }
     };
 
@@ -204,7 +204,7 @@ pub fn run(args: &BenchArgs, harness: &crate::harness::Harness) -> Result<(), cr
         paint_stdout(impl_count.to_string(), Style::new().fg(Color::Green).bold()),
     ));
     if let Some(p) = avg_pct {
-        parts.push(format!("avg {}", paint_stdout(format!("{p:.0}% MT"), pct_style(p)),));
+        parts.push(format!("avg {}", paint_stdout(format!("{p:.0}% FFAI"), pct_style(p)),));
     }
     if checked_count > 0 {
         let corr_style = if equiv_fail == 0 {
@@ -343,7 +343,7 @@ fn chip_slug(device: &str) -> String {
 }
 
 /// Convert a `ProtoBenchResult` to the legacy JSON schema used by the
-/// diff/baseline system: `op`/`subop`/`shape`/`metric`/`ref`/`mt`.
+/// diff/baseline system: `op`/`subop`/`shape`/`metric`/`ref`/`ffai`.
 ///
 /// The kernel `name` (e.g. `"unary/exp"`) is split on the first `'/'`:
 /// the leading component becomes `op`, any remainder becomes `subop`.
@@ -360,7 +360,7 @@ fn result_to_value(r: &ProtoBenchResult) -> Value {
     obj.insert("shape".into(), Value::from(r.shape.as_str()));
     obj.insert("metric".into(), Value::from("GB/s"));
     obj.insert("ref".into(), r.ref_gbps.map(Value::from).unwrap_or(Value::Null));
-    obj.insert("mt".into(), Value::from(r.mt_gbps));
+    obj.insert("ffai".into(), Value::from(r.ffai_gbps));
     Value::Object(obj)
 }
 
@@ -384,7 +384,7 @@ fn save_json(device: &str, results: &[ProtoBenchResult], path: &str) {
         };
         out.push_str(&format!(
             "  {}{}\n",
-            format_result_row(op, subop, &r.shape, "GB/s", r.ref_gbps, Some(r.mt_gbps)),
+            format_result_row(op, subop, &r.shape, "GB/s", r.ref_gbps, Some(r.ffai_gbps)),
             comma
         ));
     }
@@ -418,39 +418,39 @@ struct Summary {
 fn summarize(results: &[ProtoBenchResult]) -> Summary {
     Summary {
         total: results.len(),
-        implemented: results.iter().filter(|r| r.mt_gbps > 0.0).count(),
+        implemented: results.iter().filter(|r| r.ffai_gbps > 0.0).count(),
         correct: results.iter().filter(|r| r.correct).count(),
     }
 }
 
 /// Format one bench result as a single-line JSON object. The `subop` field is
 /// emitted only when present, keeping the schema additive — existing consumers
-/// that only read `op`/`shape`/`metric`/`ref`/`mt` are unaffected.
+/// that only read `op`/`shape`/`metric`/`ref`/`ffai` are unaffected.
 fn format_result_row(
     op: &str,
     subop: Option<&str>,
     shape: &str,
     metric: &str,
     ref_perf: Option<f64>,
-    mt_perf: Option<f64>,
+    ffai_perf: Option<f64>,
 ) -> String {
     match subop {
         Some(s) => format!(
-            "{{\"op\":{:?},\"subop\":{:?},\"shape\":{:?},\"metric\":{:?},\"ref\":{},\"mt\":{}}}",
+            "{{\"op\":{:?},\"subop\":{:?},\"shape\":{:?},\"metric\":{:?},\"ref\":{},\"ffai\":{}}}",
             op,
             s,
             shape,
             metric,
             json_f(ref_perf),
-            json_f(mt_perf),
+            json_f(ffai_perf),
         ),
         None => format!(
-            "{{\"op\":{:?},\"shape\":{:?},\"metric\":{:?},\"ref\":{},\"mt\":{}}}",
+            "{{\"op\":{:?},\"shape\":{:?},\"metric\":{:?},\"ref\":{},\"ffai\":{}}}",
             op,
             shape,
             metric,
             json_f(ref_perf),
-            json_f(mt_perf),
+            json_f(ffai_perf),
         ),
     }
 }
@@ -483,15 +483,15 @@ impl<'a> super::FFAICommand for BenchCommand<'a> {
 mod tests {
     use super::*;
 
-    fn make_result(name: &str, dtype: &str, mt_gbps: f64, correct: bool) -> ProtoBenchResult {
+    fn make_result(name: &str, dtype: &str, ffai_gbps: f64, correct: bool) -> ProtoBenchResult {
         ProtoBenchResult {
             name: name.into(),
             group: String::new(),
             dtype: dtype.into(),
             shape: format!("N=1M {dtype}"),
-            mt_gbps,
+            ffai_gbps,
             ref_gbps: None,
-            mt_pct: None,
+            ffai_pct: None,
             correct,
             min_us: 1.0,
             mean_us: 1.0,
@@ -507,7 +507,7 @@ mod tests {
 
         let s = summarize(&[implemented_correct, implemented_wrong, nyi]);
         assert_eq!(s.total, 3);
-        assert_eq!(s.implemented, 2); // exp + log (mt_gbps > 0)
+        assert_eq!(s.implemented, 2); // exp + log (ffai_gbps > 0)
         assert_eq!(s.correct, 1); // only exp
     }
 
@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(v["op"], "unary");
         assert_eq!(v["subop"], "exp");
         assert_eq!(v["metric"], "GB/s");
-        assert_eq!(v["mt"], 325.6);
+        assert_eq!(v["ffai"], 325.6);
         assert!(v["ref"].is_null());
     }
 
@@ -558,7 +558,7 @@ mod tests {
         );
         assert_eq!(
             row,
-            r#"{"op":"rms_norm","shape":"B=1024 N=4096 f32","metric":"GB/s","ref":323.900,"mt":325.600}"#,
+            r#"{"op":"rms_norm","shape":"B=1024 N=4096 f32","metric":"GB/s","ref":323.900,"ffai":325.600}"#,
         );
         assert!(!row.contains("\"subop\""));
     }
@@ -572,7 +572,7 @@ mod tests {
             format_result_row("unary", Some("sin"), "N=64M f32", "GB/s", Some(544.8), Some(114.5));
         assert_eq!(
             row,
-            r#"{"op":"unary","subop":"sin","shape":"N=64M f32","metric":"GB/s","ref":544.800,"mt":114.500}"#,
+            r#"{"op":"unary","subop":"sin","shape":"N=64M f32","metric":"GB/s","ref":544.800,"ffai":114.500}"#,
         );
     }
 
@@ -580,7 +580,7 @@ mod tests {
     fn row_handles_missing_perf_values() {
         let row = format_result_row("sdpa", Some("sdpa_vector"), "H=8 N=2048", "GB/s", None, None);
         assert!(row.contains(r#""ref":null"#));
-        assert!(row.contains(r#""mt":null"#));
+        assert!(row.contains(r#""ffai":null"#));
         assert!(row.contains(r#""subop":"sdpa_vector""#));
     }
 

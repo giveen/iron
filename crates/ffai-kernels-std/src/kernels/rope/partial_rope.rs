@@ -31,7 +31,7 @@
 //! `out == qk` — only the rope tail dims are written; the caller passes the
 //! nope dims through.
 //!
-//! (The old single-token `mt_partial_rope` kernel was redundant — `#[constexpr]`
+//! (The old single-token `ffai_partial_rope` kernel was redundant — `#[constexpr]`
 //! is already a runtime buffer read, so the scalar-position variant bought
 //! nothing over `n_tokens = 1`.)
 
@@ -39,7 +39,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_partial_rope<T>(
+pub fn ffai_partial_rope<T>(
     qk: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] head_dim: u32,
@@ -98,7 +98,7 @@ pub fn mt_partial_rope<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_partial_rope;
+    use super::ffai_partial_rope;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// f32 oracle: token `t` roped at position `base_position + t`, adjacent
@@ -170,7 +170,7 @@ pub mod kernel_tests {
         // untouched nope dims pass through — kernel only writes the
         // rope pairs (the in-place pattern callers rely on).
         // freq_scale=1, ext_factor=0 → YaRN disabled (full-layer path).
-        TestSetup::new(mt_partial_rope::kernel_ir_for(dt))
+        TestSetup::new(ffai_partial_rope::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("qk", pack_f32(&qk, dt), dt))
             .input(TestBuffer::from_vec("out", pack_f32(&qk, dt), dt))
@@ -217,13 +217,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_partial_rope;
+    use super::ffai_partial_rope;
 
     /// Builds an `n_tokens`-token partial-RoPE bench at the DSv4 production shape.
     fn partial_rope_bench(dt: DType, n_tokens: usize) -> BenchSetup {
         let (n_heads, head_dim, n_nope, half_rot) = (64usize, 512usize, 448usize, 32usize);
         let n = n_tokens * n_heads * head_dim;
-        BenchSetup::new(mt_partial_rope::kernel_ir_for(dt))
+        BenchSetup::new(ffai_partial_rope::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("qk", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

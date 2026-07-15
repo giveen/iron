@@ -16,7 +16,7 @@
 > tests green. Software-emulated MMA is correctness-first; the production perf
 > path on this hardware is inline-PTX `mma.sync` (a later retune).
 
-Companion to `CUDA_BACKEND_SPEC.md` (Eric, PR #262). The spec is the *design*;
+Companion to `CUDA_BACKEND_SPEC.md` (Eric). The spec is the *design*;
 this is the *engineering plan* — concrete seams, file targets, dev env, sequencing.
 
 **Worktree:** `/Users/tom/dev/ffai-kernels-cuda` on branch `feature/cuda-backend`
@@ -213,7 +213,7 @@ detected compute capability:
   + `wmma`/CUTLASS MMA. Phase 2/3.
 - **Hardware block-scaling** (Blackwell sm_100+): packed codes + E8M0 scale
   buffers feed `tcgen05.mma` scaled tensor cores with little/no repacking — the
-  PR-#2 E8M0/block-32 layout *is* the native Blackwell microscaling layout.
+  E8M0/block-32 layout *is* the native Blackwell microscaling layout.
   Phase 4. **Spark validates this for real.**
 
 Formats already in tree (`ffai-kernels-std/src/quant/{codec,format,mod}.rs` +

@@ -18,7 +18,7 @@ is tracked separately.
 
 Concrete example that motivated this (decode/gemv, N=K=4096, M1 Max):
 
-| kernel | weights | MT GB/s |
+| kernel | weights | FFAI GB/s |
 |---|---|---|
 | `gemv` (f16 dense) | 33.6 MB | 530 |
 | `qmv` (int4) | 8.4 MB | 380 |
@@ -31,7 +31,7 @@ GB/s alone can't tell you the int4 path is *fastest* (¼ the bytes), nor that th
 **Goals**
 - Add the measurements needed to (a) find a kernel's bottleneck and (b) tell whether the GPU is being used efficiently.
 - Make "which precision/variant is fastest" directly readable from a bench run.
-- **Additive only** — do not remove or change the existing GB/s / ref-vs-MT / correctness columns or the JSON fields already consumed by `baselines/*.json` diffing.
+- **Additive only** — do not remove or change the existing GB/s / ref-vs-FFAI / correctness columns or the JSON fields already consumed by `baselines/*.json` diffing.
 
 **Non-goals (this spec)**
 - Implementing new precisions/kernels (now implemented, see Appendix B roadmap).
@@ -40,7 +40,7 @@ GB/s alone can't tell you the int4 path is *fastest* (¼ the bytes), nor that th
 ## 3. Current state (what already exists)
 
 - **`BenchStats`** (`crates/ffai-kernels-std/src/stats.rs`) already captures per-kernel timing: `min_us`, `mean_us`, `median_us`, `p95_us`, `p99_us`, `stddev_us`, `cv_pct`. **Latency is measured but not surfaced** in the default table or JSON.
-- **`OpResult`** (`crates/ffai-kernels-std/src/bench_types.rs`) carries `ref_perf`/`mt_perf` (GB/s), `equiv`, and optional `mt_timing`/`ref_timing` (`BenchStats`).
+- **`OpResult`** (`crates/ffai-kernels-std/src/bench_types.rs`) carries `ref_perf`/`ffai_perf` (GB/s), `equiv`, and optional `ffai_timing`/`ref_timing` (`BenchStats`).
 - **`run_kernel_bench`** (`crates/ffai-kernels-std/src/run_kernel.rs`) computes `gbps` from `bench_gbps(...)` and **discards the `BenchStats`** (`let (gbps, _stats) = ...`). `bytes_moved` comes from `BenchSetup::compute_bytes_moved()` (sum of buffer sizes unless overridden via `.bytes_moved()`).
 - **`-vv` profile** (`compute_profiles` in `crates/ffai-kernels-cli/src/cmd/bench.rs`) already shows `occ%`, `regs`, and a coarse `bottleneck` label (e.g. "register-limited"), plus `p95/p99/cv%`.
 - **JSON** (`ffaik bench --json`) emits only `{op, shape, metric, ref, mt}` — consumed by baseline diffing; must stay backward-compatible.
@@ -51,8 +51,8 @@ All additive. New fields default to `None`/absent so untouched kernels and the b
 
 ### 4.1 Wall-clock latency (µs) — *Phase 1, low risk*
 - Surface `BenchStats.min_us` (primary) in the default table and JSON; keep `mean/median/p95/p99/cv` available under `-v`/`-vv`.
-- `run_kernel_bench` must **stop discarding** the `BenchStats` and thread it into the `OpResult` (the `mt_timing`/`ref_timing` slots already exist on `result_sub_timed`).
-- Display: add a `MT(µs)` column (and `Ref(µs)` when a reference is present). This is the metric that makes cross-precision "fastest" readable.
+- `run_kernel_bench` must **stop discarding** the `BenchStats` and thread it into the `OpResult` (the `ffai_timing`/`ref_timing` slots already exist on `result_sub_timed`).
+- Display: add a `FFAI(µs)` column (and `Ref(µs)` when a reference is present). This is the metric that makes cross-precision "fastest" readable.
 
 ### 4.2 Compute throughput (GFLOP/s) — *Phase 2*
 - Add `flops: Option<u64>` to `BenchSetup` + a `.flops(n)` builder (mirrors `.bytes_moved()`). Default `None`.
@@ -76,10 +76,10 @@ All additive. New fields default to `None`/absent so untouched kernels and the b
 |---|---|
 | `BenchSetup` | `+ flops: Option<u64>`, `+ .flops()` builder |
 | `run_kernel_bench` | thread `BenchStats` into `OpResult` (stop discarding); compute gflops/util when data present |
-| `OpResult` | `+ mt_us`/`ref_us` (from `BenchStats.min_us`), `+ gflops`, `+ pct_peak_bw`, `+ pct_peak_flops`, `+ arith_intensity`, `+ bottleneck` |
+| `OpResult` | `+ ffai_us`/`ref_us` (from `BenchStats.min_us`), `+ gflops`, `+ pct_peak_bw`, `+ pct_peak_flops`, `+ arith_intensity`, `+ bottleneck` |
 | Device specs | new `DeviceSpecs` lookup by device name |
-| Table | default: add `MT(µs)`, `GFLOP/s`, `%BW`/`%FLOP`, `bottleneck`; keep GB/s + `ok`. `-v`/`-vv` keep the existing profile detail |
-| JSON | **add** `latency_us`, `gflops`, `pct_peak_bw`, `pct_peak_flops`, `arith_intensity`, `bottleneck`; **keep** `ref`/`mt` (GB/s) for baseline-diff compatibility |
+| Table | default: add `FFAI(µs)`, `GFLOP/s`, `%BW`/`%FLOP`, `bottleneck`; keep GB/s + `ok`. `-v`/`-vv` keep the existing profile detail |
+| JSON | **add** `latency_us`, `gflops`, `pct_peak_bw`, `pct_peak_flops`, `arith_intensity`, `bottleneck`; **keep** `ref`/`ffai` (GB/s) for baseline-diff compatibility |
 
 ## 6. Implementation plan (phased, each independently shippable)
 
@@ -101,9 +101,9 @@ Test each phase: unit-test the metric math (latency→µs, gflops, %peak, AI) wi
 
 ## Appendix A — Related findings / bugs to fix (surfaced during the MLX A/B work)
 
-1. **Flaky quantized A/B correctness** — the quantized matmul benches seed **random** packed weights, so `qmm_*` A/B comparisons pass/fail nondeterministically (this is the **PR #240 CI "Bench" failure**). Fix: deterministic packed weights (or a justified, dtype-aware tol). *Being fixed alongside this spec.*
+1. **Flaky quantized A/B correctness** — the quantized matmul benches seed **random** packed weights, so `qmm_*` A/B comparisons pass/fail nondeterministically (this is the **CI "Bench" failure**). Fix: deterministic packed weights (or a justified, dtype-aware tol). *Being fixed alongside this spec.*
 2. **int8 gemv under-optimization** — `qmv_b8` hits ~60 GB/s vs int4 `qmv`'s ~380 GB/s on M1 Max. Likely a kernel/codegen inefficiency, not a precision law. Investigate once the latency/%-peak metrics (Phase 1/3) make it measurable.
-3. **Widen f32-only tests** — several `#[test_kernel(dtypes=[f32])]` are on *generic `<T>`* kernels (`fft`, `softmax`, `logsumexp`, …) whose kernels already support f16/bf16; widen the tests. Genuinely-typed exceptions (`mt_fp4_quant_dequant` f32, `mt_random_hash` u32) stay as-is.
+3. **Widen f32-only tests** — several `#[test_kernel(dtypes=[f32])]` are on *generic `<T>`* kernels (`fft`, `softmax`, `logsumexp`, …) whose kernels already support f16/bf16; widen the tests. Genuinely-typed exceptions (`ffai_fp4_quant_dequant` f32, `ffai_random_hash` u32) stay as-is.
 
 ## Appendix B — Precision-support roadmap (separate, larger effort, now complete ✅)
 
@@ -146,7 +146,7 @@ Goal: **support all precisions in every weight-bearing kernel** (matmul/gemv/att
 | depthwise conv2d | `ffai/depthwise_conv2d_block_scaled.rs` |
 | audio conv1d (STT) / fishspeech conv1d (TTS) | `ffai/{audio_conv1d,fishspeech_conv1d}_block_scaled.rs` |
 
-Each (family × format) ships a `#[test_kernel]` CPU-oracle correctness check (1:1, GPU-verified vs `quant::format::dequant`) and a `#[bench]` with `.flops()` so the PR-#1 latency/GFLOP/roofline columns rank precisions side-by-side. `fp8_e4m3` reuses each family's `nvfp8` kernel (identical 8-bit-E4M3 + f32-scale shape). The MPP/NAX/MoE-MPP cooperative-matmul variants dequant W to `coop_stage(T)` during threadgroup staging and reuse the proven int4/int8 `mpp::tensor_ops::matmul2d` dispatch geometry byte-for-byte (no new freeze surface). Block-scaled coverage spans **every quantized weight-bearing op + backend + MoE tile** — all **30 Track-1 formats** (8 spec/legacy float formats + the full symmetric integer matrix `int2-6`/`int8` FP32-group and `mxint2-8` E8M0-block + an **FP16-scale twin** `*_f16` of every FP32-scaled format), GPU-verified on f32/f16/bf16, each 1:1 tested + benched. The integer formats are emitted by a parameterized `(bit-width × scale-kind)` decode macro per family (straddle-aware sub-byte bit-stream extract + float sign-extend) that reuses each family's proven geometry verbatim; the fp16-scale twins clone the FP32-scaled kernels with a `Tensor<f16>` scale read. Flash KV covers every production head dim (d64/96/128/256/512 × all 30 formats) with **no holes** — int8 @ d96 (where the group size 64 doesn't divide 96) tiles with a ragged trailing block (64 + 32), the host packer and kernel rounding up `n_blocks` identically. The MMA patch-embed (`patch_embed_mma_block_scaled.rs`) reuses the dense `patch_embed_mma` geometry + the `conv2d_mma` block-scaled W-dequant.
+Each (family × format) ships a `#[test_kernel]` CPU-oracle correctness check (1:1, GPU-verified vs `quant::format::dequant`) and a `#[bench]` with `.flops()` so the latency/GFLOP/roofline columns rank precisions side-by-side. `fp8_e4m3` reuses each family's `nvfp8` kernel (identical 8-bit-E4M3 + f32-scale shape). The MPP/NAX/MoE-MPP cooperative-matmul variants dequant W to `coop_stage(T)` during threadgroup staging and reuse the proven int4/int8 `mpp::tensor_ops::matmul2d` dispatch geometry byte-for-byte (no new freeze surface). Block-scaled coverage spans **every quantized weight-bearing op + backend + MoE tile** — all **30 Track-1 formats** (8 spec/legacy float formats + the full symmetric integer matrix `int2-6`/`int8` FP32-group and `mxint2-8` E8M0-block + an **FP16-scale twin** `*_f16` of every FP32-scaled format), GPU-verified on f32/f16/bf16, each 1:1 tested + benched. The integer formats are emitted by a parameterized `(bit-width × scale-kind)` decode macro per family (straddle-aware sub-byte bit-stream extract + float sign-extend) that reuses each family's proven geometry verbatim; the fp16-scale twins clone the FP32-scaled kernels with a `Tensor<f16>` scale read. Flash KV covers every production head dim (d64/96/128/256/512 × all 30 formats) with **no holes** — int8 @ d96 (where the group size 64 doesn't divide 96) tiles with a ragged trailing block (64 + 32), the host packer and kernel rounding up `n_blocks` identically. The MMA patch-embed (`patch_embed_mma_block_scaled.rs`) reuses the dense `patch_embed_mma` geometry + the `conv2d_mma` block-scaled W-dequant.
 
 **The full symmetric integer matrix is in every family above** — `int2/3/4/5/6/8` (FP32 group) + `mxint2/3/4/5/6/8` (E8M0 block) — including the fast tensor-engine paths (simdgroup-MMA, MPP, NAX, MoE-MPP), where integer throughput is highest on Apple GPUs / the ANE and the `mxint*` E8M0 layout maps to tensor-core block-scaling on future NVIDIA / AMD targets. The core matmul / MoE / fused-norm / batched-QKV / KV-cache / attention families *also* carry the pre-existing asymmetric affine (scale+bias) integers for MLX-checkpoint interop. No weight-bearing family lacks an integer path.
 
@@ -188,14 +188,14 @@ the per-lane dim count changes), so the extension added no freeze surface.
 
 > **fp4 simdgroup-MMA f32 fix (this PR):** exposing the real harness surfaced two
 > intertwined fp4-MMA defects, both now fixed (every fp4 MMA test runs f32/f16/bf16):
-> (1) the original `fp_quantized_mma::mt_fp4_qmm_mma` hand-rolled the E2M1 magnitude
+> (1) the original `fp_quantized_mma::ffai_fp4_qmm_mma` hand-rolled the E2M1 magnitude
 > as `(mantissa + 2) << (exp − 1)`, an **undefined shift when `exp == 0`** (subnormal
 > codes) that miscompiled on the f32 path → unwritten output (zeros / stale garbage);
 > replaced with the `e2m1_decode` intrinsic. (2) the block-scaled fp4 MMA kernel was
-> **also named `mt_fp4_qmm_mma`**, colliding with the original in the MSL/pipeline
+> **also named `ffai_fp4_qmm_mma`**, colliding with the original in the MSL/pipeline
 > cache → order-dependent wrong pipelines (the source of the ~0.46 f32 anomaly and the
 > apparent `ffai_sdpa_multi_d256_causal` failure, which was a *victim* of the shared-
-> state contamination, not itself buggy); renamed to `mt_fp4_float_qmm_mma`.
+> state contamination, not itself buggy); renamed to `ffai_fp4_float_qmm_mma`.
 
 **Two parallel, both-current quant tracks (by design — neither supersedes the other):**
 the **affine** int2–8 (scale+bias) track lives in `dequant_gemv`/`quantized`/`quantized_{mpp,nax}`/`kv_cache` and is *not* legacy — it is the on-disk format for MLX-quantized checkpoints (asymmetric, carries a per-group **bias**) and the right scheme for per-decode-step KV-cache quant (cheap min/max encode; block-scaled would need GPU encode intrinsics). The new symmetric `Int8` is a parallel spec-family member (scale-only), not a replacement; there is no block-scaled int4 at all, so affine int4 remains required to load MLX 4-bit models.

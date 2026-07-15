@@ -8,7 +8,7 @@
 //! from the legacy `mlx/` + `ffai/` split.
 //!
 //! Filenames keep the `moe_` prefix so they match their kernel names
-//! (`mt_moe_*`); the two files whose kernels are format-prefixed instead
+//! (`ffai_moe_*`); the two files whose kernels are format-prefixed instead
 //! (`block_scaled_moe`, `dequant_gemv_expert_indexed*`) match those. The
 //! per-format `*_block_scaled` matrices keep the format axis as-is; the
 //! format-axis fold (plan §7) is deferred.

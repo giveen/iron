@@ -6,7 +6,7 @@
 //! block of tokens is forwarded at once instead of one decode step at
 //! a time.
 //!
-//! This is `mt_sdpa_decode` generalised with a query dimension: one
+//! This is `ffai_sdpa_decode` generalised with a query dimension: one
 //! threadgroup per (query, q_head), the same TPG=1024 online-softmax
 //! cross-simdgroup reduction. Two attention modes select via the
 //! `causal` uniform:
@@ -21,7 +21,7 @@
 //! ## DISPATCH INVARIANTS
 //!
 //! Reduction-mode kernel — STRICT threadgroup geometry, the same
-//! machine-freeze hazard as `mt_sdpa_decode`. Consumers MUST encode
+//! machine-freeze hazard as `ffai_sdpa_decode`. Consumers MUST encode
 //! these as preconditions in their wrappers.
 //!
 //! - **TPG = 1024 threads** (32 simdgroups × 32 lanes). Hard. A TPG
@@ -44,7 +44,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_multi<T>(
+pub fn ffai_sdpa_multi<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -92,7 +92,7 @@ pub fn mt_sdpa_multi<T>(
     // per-lane quartile dot product into the full score; online softmax
     // updates the running (max, sum); V accumulates into fp32 registers.
     // Pre-compute the kv VIDs before the loads so vectorize sees 4
-    // consecutive Op::Load (same constraint as mt_sdpa_decode).
+    // consecutive Op::Load (same constraint as ffai_sdpa_decode).
     for _t in range(sg, n_kv, ns) {
         let base = kv_head_base + _t * head_dim;
         let kv_idx = base + d0;
@@ -151,7 +151,7 @@ pub fn mt_sdpa_multi<T>(
     let g_sum = threadgroup_load("tg_sum", 0);
     let rescale = select(g_sum > 0.0f32, exp(run_max - g_max) / g_sum, 0.0f32);
     // Transpose-then-reduce with a +1 padded stride so adjacent lanes
-    // hit distinct threadgroup-memory banks (see mt_sdpa_decode).
+    // hit distinct threadgroup-memory banks (see ffai_sdpa_decode).
     let stride = ns + 1u32;
     let idx = lane * stride + sg;
     threadgroup_store("tg_out0", idx, o0 * rescale);
@@ -179,9 +179,9 @@ pub fn mt_sdpa_multi<T>(
     }
 }
 
-// ─── Tree-causal variant: `mt_sdpa_multi_tree_mask` ───────────────
+// ─── Tree-causal variant: `ffai_sdpa_multi_tree_mask` ───────────────
 //
-// Identical to `mt_sdpa_multi` except the `causal: u32` constexpr is
+// Identical to `ffai_sdpa_multi` except the `causal: u32` constexpr is
 // replaced by a runtime additive `mask: Tensor<T>` of shape
 // `[n_query, n_query]`. The mask is consulted ONLY for in-block KV
 // positions (i.e. `_t >= base_kv`); the cached prefix (`_t < base_kv`)
@@ -198,10 +198,10 @@ pub fn mt_sdpa_multi<T>(
 // Equivalence: `treeCausalMask` from FFAI's `DraftTreeNode` is the
 // canonical mask producer.
 //
-// Dispatch invariants — IDENTICAL to `mt_sdpa_multi`. TPG=1024,
+// Dispatch invariants — IDENTICAL to `ffai_sdpa_multi`. TPG=1024,
 // head_dim=128 hard, grid `[n_q_heads * n_query * 1024, 1, 1]`.
 #[kernel]
-pub fn mt_sdpa_multi_tree_mask<T>(
+pub fn ffai_sdpa_multi_tree_mask<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -338,7 +338,7 @@ pub fn mt_sdpa_multi_tree_mask<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_multi;
+    use super::ffai_sdpa_multi;
     use crate::utils::{pack_f32, unpack_f32};
 
     // Per (query, q_head): softmax(Q·Kᵀ·scale)·V over the attended KV
@@ -414,7 +414,7 @@ pub mod kernel_tests {
             &q, &k, &v, n_q_heads, n_kv_heads, head_dim, base_kv, n_query, kv_stride, causal, scale,
         );
 
-        TestSetup::new(mt_sdpa_multi::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_multi::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -442,11 +442,11 @@ pub mod kernel_tests {
     fn test_ffai_sdpa_multi_causal(dt: DType) -> TestSetup { multi_setup(dt, true) }
 }
 
-/// New-syntax benchmark for `mt_sdpa_multi` (`class=GenericEmpty`).
+/// New-syntax benchmark for `ffai_sdpa_multi` (`class=GenericEmpty`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_multi;
+    use super::ffai_sdpa_multi;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_multi(dt: DType) -> BenchSetup {
@@ -458,7 +458,7 @@ pub mod kernel_benches {
         let n_kv = base_kv + n_query;
         let bytes = (2 * n_query * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim)
             * dt.size_bytes();
-        BenchSetup::new(mt_sdpa_multi::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_multi::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))
@@ -480,7 +480,7 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_multi_tree_mask(dt: DType) -> BenchSetup {
-        use super::mt_sdpa_multi_tree_mask;
+        use super::ffai_sdpa_multi_tree_mask;
         let (n_q_heads, n_kv_heads, head_dim) = (32usize, 8usize, 128usize);
         let (base_kv, n_query) = (4096usize, 8usize);
         let kv_stride = base_kv + n_query;
@@ -491,7 +491,7 @@ pub mod kernel_benches {
             + 2 * n_kv_heads * n_kv * head_dim
             + n_query * n_query)
             * dt.size_bytes();
-        BenchSetup::new(mt_sdpa_multi_tree_mask::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_multi_tree_mask::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

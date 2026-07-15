@@ -30,14 +30,14 @@ use ffai_kernels::core::{
 };
 use rustc_hash::FxHashMap;
 
-/// Build the [`Kernel`] IR for `mt_mpp_matmul_probe`.
+/// Build the [`Kernel`] IR for `ffai_mpp_matmul_probe`.
 ///
 /// Expresses the matmul via 6 primitive `CoopTile*` ops:
 /// `CoopTileSetup → CoopTileZero → CoopTileLoadA → CoopTileLoadB → CoopTileRun → CoopTileStoreC`.
 ///
 /// Dispatch geometry: 1 threadgroup × 32 threads = one simdgroup.
 pub fn kernel_ir() -> Kernel {
-    let mut k = Kernel::new("mt_mpp_matmul_probe");
+    let mut k = Kernel::new("ffai_mpp_matmul_probe");
     k.mode = KernelMode::Elementwise;
 
     // Params: A [M=16, K=32] fp16, B [K=32, N=16] fp16, C [M=16, N=16] fp32.
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_has_three_params() {
         let k = kernel_ir();
-        assert_eq!(k.name, "mt_mpp_matmul_probe");
+        assert_eq!(k.name, "ffai_mpp_matmul_probe");
         assert_eq!(k.params.len(), 3);
         assert_eq!(k.params[0].name, "A");
         assert_eq!(k.params[1].name, "B");
@@ -171,7 +171,7 @@ mod tests {
             "MPP include missing from generated MSL:\n{msl}"
         );
         assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-        assert!(msl.contains("kernel void mt_mpp_matmul_probe"));
+        assert!(msl.contains("kernel void ffai_mpp_matmul_probe"));
     }
 
     /// Developer aid — `cargo test -p ffai-kernels-std --lib -- dump_generated_msl --nocapture`

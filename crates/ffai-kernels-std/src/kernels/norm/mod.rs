@@ -5,7 +5,7 @@
 //! (residual add, RoPE, gated, and the quantized RMSNorm→GEMV fusions),
 //! LayerNorm, and 1-D adaptive instance norm. Kernels are named for the
 //! operation; the quantized fusions carry the weight format as a name axis
-//! (`mt_<format>_rms_norm_qgemv`).
+//! (`ffai_<format>_rms_norm_qgemv`).
 //!
 //! Migrated from the legacy `mlx/` (`rms_norm`, `layer_norm`) + `ffai/` split.
 //! The `*_block_scaled_qgemv` files hold the per-format matrix and will fold

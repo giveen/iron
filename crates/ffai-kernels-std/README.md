@@ -15,7 +15,7 @@ types; it adds no new GPU runtime of its own.
 
 | Module | Purpose |
 |---|---|
-| `mlx` | Kernels with an upstream MLX `.metal` counterpart they can be benched against (`mt_softmax`, `mt_copy`, `mt_gemv`, `mt_rope`, the elementwise/reduce/sort/scan families, the `steel/` tiled-GEMM/attention path, …). |
+| `mlx` | Kernels with an upstream MLX `.metal` counterpart they can be benched against (`ffai_softmax`, `ffai_copy`, `ffai_gemv`, `ffai_rope`, the elementwise/reduce/sort/scan families, the `steel/` tiled-GEMM/attention path, …). |
 | `ffai` | Model-specific kernels with no upstream metal mirror — attention (SDPA decode/prefill/bidirectional/flash), MoE, SSM / GatedDeltaNet, RoPE variants, AURA KV codec, RMSNorm fusions, vision/STT/TTS front-ends, sampling, GGUF/DSv4 dequant. |
 | `convolution` | The consolidated convolution family — `conv1d`/`conv2d`/`conv3d` (direct + depthwise + MMA + block-scaled), Winograd, the causal-streaming path, and the `steel_conv/` implicit-GEMM port. See [`docs/specs/KERNEL_CONSOLIDATION_PLAN.md`](../../docs/specs/KERNEL_CONSOLIDATION_PLAN.md) — this module is the proven exemplar for the wider reorg. |
 | `quant` | The precision layer: `codec` (host element/scale encode-decode primitives — the single source of truth shared by kernels and oracles), `format` (the ~30-format block-scaled `QFormat` matrix + host packer/oracle), and `gguf` (GGUF k-quant layouts). |
@@ -38,26 +38,26 @@ use ffai-kernels::kernel;
 
 /// Multiply each element of `inp` by `alpha`.
 #[kernel]
-pub fn mt_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) {
+pub fn ffai_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) {
     let idx = program_id::<0>();
     store(out[idx], (load(inp[idx]).cast::<f32>() * alpha).cast::<T>());
 }
 
 pub mod kernel_tests {
     use ffai-kernels::{test::*, test_kernel};
-    use super::mt_scale;
+    use super::ffai_scale;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-3, 1e-3])]
-    fn test_mt_scale(dt: DType) -> TestSetup { /* … oracle vs GPU … */ }
+    fn test_ffai_scale(dt: DType) -> TestSetup { /* … oracle vs GPU … */ }
 }
 
 pub mod kernel_benches {
     use ffai-kernels::{bench, test::*};
-    use super::mt_scale;
+    use super::ffai_scale;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_mt_scale(dt: DType) -> BenchSetup { /* … */ }
+    fn bench_ffai_scale(dt: DType) -> BenchSetup { /* … */ }
 }
 ```
 

@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU smoke test for the `Op::SimdgroupLoad` HW intrinsic.
 //!
-//! The kernel under test (`mt_simdgroup_load_probe` in `probe::simdgroup_load_probe`)
+//! The kernel under test (`ffai_simdgroup_load_probe` in `probe::simdgroup_load_probe`)
 //! stages a flat-64 `src` into TG memory, runs **one** MSL
 //! `simdgroup_load(...)` instruction to land it into a
 //! `simdgroup_matrix<T, 8, 8>` fragment, then scatters the fragment
@@ -35,14 +35,14 @@ use ffai_kernels::{
     codegen::msl::{MslConfig, MslGenerator},
     core::dtype::DType,
 };
-use ffai_kernels_std::probe::simdgroup_load_probe::mt_simdgroup_load_probe;
+use ffai_kernels_std::probe::simdgroup_load_probe::ffai_simdgroup_load_probe;
 
 /// Sanity-check that the MSL the codegen produces actually contains
 /// a `simdgroup_load(...)` call — this is the whole point of having
 /// a smoke kernel for the primitive.
 #[test]
-fn mt_simdgroup_load_probe_emits_simdgroup_load_instruction_f32() {
-    let kernel = mt_simdgroup_load_probe::kernel_ir_for(DType::F32);
+fn ffai_simdgroup_load_probe_emits_simdgroup_load_instruction_f32() {
+    let kernel = ffai_simdgroup_load_probe::kernel_ir_for(DType::F32);
     let msl_gen = MslGenerator::new(MslConfig::default());
     let msl = msl_gen.generate(&kernel).expect("MSL emit should succeed");
 
@@ -77,8 +77,8 @@ fn mt_simdgroup_load_probe_emits_simdgroup_load_instruction_f32() {
 /// dtype-specialisation path of `kernel_ir_for` doesn't accidentally
 /// drop the primitive.
 #[test]
-fn mt_simdgroup_load_probe_emits_simdgroup_load_instruction_f16() {
-    let kernel = mt_simdgroup_load_probe::kernel_ir_for(DType::F16);
+fn ffai_simdgroup_load_probe_emits_simdgroup_load_instruction_f16() {
+    let kernel = ffai_simdgroup_load_probe::kernel_ir_for(DType::F16);
     let msl_gen = MslGenerator::new(MslConfig::default());
     let msl = msl_gen.generate(&kernel).expect("MSL emit should succeed");
 
@@ -111,7 +111,7 @@ fn run_round_trip(dtype: Dt) {
     buffers.insert("dst".into(), vec![0u8; 64 * dtype.bytes()]);
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let kernel = mt_simdgroup_load_probe::kernel_ir_for(dtype.to_dtype());
+    let kernel = ffai_simdgroup_load_probe::kernel_ir_for(dtype.to_dtype());
 
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [1, 1, 1], [32, 1, 1])
@@ -133,7 +133,7 @@ fn run_round_trip(dtype: Dt) {
 }
 
 #[test]
-fn mt_simdgroup_load_probe_round_trips_8x8_tile_f32() { run_round_trip(Dt::F32); }
+fn ffai_simdgroup_load_probe_round_trips_8x8_tile_f32() { run_round_trip(Dt::F32); }
 
 #[test]
-fn mt_simdgroup_load_probe_round_trips_8x8_tile_f16() { run_round_trip(Dt::F16); }
+fn ffai_simdgroup_load_probe_round_trips_8x8_tile_f16() { run_round_trip(Dt::F16); }

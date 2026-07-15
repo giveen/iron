@@ -4,9 +4,9 @@
 //! round-trip, corresponding to MLX `metal/fp_quantized.metal`.
 //!
 //! Three standalone kernels:
-//! - `mt_fp4_quant_dequant` — MXFP4 / NV-FP4 codebook quantization.
-//! - `mt_fp8_e4m3_quant_dequant` — E4M3 fp8 (3 mantissa bits, max ±448).
-//! - `mt_fp8_e5m2_quant_dequant` — E5M2 fp8 (2 mantissa bits, max ±57344).
+//! - `ffai_fp4_quant_dequant` — MXFP4 / NV-FP4 codebook quantization.
+//! - `ffai_fp8_e4m3_quant_dequant` — E4M3 fp8 (3 mantissa bits, max ±448).
+//! - `ffai_fp8_e5m2_quant_dequant` — E5M2 fp8 (2 mantissa bits, max ±57344).
 //!
 //! All kernels are Grid3D; each group of 32 consecutive elements forms one
 //! simdgroup (`simd_max` derives the per-group amax). Dispatch:
@@ -21,7 +21,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_fp4_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
+pub fn ffai_fp4_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
     let gid = program_id::<0>();
     let x = load(inp[gid]);
     let ax = abs(x);
@@ -54,9 +54,9 @@ pub fn mt_fp4_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: 
     store(out[gid], result);
 }
 
-// ─── mt_fp8_quant_dequant — fp8 (e4m3 / e5m2) quant + dequant ─────────────
+// ─── ffai_fp8_quant_dequant — fp8 (e4m3 / e5m2) quant + dequant ─────────────
 //
-// The fp8 counterpart of `mt_fp4_quant_dequant` above. fp8 is the standard
+// The fp8 counterpart of `ffai_fp4_quant_dequant` above. fp8 is the standard
 // inference activation/KV format on Hopper / Blackwell-class hardware and the
 // MLX `fp_quantized.metal` family ships both variants:
 //
@@ -78,10 +78,10 @@ pub fn mt_fp4_quant_dequant(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: 
 /// fp8 quant+dequant round-trip, folded over the two formats: E4M3 (3 mantissa
 /// bits, exp [-6, 8], max ±448) and E5M2 (2 mantissa bits, exp [-14, 15], max
 /// ±57344). `FMT` is the integer discriminant; the four format constants are
-/// selected by its compile-time `if`. Produces `mt_fp8_e4m3_quant_dequant` and
-/// `mt_fp8_e5m2_quant_dequant`.
+/// selected by its compile-time `if`. Produces `ffai_fp8_e4m3_quant_dequant` and
+/// `ffai_fp8_e5m2_quant_dequant`.
 #[kernel(variants((FMT, NAME) = [(0u32, e4m3), (1u32, e5m2)], suffix = "{NAME}_quant_dequant"))]
-pub fn mt_fp8(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
+pub fn ffai_fp8(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
     let fp8max = if FMT == 0u32 { 448.0f32 } else { 57344.0f32 };
     let emin = if FMT == 0u32 { 0.0f32 - 6.0f32 } else { 0.0f32 - 14.0f32 };
     let emax = if FMT == 0u32 { 8.0f32 } else { 15.0f32 };
@@ -104,7 +104,7 @@ pub fn mt_fp8(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
     store(out[gid], result);
 }
 
-/// New-syntax correctness for `mt_fp4_quant_dequant` (Grid3D, one 32-lane
+/// New-syntax correctness for `ffai_fp4_quant_dequant` (Grid3D, one 32-lane
 /// simdgroup per group; per-group amax → fp4-codebook snap → rescale). The
 /// oracle replays the exact codebook; inputs are kept clear of codebook
 /// decision boundaries so an f32 ULP can't flip a cell. The fp8 e4m3/e5m2
@@ -113,7 +113,7 @@ pub fn mt_fp8(inp: Tensor<f32>, out: Tensor<f32>, #[constexpr] n: u32) {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_fp4_quant_dequant, mt_fp8_e4m3_quant_dequant, mt_fp8_e5m2_quant_dequant};
+    use super::{ffai_fp4_quant_dequant, ffai_fp8_e4m3_quant_dequant, ffai_fp8_e5m2_quant_dequant};
 
     fn fp4_snap(norm: f32) -> f32 {
         if norm < 0.25 {
@@ -150,7 +150,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32], tol = 1e-4)]
-    fn test_mt_fp4_quant_dequant(_dt: DType) -> TestSetup {
+    fn test_ffai_fp4_quant_dequant(_dt: DType) -> TestSetup {
         let inp: Vec<f32> = (0..4).flat_map(synthetic_group).collect();
         let n = inp.len();
         // Per-32-element-simdgroup amax-scale → codebook snap → rescale.
@@ -165,7 +165,7 @@ pub mod kernel_tests {
                 expected[gi * 32 + i] = sign * q * rescale;
             }
         }
-        TestSetup::new(mt_fp4_quant_dequant::kernel_ir_for())
+        TestSetup::new(ffai_fp4_quant_dequant::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec(
                 "inp",
@@ -238,13 +238,13 @@ pub mod kernel_tests {
 
     // e4m3: 3 mantissa bits, exponent [-6, 8], max ±448.
     #[test_kernel(dtypes = [f32], tol = 1e-3)]
-    fn test_mt_fp8_e4m3_quant_dequant(_dt: DType) -> TestSetup {
-        fp8_setup(mt_fp8_e4m3_quant_dequant::kernel_ir_for(), 3.0, -6.0, 8.0, 448.0)
+    fn test_ffai_fp8_e4m3_quant_dequant(_dt: DType) -> TestSetup {
+        fp8_setup(ffai_fp8_e4m3_quant_dequant::kernel_ir_for(), 3.0, -6.0, 8.0, 448.0)
     }
     // e5m2: 2 mantissa bits, exponent [-14, 15], max ±57344.
     #[test_kernel(dtypes = [f32], tol = 1e-3)]
-    fn test_mt_fp8_e5m2_quant_dequant(_dt: DType) -> TestSetup {
-        fp8_setup(mt_fp8_e5m2_quant_dequant::kernel_ir_for(), 2.0, -14.0, 15.0, 57344.0)
+    fn test_ffai_fp8_e5m2_quant_dequant(_dt: DType) -> TestSetup {
+        fp8_setup(ffai_fp8_e5m2_quant_dequant::kernel_ir_for(), 2.0, -14.0, 15.0, 57344.0)
     }
 }
 
@@ -252,7 +252,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, core::ir::Kernel, test::*};
 
-    use super::{mt_fp4_quant_dequant, mt_fp8_e4m3_quant_dequant, mt_fp8_e5m2_quant_dequant};
+    use super::{ffai_fp4_quant_dequant, ffai_fp8_e4m3_quant_dequant, ffai_fp8_e5m2_quant_dequant};
     use crate::utils::{InputDomain, input_buffer};
 
     const QUANT_N: usize = 64 * 1024 * 1024;
@@ -274,8 +274,8 @@ pub mod kernel_benches {
     // no function constants. It is dispatched 2D: `index = tidx.x + grid_dim.x *
     // tidx.y`, so the legacy `[1, n/32, 1]` threadgroups × `[32,1,1]` tpg gives
     // `grid_dim.x = 32` and each 32-lane threadgroup is one simdgroup covering 32
-    // consecutive elements — the same element-to-simdgroup grouping the MT Grid3D
-    // dispatch uses. `inp` is shared by name with the MT input below.
+    // consecutive elements — the same element-to-simdgroup grouping the FFAI Grid3D
+    // dispatch uses. `inp` is shared by name with the FFAI input below.
     //
     // The input is seeded `Signed` (period-8 pattern `[-3..3]`) rather than
     // `qb`'s raw `BenchBuffer::random` (random f32 *bytes* alias to inf/nan, which
@@ -285,7 +285,7 @@ pub mod kernel_benches {
     //
     // NOTE (semantic divergence): MLX `nvfp4` quantises at **group_size 16**
     // (`use_mx_scale = group_size == 32` is false → each 32-lane simdgroup is
-    // split into two 16-lane amax groups), whereas `mt_fp4_quant_dequant` takes a
+    // split into two 16-lane amax groups), whereas `ffai_fp4_quant_dequant` takes a
     // full **32-lane** `simd_max` (group_size 32). With a non-uniform input the
     // two would pick different per-group scales near a 16-boundary and disagree by
     // up to a codebook step; the `Signed` pattern's uniform amax avoids that, so
@@ -293,7 +293,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32])]
     fn bench_fp4(_dt: DType) -> BenchSetup {
         let n = QUANT_N;
-        BenchSetup::new(mt_fp4_quant_dequant::kernel_ir_for())
+        BenchSetup::new(ffai_fp4_quant_dequant::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .buffer(input_buffer("inp", n, DType::F32, InputDomain::Signed))
             .buffer(BenchBuffer::zeros("out", n, DType::F32).output())
@@ -305,7 +305,7 @@ pub mod kernel_benches {
                     "nvfp4_quantize_dequantize_float_gs_16_b_4".to_string(),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/fp_quantized.metal")),
                 )
-                // w[[0]] shared by name with the MT `inp`; out[[1]] fresh.
+                // w[[0]] shared by name with the FFAI `inp`; out[[1]] fresh.
                 .buffer(BenchBuffer::zeros("inp", n, DType::F32))
                 .buffer(BenchBuffer::zeros("out", n, DType::F32).output())
                 // 2D: [1, n/32, 1] threadgroups × [32,1,1] → grid_dim.x = 32.
@@ -314,7 +314,7 @@ pub mod kernel_benches {
             )
     }
     #[bench(dtypes = [f32])]
-    fn bench_fp8_e4m3(_dt: DType) -> BenchSetup { qb(mt_fp8_e4m3_quant_dequant::kernel_ir_for()) }
+    fn bench_fp8_e4m3(_dt: DType) -> BenchSetup { qb(ffai_fp8_e4m3_quant_dequant::kernel_ir_for()) }
     #[bench(dtypes = [f32])]
-    fn bench_fp8_e5m2(_dt: DType) -> BenchSetup { qb(mt_fp8_e5m2_quant_dequant::kernel_ir_for()) }
+    fn bench_fp8_e5m2(_dt: DType) -> BenchSetup { qb(ffai_fp8_e5m2_quant_dequant::kernel_ir_for()) }
 }

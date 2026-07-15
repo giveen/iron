@@ -1,8 +1,8 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Microbench: `mt_gated_delta_wy_chunk` vs `mt_gated_delta_step` (MLX baseline).
+//! Microbench: `ffai_gated_delta_wy_chunk` vs `ffai_gated_delta_step` (MLX baseline).
 //!
-//! Compares the chunked-WY kernel against running `mt_gated_delta_step`
+//! Compares the chunked-WY kernel against running `ffai_gated_delta_step`
 //! T times (the current production GDN prefill path). Both kernels live
 //! in ffai-kernels-std; we drive them via the same Context and time wall
 //! clock.
@@ -23,8 +23,8 @@ use std::{collections::BTreeMap, time::Instant};
 use common::{Dt, gpu_lock, pack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::ssm::{
-    gated_delta::{mt_gated_delta_chunk, mt_gated_delta_step},
-    gated_delta_wy::mt_gated_delta_wy_chunk,
+    gated_delta::{ffai_gated_delta_chunk, ffai_gated_delta_step},
+    gated_delta_wy::ffai_gated_delta_wy_chunk,
 };
 
 /// Run the WY chunked kernel once on the given inputs, returning wall time
@@ -66,7 +66,7 @@ fn time_wy_chunk(
     buffers.insert("c".into(), (c as u32).to_le_bytes().to_vec());
     buffers.insert("t_len".into(), (t as u32).to_le_bytes().to_vec());
 
-    let mut kernel = mt_gated_delta_wy_chunk::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_gated_delta_wy_chunk::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     // Warm-up dispatch so the PSO cache is hot.
@@ -84,8 +84,8 @@ fn time_wy_chunk(
     elapsed_us / iters as f64
 }
 
-/// Fair baseline: `mt_gated_delta_chunk` runs the full T-sequence in ONE
-/// dispatch via its inner T-loop. This is the kernel `mt_gated_delta_wy_chunk`
+/// Fair baseline: `ffai_gated_delta_chunk` runs the full T-sequence in ONE
+/// dispatch via its inner T-loop. This is the kernel `ffai_gated_delta_wy_chunk`
 /// is actually trying to beat (both single dispatch over T tokens).
 #[allow(clippy::too_many_arguments)]
 fn time_chunk_kernel(
@@ -121,7 +121,7 @@ fn time_chunk_kernel(
     buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
     buffers.insert("t_len".into(), (t as u32).to_le_bytes().to_vec());
 
-    let mut kernel = mt_gated_delta_chunk::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_gated_delta_chunk::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     let _ = ctx
@@ -160,7 +160,7 @@ fn time_step_loop(
     let beta_all: Vec<f32> =
         (0..t * n_total).map(|i| 0.5 + 0.2 * (i as f32 * 0.017).cos()).collect();
 
-    let mut kernel = mt_gated_delta_step::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_gated_delta_step::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     // Single dispatch warm-up.

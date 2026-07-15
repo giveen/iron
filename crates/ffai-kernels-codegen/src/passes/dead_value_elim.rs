@@ -93,7 +93,7 @@ impl super::Pass for DeadValueElimPass {
     fn run(&self, kernel: &mut Kernel) -> Result<()> { force_eliminate_dead_values(kernel) }
 }
 
-/// Per-pass DCE postcondition (#209/1).  Each orphan-producing pass
+/// Per-pass DCE postcondition.  Each orphan-producing pass
 /// (Vectorize, Unroll, CopyProp, CSE, LICM, IfConversion, ValueSink,
 /// Fusion, FmaFusion, AlgebraicSimplify, ConstFold) calls this at
 /// the end of its `run()` to enforce the "if you remove the only
@@ -133,7 +133,7 @@ pub fn force_eliminate_dead_values(kernel: &mut Kernel) -> Result<()> {
         let mut removed_any = false;
 
         // Entry block — `kernel.body` is the canonical entry block;
-        // `kernel.blocks` only holds nested blocks (post-#209/2).
+        // `kernel.blocks` only holds nested blocks.
         removed_any |= dve_block(&mut kernel.body, &used);
 
         // Nested blocks.  Snapshot ids so we can iterate-and-mutate.
@@ -493,7 +493,7 @@ mod tests {
     }
 
     /// REGRESSION: `Kernel` stores the entry block twice — once as
-    /// Post-#209/2 the entry block lives only at `kernel.body`;
+    /// The entry block now lives only at `kernel.body`;
     /// `kernel.blocks` holds nested blocks only.  This test pins that
     /// invariant: build a kernel, observe that `kernel.body.id` is
     /// NOT a key in `kernel.blocks`, and confirm DCE only needs the

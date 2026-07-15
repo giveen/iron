@@ -88,7 +88,7 @@ use ffai_kernels::kernel;
 // Both are uploaded once at runtime init and shared across all
 // dequant calls.
 #[kernel]
-pub fn mt_gguf_dequant_iq2_xxs<T>(
+pub fn ffai_gguf_dequant_iq2_xxs<T>(
     qs_u32: Tensor<u32>,
     d_f32: Tensor<f32>,
     grid: Tensor<u8>,
@@ -146,7 +146,7 @@ pub mod kernel_tests {
 
     use ffai_kernels::test::*;
 
-    use super::mt_gguf_dequant_iq2_xxs;
+    use super::ffai_gguf_dequant_iq2_xxs;
     use crate::utils::pack_f32;
 
     /// MSL emission smoke test — confirms the kernel codegens for all
@@ -156,7 +156,7 @@ pub mod kernel_tests {
     #[test]
     fn codegen_iq2_xxs_smoke() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let ir = mt_gguf_dequant_iq2_xxs::kernel_ir_for(dt);
+            let ir = ffai_gguf_dequant_iq2_xxs::kernel_ir_for(dt);
             assert!(!ir.body.ops.is_empty(), "kernel body emitted no ops for {dt:?}");
             assert!(ir.params.iter().any(|p| p.name == "qs_u32"), "missing qs_u32 param");
             assert!(ir.params.iter().any(|p| p.name == "grid"), "missing grid param");
@@ -171,7 +171,7 @@ pub mod kernel_tests {
     #[allow(dead_code)]
     fn _placeholder_setup(n_blocks: usize, dt: DType) -> TestSetup {
         let n = n_blocks * 256;
-        TestSetup::new(mt_gguf_dequant_iq2_xxs::kernel_ir_for(dt))
+        TestSetup::new(ffai_gguf_dequant_iq2_xxs::kernel_ir_for(dt))
             .input(TestBuffer::zeros("qs_u32", n_blocks * 16, DType::U32))
             .input(TestBuffer::from_vec(
                 "d_f32",
@@ -190,13 +190,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gguf_dequant_iq2_xxs;
+    use super::ffai_gguf_dequant_iq2_xxs;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_iq2_xxs(dt: DType) -> BenchSetup {
         let n = 4096 * 4096usize;
         let n_blocks = n / 256;
-        BenchSetup::new(mt_gguf_dequant_iq2_xxs::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gguf_dequant_iq2_xxs::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("qs_u32", n_blocks * 16, DType::U32))
             .buffer(BenchBuffer::random("d_f32", n_blocks, DType::F32))
             .buffer(BenchBuffer::random("grid", 2048, DType::U8))

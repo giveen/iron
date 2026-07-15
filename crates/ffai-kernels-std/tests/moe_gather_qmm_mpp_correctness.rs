@@ -2,12 +2,12 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::moe_mpp::mt_moe_gather_qmm_mma_int4_bm16_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp::ffai_moe_gather_qmm_mma_int4_bm16_mpp`.
 //!
 //! This is the MPP (MetalPerformancePrimitives) MoE BGEMM — same algorithm
-//! and output as `mt_moe_gather_qmm_mma_int4_bm16` but routes the inner
+//! and output as `ffai_moe_gather_qmm_mma_int4_bm16` but routes the inner
 //! 16×32×16 tile through `mpp::tensor_ops::matmul2d` (Apple's NAX-tapping
-//! cooperative-tensor API). Validated against the scalar `mt_moe_gather_qmm_int4`
+//! cooperative-tensor API). Validated against the scalar `ffai_moe_gather_qmm_int4`
 //! oracle on the same "clean tile" shape the simdgroup-matrix bm16 variant
 //! is tested at (n_experts=4, T=64, N=64, K=64, group_size=32).
 //!
@@ -23,11 +23,11 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::{moe_gather_qmm::mt_moe_gather_qmm_int4, moe_mpp};
+use ffai_kernels_std::kernels::moe::{moe_gather_qmm::ffai_moe_gather_qmm_int4, moe_mpp};
 
 /// Pack a row of int4 weights into uint32s (8 per uint, LSB-first per nibble).
 /// Identical to the helper used by the legacy
-/// `tests/moe_gather_qmm_gpu_correctness.rs` (removed in #240) —
+/// `tests/moe_gather_qmm_gpu_correctness.rs` (since removed) —
 /// duplicated to keep this test file self-contained.
 fn pack_int4_row(weights: &[u32]) -> Vec<u32> {
     assert!(weights.len() % 8 == 0);
@@ -119,7 +119,7 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_matches_m1_clean_tile() {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_int4::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_int4::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -141,7 +141,8 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_matches_m1_clean_tile() {
         buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = moe_mpp::mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k =
+            moe_mpp::ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         // Grid: [N/BN=32, ceil(T/BM=16), 1]. TG: 32 lanes = 1 SG (MPP's
         // matmul2d uses `execution_simdgroup`).
@@ -251,7 +252,7 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_bf16_matches_m1_clean_tile() {
         buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
-        let mut k = mt_moe_gather_qmm_int4::kernel_ir_for(Dt::F32.to_dtype());
+        let mut k = ffai_moe_gather_qmm_int4::kernel_ir_for(Dt::F32.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
@@ -274,7 +275,7 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_bf16_matches_m1_clean_tile() {
         buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
         let ctx = Context::new().unwrap();
         let mut k =
-            moe_mpp::mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
+            moe_mpp::ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(Dt::Bf16.to_dtype());
         k.mode = KernelMode::Reduction;
         let r = ctx
             .dispatch_with_grid(

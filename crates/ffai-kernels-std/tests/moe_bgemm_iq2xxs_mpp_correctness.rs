@@ -1,8 +1,8 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_gather_bgemm_iq2xxs_mpp` — the
+//! GPU correctness for `ffai::ffai_moe_gather_bgemm_iq2xxs_mpp` — the
 //! prefill IQ2_XXS grouped BGEMM. Oracle: per-row IQ2_XXS dequant gemv
-//! (same formula as mt_gguf_dequant_iq2_xxs). Cosine ≥ 0.99 (MMA
+//! (same formula as ffai_gguf_dequant_iq2_xxs). Cosine ≥ 0.99 (MMA
 //! accumulation order differs from the scalar oracle).
 #![cfg(target_os = "macos")]
 
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_bgemm_iq2xxs_mpp::mt_moe_gather_bgemm_iq2xxs_mpp;
+use ffai_kernels_std::kernels::moe::moe_bgemm_iq2xxs_mpp::ffai_moe_gather_bgemm_iq2xxs_mpp;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -97,7 +97,7 @@ fn bgemm_iq2xxs_mpp_matches_gemv_oracle() {
     buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_gather_bgemm_iq2xxs_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_gather_bgemm_iq2xxs_mpp::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [

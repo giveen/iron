@@ -216,7 +216,7 @@ enum Command {
     /// Generate shell completion script and print it to stdout.
     ///
     /// Pipe into your shell's completion directory, e.g.:
-    ///   ffaik completions zsh > ~/.zfunc/_tile
+    ///   ffaik completions zsh > ~/.zfunc/_ffaik
     ///   ffaik completions bash > /etc/bash_completion.d/ffaik
     #[command(visible_alias = "com")]
     Completions(CompletionsArgs),
@@ -533,7 +533,7 @@ struct BuildArgs {
 
 #[derive(clap::Args, Debug)]
 #[command(
-    after_help = "EXAMPLES:\n  ffaik inspect                     # list all kernels\n  ffaik inspect mt_softmax_f32      # print final MSL\n  ffaik inspect mt_softmax_f32 --ir # print raw IR\n  ffaik inspect --all -o /tmp/out   # dump all kernels to disk"
+    after_help = "EXAMPLES:\n  ffaik inspect                     # list all kernels\n  ffaik inspect ffai_softmax_f32      # print final MSL\n  ffaik inspect ffai_softmax_f32 --ir # print raw IR\n  ffaik inspect --all -o /tmp/out   # dump all kernels to disk"
 )]
 struct InspectArgs {
     /// Kernel name to inspect (lists all registered kernels when omitted).

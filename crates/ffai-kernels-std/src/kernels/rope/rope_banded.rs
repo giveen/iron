@@ -12,8 +12,8 @@
 //! redundant — `#[constexpr]` is already a runtime buffer read, so the
 //! scalar-position variant bought nothing over `T = 1`.)
 //!
-//! Different from `mt_rope` (in `kernels/rope/base.rs`):
-//!   - generic dtype (mt_rope is f16-only)
+//! Different from `ffai_rope` (in `kernels/rope/base.rs`):
+//!   - generic dtype (ffai_rope is f16-only)
 //!   - supports wavelength banding (low / high / smoothed)
 //!
 //! For each (head, i in 0..head_dim/2):
@@ -41,7 +41,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_rope_banded<T>(
+pub fn ffai_rope_banded<T>(
     qk: Tensor<T>,
     positions: Tensor<u32>,
     out: Tensor<T>,
@@ -93,7 +93,7 @@ pub fn mt_rope_banded<T>(
     store(out[i2], o2.cast::<T>());
 }
 
-/// New-syntax correctness for `mt_rope_banded`. Grid3D `[T, n_heads, half_dim]`,
+/// New-syntax correctness for `ffai_rope_banded`. Grid3D `[T, n_heads, half_dim]`,
 /// tpg `[1,1,1]` (one thread per (row, head, i); each writes the rotation pair
 /// i / i+half_dim). Oracle replays the exact banded-inv_freq + rotation math in
 /// f32, per row at that row's position. Covers decode (T=1) and prefill (T>1),
@@ -101,7 +101,7 @@ pub fn mt_rope_banded<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_rope_banded;
+    use super::ffai_rope_banded;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -170,7 +170,7 @@ pub mod kernel_tests {
                 }
             }
         }
-        TestSetup::new(mt_rope_banded::kernel_ir_for(dt))
+        TestSetup::new(ffai_rope_banded::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("qk", pack_f32(&qk_f, dt), dt))
             .input(TestBuffer::from_vec("positions", u32_bytes(&positions), DType::U32))
@@ -206,17 +206,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmarks for `mt_rope_banded`: decode (T=1) and prefill (T=512).
+/// New-syntax benchmarks for `ffai_rope_banded`: decode (T=1) and prefill (T=512).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_rope_banded;
+    use super::ffai_rope_banded;
 
     /// Builds a `T`-row bench at the given head geometry (Llama-3 banding on).
     fn rope_banded_bench(dt: DType, t_len: usize, n_heads: usize, head_dim: usize) -> BenchSetup {
         let half = head_dim / 2;
         let row_stride = n_heads * head_dim;
-        BenchSetup::new(mt_rope_banded::kernel_ir_for(dt))
+        BenchSetup::new(ffai_rope_banded::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("qk", t_len * row_stride, dt))
             .buffer(BenchBuffer::random("positions", t_len, DType::U32))

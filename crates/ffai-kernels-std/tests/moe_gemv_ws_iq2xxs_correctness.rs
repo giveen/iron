@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_gemv_ws_iq2xxs` — the WEIGHT-STATIONARY
+//! GPU correctness for `ffai::ffai_moe_gemv_ws_iq2xxs` — the WEIGHT-STATIONARY
 //! prefill MoE IQ2_XXS gemv (dequants each expert's weight row ONCE into
 //! threadgroup memory, reused across the tile's rows). Oracle: per-row
 //! IQ2_XXS dequant gemv from the SAME split pool (`qs_all`/`d_all`) as the
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_gemv_ws_iq2xxs::mt_moe_gemv_ws_iq2xxs;
+use ffai_kernels_std::kernels::moe::moe_gemv_ws_iq2xxs::ffai_moe_gemv_ws_iq2xxs;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -101,7 +101,7 @@ fn gemv_ws_iq2xxs_matches_oracle() {
     buffers.insert("rows_per_tile".into(), (rows_per_tile as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_gemv_ws_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_gemv_ws_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let gy = m_total.div_ceil(rows_per_tile);
     let r =

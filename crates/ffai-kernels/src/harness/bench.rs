@@ -309,7 +309,7 @@ pub struct RefKernel {
     pub buffers: Vec<BenchBuffer>,
     /// Dispatch grid for the reference kernel.
     pub grid: Grid,
-    /// Maximum absolute error tolerance for the MT-vs-reference equivalence check.
+    /// Maximum absolute error tolerance for the FFAI-vs-reference equivalence check.
     pub tol: f32,
     /// Boolean Metal `[[function_constant(index)]]` specializations, as `(index, value)` pairs.
     pub bool_constants: Vec<(usize, bool)>,

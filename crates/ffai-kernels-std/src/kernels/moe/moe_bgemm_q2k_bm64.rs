@@ -10,7 +10,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_bgemm_q2k_bm64<T>(
+pub fn ffai_moe_bgemm_q2k_bm64<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     scales: Tensor<u8>,
@@ -160,7 +160,7 @@ pub fn mt_moe_bgemm_q2k_bm64<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_bgemm_q2k_bm64;
+    use super::ffai_moe_bgemm_q2k_bm64;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bgemm_q2k_bm64(dt: DType) -> BenchSetup {
@@ -169,7 +169,7 @@ pub mod kernel_benches {
         let n_out = 4096usize;
         let t_rows = 256usize;
         let nblk = n_out * k_in / 256;
-        BenchSetup::new(mt_moe_bgemm_q2k_bm64::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_bgemm_q2k_bm64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", t_rows * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_experts * nblk * 16, DType::U32))

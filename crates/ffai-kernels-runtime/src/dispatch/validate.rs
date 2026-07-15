@@ -32,7 +32,7 @@ const SIMD_WIDTH: usize = 32;
 /// `uses_n_simd` is the freeze-prone signal from
 /// [`ffai_kernels_codegen::kernel_uses_n_simd`] — `true` iff the kernel derives
 /// `n_simd = tpg / 32` and strides a reduction by it. (Mode alone is too coarse:
-/// the per-thread `mt_hadamard_m*` matvecs are Reduction-mode but dispatch
+/// the per-thread `ffai_hadamard_m*` matvecs are Reduction-mode but dispatch
 /// safely at TPG < 32 because they never compute `n_simd`.)
 ///
 /// Rejects, with a [`FFAIError::Dispatch`] describing the violation:
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn non_n_simd_kernel_allows_small_threadgroups() {
-        // The per-thread `mt_hadamard_m*` case: Reduction-mode but never derives
+        // The per-thread `ffai_hadamard_m*` case: Reduction-mode but never derives
         // n_simd, so a TPG of 12 / 28 / 1 must be allowed.
         for t in [1usize, 12, 28] {
             assert!(

@@ -43,7 +43,7 @@ use ffai_kernels::kernel;
 /// up to a multiple of TPG) early-out — they must not read `indices`
 /// out of bounds or write a stray `out` slot.
 #[kernel]
-pub fn mt_gather_front<T>(
+pub fn ffai_gather_front<T>(
     src: Tensor<T>,
     indices: Tensor<u32>,
     out: Tensor<T>,
@@ -73,7 +73,7 @@ pub fn mt_gather_front<T>(
 /// stray thread reads `indices` / `updates` out of bounds and scatters
 /// garbage into `out`.
 #[kernel]
-pub fn mt_scatter<T>(
+pub fn ffai_scatter<T>(
     updates: Tensor<T>,
     indices: Tensor<u32>,
     mut out: Tensor<T>,
@@ -103,7 +103,7 @@ pub fn mt_scatter<T>(
 /// the single-batch case (`offsets` already absolute into `src`),
 /// which is what the FFAI masked-cache-update path needs.
 #[kernel]
-pub fn mt_masked_scatter<T>(
+pub fn ffai_masked_scatter<T>(
     mask: Tensor<u32>,
     offsets: Tensor<u32>,
     src: Tensor<T>,
@@ -132,13 +132,13 @@ pub fn mt_masked_scatter<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_gather_front, mt_masked_scatter, mt_scatter};
+    use super::{ffai_gather_front, ffai_masked_scatter, ffai_scatter};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_gather_front(dt: DType) -> TestSetup {
+    fn test_ffai_gather_front(dt: DType) -> TestSetup {
         let (n_src, n_out, w) = (5usize, 3usize, 4usize);
         let src: Vec<f32> = (0..n_src * w).map(|i| i as f32 * 0.1 - 1.0).collect();
         let src_dt = unpack_f32(&pack_f32(&src, dt), dt);
@@ -146,7 +146,7 @@ pub mod kernel_tests {
         let n_elems = n_out * w;
         let expected: Vec<f32> =
             (0..n_elems).map(|idx| src_dt[rows[idx / w] as usize * w + idx % w]).collect();
-        TestSetup::new(mt_gather_front::kernel_ir_for(dt))
+        TestSetup::new(ffai_gather_front::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::from_vec("indices", u32_bytes(&rows), DType::U32))
             .input(TestBuffer::zeros("out", n_elems, dt))
@@ -157,7 +157,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_scatter(dt: DType) -> TestSetup {
+    fn test_ffai_scatter(dt: DType) -> TestSetup {
         let (n_upd, n_out, w) = (3usize, 5usize, 4usize);
         let updates: Vec<f32> = (0..n_upd * w).map(|i| i as f32 * 0.1 - 0.5).collect();
         let upd_dt = unpack_f32(&pack_f32(&updates, dt), dt);
@@ -167,7 +167,7 @@ pub mod kernel_tests {
         for idx in 0..n_elems {
             expected[rows[idx / w] as usize * w + idx % w] = upd_dt[idx];
         }
-        TestSetup::new(mt_scatter::kernel_ir_for(dt))
+        TestSetup::new(ffai_scatter::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("updates", pack_f32(&updates, dt), dt))
             .input(TestBuffer::from_vec("indices", u32_bytes(&rows), DType::U32))
             .input(TestBuffer::zeros("out", n_out * w, dt))
@@ -178,7 +178,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_masked_scatter(dt: DType) -> TestSetup {
+    fn test_ffai_masked_scatter(dt: DType) -> TestSetup {
         let n_elems = 64usize;
         let src: Vec<f32> = (0..n_elems).map(|i| i as f32 * 0.05 - 1.5).collect();
         let src_dt = unpack_f32(&pack_f32(&src, dt), dt);
@@ -188,7 +188,7 @@ pub mod kernel_tests {
         let expected: Vec<f32> = (0..n_elems)
             .map(|i| if mask[i] != 0 { src_dt[offsets[i] as usize] } else { 0.0 })
             .collect();
-        TestSetup::new(mt_masked_scatter::kernel_ir_for(dt))
+        TestSetup::new(ffai_masked_scatter::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("mask", u32_bytes(&mask), DType::U32))
             .input(TestBuffer::from_vec("offsets", u32_bytes(&offsets), DType::U32))
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
@@ -203,7 +203,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_gather_front, mt_masked_scatter, mt_scatter};
+    use super::{ffai_gather_front, ffai_masked_scatter, ffai_scatter};
 
     fn u32_bytes(v: impl Iterator<Item = u32>) -> Vec<u8> {
         v.flat_map(|x| x.to_le_bytes()).collect()
@@ -213,7 +213,7 @@ pub mod kernel_benches {
     fn bench_gather_front(dt: DType) -> BenchSetup {
         let (n_src, n_out, w) = (8192usize, 8192usize, 256usize);
         let n_elems = n_out * w;
-        BenchSetup::new(mt_gather_front::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gather_front::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("src", n_src * w, dt))
             .buffer(BenchBuffer::from_vec(
                 "indices",
@@ -231,7 +231,7 @@ pub mod kernel_benches {
     fn bench_scatter(dt: DType) -> BenchSetup {
         let (n_upd, n_out, w) = (8192usize, 8192usize, 256usize);
         let n_elems = n_upd * w;
-        BenchSetup::new(mt_scatter::kernel_ir_for(dt))
+        BenchSetup::new(ffai_scatter::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("updates", n_elems, dt))
             .buffer(BenchBuffer::from_vec(
                 "indices",
@@ -248,7 +248,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_masked_scatter(dt: DType) -> BenchSetup {
         let n_elems = 8 * 1024 * 1024usize;
-        BenchSetup::new(mt_masked_scatter::kernel_ir_for(dt))
+        BenchSetup::new(ffai_masked_scatter::kernel_ir_for(dt))
             .buffer(BenchBuffer::from_vec(
                 "mask",
                 u32_bytes((0..n_elems).map(|i| (i % 2) as u32)),

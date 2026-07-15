@@ -30,7 +30,7 @@ use ffai_kernels::kernel;
 
 /// mHC collapse — `x[d, t] = sum_c pre[t, c] * H[d, c, t]`.
 #[kernel]
-pub fn mt_mhc_collapse<T>(
+pub fn ffai_mhc_collapse<T>(
     state: Tensor<T>,
     pre: Tensor<f32>,
     mut out: Tensor<T>,
@@ -63,7 +63,7 @@ pub fn mt_mhc_collapse<T>(
 /// allocated output buffer in `state`. `comb` layout matches the
 /// split kernel output: `comb[t * n_hc * n_hc + dst * n_hc + src]`.
 #[kernel]
-pub fn mt_mhc_expand<T>(
+pub fn ffai_mhc_expand<T>(
     block_out: Tensor<T>,
     post: Tensor<f32>,
     comb: Tensor<f32>,
@@ -98,7 +98,7 @@ pub fn mt_mhc_expand<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_mhc_collapse, mt_mhc_expand};
+    use super::{ffai_mhc_collapse, ffai_mhc_expand};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn cpu_collapse(
@@ -128,7 +128,7 @@ pub mod kernel_tests {
         let pre: Vec<f32> = (0..n_tokens * n_hc).map(|i| (i as f32 - 4.0) * 0.2 + 0.5).collect();
         let state_dt = unpack_f32(&pack_f32(&state, dt), dt);
         let expected = cpu_collapse(&state_dt, &pre, hidden_dim, n_hc, n_tokens);
-        TestSetup::new(mt_mhc_collapse::kernel_ir_for(dt))
+        TestSetup::new(ffai_mhc_collapse::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("state", pack_f32(&state, dt), dt))
             .input(TestBuffer::from_vec("pre", pack_f32(&pre, DType::F32), DType::F32))
             .input(TestBuffer::zeros("out", n_tokens * hidden_dim, dt))
@@ -184,7 +184,7 @@ pub mod kernel_tests {
         let residual_dt = unpack_f32(&pack_f32(&residual, dt), dt);
         let expected =
             cpu_expand(&block_out_dt, &post, &comb, &residual_dt, hidden_dim, n_hc, n_tokens);
-        TestSetup::new(mt_mhc_expand::kernel_ir_for(dt))
+        TestSetup::new(ffai_mhc_expand::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("block_out", pack_f32(&block_out, dt), dt))
             .input(TestBuffer::from_vec("post", pack_f32(&post, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("comb", pack_f32(&comb, DType::F32), DType::F32))
@@ -207,12 +207,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_mhc_collapse, mt_mhc_expand};
+    use super::{ffai_mhc_collapse, ffai_mhc_expand};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_collapse(dt: DType) -> BenchSetup {
         let (hidden_dim, n_hc, n_tokens) = (4096usize, 4usize, 1usize);
-        BenchSetup::new(mt_mhc_collapse::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mhc_collapse::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("state", n_tokens * n_hc * hidden_dim, dt))
             .buffer(BenchBuffer::random("pre", n_tokens * n_hc, DType::F32))
             .buffer(BenchBuffer::zeros("out", n_tokens * hidden_dim, dt).output())
@@ -229,7 +229,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_expand(dt: DType) -> BenchSetup {
         let (hidden_dim, n_hc, n_tokens) = (4096usize, 4usize, 1usize);
-        BenchSetup::new(mt_mhc_expand::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mhc_expand::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("block_out", n_tokens * hidden_dim, dt))
             .buffer(BenchBuffer::random("post", n_tokens * n_hc, DType::F32))
             .buffer(BenchBuffer::random("comb", n_tokens * n_hc * n_hc, DType::F32))

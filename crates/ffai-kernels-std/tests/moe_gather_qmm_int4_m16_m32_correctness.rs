@@ -1,17 +1,17 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `mt_moe_gather_qmm_int4_m16` and
-//! `mt_moe_gather_qmm_int4_m32` — short-prefill MoE GEMV with int4
+//! GPU correctness for `ffai_moe_gather_qmm_int4_m16` and
+//! `ffai_moe_gather_qmm_int4_m32` — short-prefill MoE GEMV with int4
 //! quantized weights and 16/32-row-per-TG batching.
 //!
-//! Both variants are correctness-compared against `mt_moe_gather_qmm_int4_m8`
+//! Both variants are correctness-compared against `ffai_moe_gather_qmm_int4_m8`
 //! (which is already tested): same expert routing + int4 dequant, just
 //! handling more output rows per TG. Any difference in routing or dequant
 //! logic would surface as a divergence between m8 and m16/m32.
 //!
 //! Grid:
-//!   `mt_moe_gather_qmm_int4_m16`: `[m_out/16, t_rows, 1]`, TPG = 32 (1 SG).
-//!   `mt_moe_gather_qmm_int4_m32`: `[m_out/32, t_rows, 1]`, TPG = 32 (1 SG).
+//!   `ffai_moe_gather_qmm_int4_m16`: `[m_out/16, t_rows, 1]`, TPG = 32 (1 SG).
+//!   `ffai_moe_gather_qmm_int4_m32`: `[m_out/32, t_rows, 1]`, TPG = 32 (1 SG).
 //!
 //! Tolerances: cosine ≥ 0.999 vs CPU oracle; max abs Δ < 5e-4 vs m8.
 
@@ -25,9 +25,9 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::moe_gather_qmm::{
-    mt_moe_gather_qmm_int4_m8,
-    mt_moe_gather_qmm_int4_m16,
-    mt_moe_gather_qmm_int4_m32,
+    ffai_moe_gather_qmm_int4_m8,
+    ffai_moe_gather_qmm_int4_m16,
+    ffai_moe_gather_qmm_int4_m32,
 };
 
 // ── CPU oracle ───────────────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ fn run_case_m16(n_experts: usize, t_rows: usize, k_in: usize, m_out: usize, grou
 
     let _g = gpu_lock();
     let y_m8 = run_kernel(
-        mt_moe_gather_qmm_int4_m8::kernel_ir_for,
+        ffai_moe_gather_qmm_int4_m8::kernel_ir_for,
         m_out / 8,
         &x,
         &weight_packed,
@@ -231,7 +231,7 @@ fn run_case_m16(n_experts: usize, t_rows: usize, k_in: usize, m_out: usize, grou
         group_size,
     );
     let y_m16 = run_kernel(
-        mt_moe_gather_qmm_int4_m16::kernel_ir_for,
+        ffai_moe_gather_qmm_int4_m16::kernel_ir_for,
         m_out / 16,
         &x,
         &weight_packed,
@@ -280,7 +280,7 @@ fn run_case_m32(n_experts: usize, t_rows: usize, k_in: usize, m_out: usize, grou
 
     let _g = gpu_lock();
     let y_m8 = run_kernel(
-        mt_moe_gather_qmm_int4_m8::kernel_ir_for,
+        ffai_moe_gather_qmm_int4_m8::kernel_ir_for,
         m_out / 8,
         &x,
         &weight_packed,
@@ -294,7 +294,7 @@ fn run_case_m32(n_experts: usize, t_rows: usize, k_in: usize, m_out: usize, grou
         group_size,
     );
     let y_m32 = run_kernel(
-        mt_moe_gather_qmm_int4_m32::kernel_ir_for,
+        ffai_moe_gather_qmm_int4_m32::kernel_ir_for,
         m_out / 32,
         &x,
         &weight_packed,
@@ -321,7 +321,7 @@ fn run_case_m32(n_experts: usize, t_rows: usize, k_in: usize, m_out: usize, grou
     assert!(max_diff_vs_m8 < 5e-4, "m32 vs m8: max diff = {max_diff_vs_m8:.2e}");
 }
 
-// ── mt_moe_gather_qmm_int4_m16 tests ─────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4_m16 tests ─────────────────────────────────────────
 
 #[test]
 fn moe_gather_qmm_int4_m16_f32_small() {
@@ -341,7 +341,7 @@ fn moe_gather_qmm_int4_m16_f32_wide_m() {
     run_case_m16(4, 16, 256, 128, 64);
 }
 
-// ── mt_moe_gather_qmm_int4_m32 tests ─────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4_m32 tests ─────────────────────────────────────────
 
 #[test]
 fn moe_gather_qmm_int4_m32_f32_small() {

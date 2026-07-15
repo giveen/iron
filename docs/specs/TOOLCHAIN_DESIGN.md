@@ -128,7 +128,7 @@ Rules:
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  unary.rs                                         │  │
-│  │  #[kernel]      fn mt_exp<T>(…) { … }             │  │
+│  │  #[kernel]      fn ffai_exp<T>(…) { … }             │  │
 │  │  #[bench(…)]    fn exp_bench(dt) -> BenchSetup    │  │
 │  │  #[test_kernel] fn exp_test(dt)  -> TestSetup     │  │
 │  └───────────────────────────────────────────────────┘  │
@@ -188,7 +188,7 @@ default_tol = 1e-4
 
 ```rust
 #[kernel]
-pub fn mt_exp<T>(input: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_exp<T>(input: Tensor<T>, out: Tensor<T>) {
     let idx = program_id::<0>();
     store(out[idx], exp(load(input[idx])));
 }
@@ -197,7 +197,7 @@ pub fn mt_exp<T>(input: Tensor<T>, out: Tensor<T>) {
 That is all. No bench args, no dispatch class, no tolerance.
 
 The macro generates:
-- `mod mt_exp { pub fn kernel_ir_for(dt: DType) -> Kernel { … } }`
+- `mod ffai_exp { pub fn kernel_ir_for(dt: DType) -> Kernel { … } }`
 - A `KernelEntry` submitted to `ffai_kernels_core::inventory` for `ffaik build`/`inspect`
 
 ---
@@ -210,7 +210,7 @@ Bench logic lives in the user's crate, next to the kernel, as an ordinary functi
 #[bench(dtypes = [f32, f16, bf16])]
 fn exp_bench(dt: DType) -> BenchSetup {
     const N: usize = 64 << 20;
-    BenchSetup::new(mt_exp::kernel_ir_for(dt))
+    BenchSetup::new(ffai_exp::kernel_ir_for(dt))
         .buffer(BenchBuffer::random("input", N, dt))
         .buffer(BenchBuffer::zeros("out",    N, dt).output())
         .constexpr("n", N as u32)
@@ -304,7 +304,7 @@ fn exp_test(dt: DType) -> TestSetup {
     // runner handle dtype casting and element-wise comparison.
     let input = TestBuffer::random("input", N, dt);
     let expected = input.map_f32(f32::exp).rename("out");
-    TestSetup::new(mt_exp::kernel_ir_for(dt))
+    TestSetup::new(ffai_exp::kernel_ir_for(dt))
         .input(input)
         .expected(expected)
         .grid_1d(N, 256)
@@ -340,7 +340,7 @@ When `metal_reference()` returns `Some(MetalRef { .. })`, the runner:
 1. Compiles the reference `.metal` file via `xcrun metal`
 2. Allocates the same buffers
 3. Dispatches the reference kernel with the same inputs
-4. Compares GB/s (MT vs ref) and correctness
+4. Compares GB/s (FFAI vs ref) and correctness
 
 ```rust
 pub struct MetalRef {
@@ -348,7 +348,7 @@ pub struct MetalRef {
     pub metal_file: &'static str,
     /// Kernel function name inside the metal file.
     pub function: &'static str,
-    /// Constexprs to pass to the reference (may differ from MT spelling).
+    /// Constexprs to pass to the reference (may differ from FFAI spelling).
     pub constexprs: Vec<(String, ConstValue)>,
 }
 ```
@@ -359,7 +359,7 @@ Pass one via the `ref` key in `#[bench]`:
 #[bench(
     name   = "unary/exp",
     dtypes = [f32, f16, bf16],
-    ref    = MetalRef { metal_file: "metal/exp.metal", function: "mt_exp_ref", constexprs: vec![] },
+    ref    = MetalRef { metal_file: "metal/exp.metal", function: "ffai_exp_ref", constexprs: vec![] },
 )]
 fn exp_bench(dt: DType) -> BenchSetup { … }
 ```
@@ -379,9 +379,9 @@ The `tile-runner` binary writes newline-delimited JSON to stdout. The CLI reads 
   "type": "bench",
   "name": "unary/exp",
   "dtype": "f16",
-  "mt_gbps": 1234.5,
+  "ffai_gbps": 1234.5,
   "ref_gbps": 1189.2,    // null if no metal_reference
-  "mt_pct": 103.8,       // null if no ref
+  "ffai_pct": 103.8,       // null if no ref
   "correct": true,
   "min_us": 12.3,
   "mean_us": 12.8

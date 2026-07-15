@@ -7,7 +7,7 @@
 //! 3 weight roles on DSv4-Flash). The extract kernel reads 4 raw
 //! bytes from the on-disk 66-byte block layout, assembles one u32,
 //! and writes to the packed `qs_u32` staging buffer the existing
-//! `mt_gguf_dequant_iq2_xxs` kernel expects.
+//! `ffai_gguf_dequant_iq2_xxs` kernel expects.
 //!
 //! ## Block layout
 //!
@@ -34,7 +34,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gguf_iq2_xxs_extract_qs(
+pub fn ffai_gguf_iq2_xxs_extract_qs(
     raw_bytes: Tensor<u8>,
     mut qs_u32: Tensor<u32>,
     #[constexpr] n_blocks: u32,
@@ -57,11 +57,11 @@ pub fn mt_gguf_iq2_xxs_extract_qs(
 #[cfg(test)]
 pub mod kernel_tests {
 
-    use super::mt_gguf_iq2_xxs_extract_qs;
+    use super::ffai_gguf_iq2_xxs_extract_qs;
 
     #[test]
     fn codegen_extract_qs_smoke() {
-        let ir = mt_gguf_iq2_xxs_extract_qs::kernel_ir_for();
+        let ir = ffai_gguf_iq2_xxs_extract_qs::kernel_ir_for();
         assert!(!ir.body.ops.is_empty(), "kernel body emitted no ops");
         assert!(ir.params.iter().any(|p| p.name == "raw_bytes"), "missing raw_bytes");
         assert!(ir.params.iter().any(|p| p.name == "qs_u32"), "missing qs_u32");
@@ -71,13 +71,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gguf_iq2_xxs_extract_qs;
+    use super::ffai_gguf_iq2_xxs_extract_qs;
 
     #[bench(dtypes = [u32])]
     fn bench_extract_qs(_dt: DType) -> BenchSetup {
         let n = 4096 * 4096usize;
         let n_blocks = n / 256;
-        BenchSetup::new(mt_gguf_iq2_xxs_extract_qs::kernel_ir_for())
+        BenchSetup::new(ffai_gguf_iq2_xxs_extract_qs::kernel_ir_for())
             .buffer(BenchBuffer::random("raw_bytes", n_blocks * 66, DType::U8))
             .buffer(BenchBuffer::zeros("qs_u32", n_blocks * 16, DType::U32).output())
             .constexpr("n_blocks", n_blocks as u32)

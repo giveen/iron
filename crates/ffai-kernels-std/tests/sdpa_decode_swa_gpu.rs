@@ -8,7 +8,7 @@
 //! the dense path (`sink_end = 0, window_start = 0`) against the pre-SWA
 //! kernel's CPU naive reference within fp32 tolerance and the SWA bound split
 //! against a masked naive reference. (That coverage moved here from the
-//! former `sdpa_decode_gpu_correctness.rs`, deleted in #240.) This
+//! former `sdpa_decode_gpu_correctness.rs`, since deleted.) This
 //! file measures the resulting decode speedup at Qwen3-class GQA
 //! shapes and the long-context regimes where sliding window is
 //! actually deployed (industry SWA config: `window = 4096` over
@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, pack_bytes, ramp};
 use ffai_kernels::{Context, DispatchSpec, ResidentBuffer, core::ir::KernelMode};
-use ffai_kernels_std::kernels::sdpa::sdpa_decode::mt_sdpa_decode as sdpa_decode;
+use ffai_kernels_std::kernels::sdpa::sdpa_decode::ffai_sdpa_decode as sdpa_decode;
 
 // (n_q_heads, n_kv_heads, n_kv, window_size, sink_tokens). Qwen3-class
 // GQA shape (32 Q heads / 8 KV heads) at the long-context regimes where

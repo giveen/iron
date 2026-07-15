@@ -29,7 +29,7 @@
 //! …) emit their decode math inline in MSL. Their CPU correctness oracles call
 //! the [`dequant_q8_0`] / [`dequant_q2_k`] functions here (and the canonical
 //! [`q2_k_qpos`] index map), so the oracle can't silently drift from the kernel.
-//! That drift is exactly the class of bug fixed in PR #264 (a hand-rolled q2_k
+//! That drift is exactly the class of bug fixed here (a hand-rolled q2_k
 //! oracle used the wrong 2-bit byte layout and reported ~0.71 error against a
 //! *correct* kernel); routing every oracle through one shared decoder retires it.
 
@@ -152,7 +152,7 @@ pub fn dequant_q8_0(p: &PackedQ8_0) -> Vec<f32> {
 /// 16 consecutive `qs` bytes at a shared `jg·2` shift (the llama.cpp
 /// `dequantize_row_q2_K` order). The canonical scale index for output `i` is
 /// simply `i / 16`. This is the **one** definition the kernel, the quantizer,
-/// and the oracle all read — getting it wrong was the PR #264 bug.
+/// and the oracle all read — getting it wrong was the bug.
 pub fn q2_k_qpos(i: usize) -> (usize, u32) {
     let half = i / 128; // 0..1  → qs byte base half*32
     let yh = i % 128; // 0..127

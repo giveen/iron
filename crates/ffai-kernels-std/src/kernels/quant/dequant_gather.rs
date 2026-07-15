@@ -32,7 +32,7 @@
 //!
 //! ## Macro structure
 //!
-//! `mt_dequant_gather_kernel!` emits the entire `#[kernel] pub fn …`
+//! `ffai_dequant_gather_kernel!` emits the entire `#[kernel] pub fn …`
 //! at module scope.  The compiler expands the outer macro before the
 //! `#[kernel]` proc-macro runs, so the body parser sees concrete tokens
 //! with `$bits` already substituted.  Embedding the body inside an *inner*
@@ -43,7 +43,7 @@ use ffai_kernels::kernel;
 
 /// Dequantizing token-gather kernel — variable bit-widths (2, 3, 4, 5, 6, 8).
 ///
-/// Produces kernels: `mt_dequant_gather_int2`, `_int3`, `_int4`, `_int5`,
+/// Produces kernels: `ffai_dequant_gather_int2`, `_int3`, `_int4`, `_int5`,
 /// `_int6`, `_int8`.
 ///
 /// Uses a straddle-aware two-word bit-stream read that handles every width
@@ -53,7 +53,7 @@ use ffai_kernels::kernel;
 ///
 /// Grid: Elementwise, one thread per `(token, d)` output element.
 #[kernel(variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]
-pub fn mt_dequant_gather<T>(
+pub fn ffai_dequant_gather<T>(
     weight: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -94,7 +94,7 @@ pub fn mt_dequant_gather<T>(
     store(out[idx], w_real.cast::<T>());
 }
 
-/// New-syntax correctness tests for the `mt_dequant_gather_int{2,3,4,5,6,8}`
+/// New-syntax correctness tests for the `ffai_dequant_gather_int{2,3,4,5,6,8}`
 /// quantized-embedding-gather family. Grid3D, one thread per output element
 /// (`n_tokens * hidden` threads via `grid_1d` ceil-div).
 ///
@@ -142,7 +142,7 @@ pub mod kernel_tests {
     /// CPU oracle: per `(token, d)`, gather row `indices[token]`, unpack the
     /// `bits`-wide code at bit offset `d*bits`, dequantize via `q*scale+bias`.
     #[allow(clippy::too_many_arguments)]
-    fn mt_dequant_gather_oracle(
+    fn ffai_dequant_gather_oracle(
         weight: &[u32],
         scales: &[f32],
         biases: &[f32],
@@ -200,7 +200,7 @@ pub mod kernel_tests {
         let n_tokens = indices.len();
         let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
         let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
-        let expected = mt_dequant_gather_oracle(&w, &s, &b, &indices, hidden, group_size, bits);
+        let expected = ffai_dequant_gather_oracle(&w, &s, &b, &indices, hidden, group_size, bits);
         TestSetup::new(kernel)
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("weight", u32_bytes(&w), DType::U32))
@@ -218,7 +218,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 1e-1],
                   variants(BITS = [2, 4, 8], suffix = "int{BITS}"))]
     fn test_dequant_gather_pow2(dt: DType) -> TestSetup {
-        gather_setup(mt_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 256, 64, dt)
+        gather_setup(ffai_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 256, 64, dt)
     }
 
     // Odd widths — hidden*BITS must be a multiple of 32 (hidden=64, group_size=32).
@@ -226,7 +226,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 1e-1],
                   variants(BITS = [3, 5, 6], suffix = "int{BITS}"))]
     fn test_dequant_gather_odd(dt: DType) -> TestSetup {
-        gather_setup(mt_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 64, 32, dt)
+        gather_setup(ffai_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 64, 32, dt)
     }
 }
 
@@ -260,6 +260,6 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]
     fn bench_dequant_gather(dt: DType) -> BenchSetup {
-        gb(mt_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 4096, 64, dt)
+        gb(ffai_dequant_gather_intBITS::kernel_ir_for(dt), BITS, 4096, 64, dt)
     }
 }

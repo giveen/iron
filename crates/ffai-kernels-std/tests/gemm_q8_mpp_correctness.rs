@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_gemm_q8_mpp` and `mt_grouped_gemm_q8_mpp`
+//! GPU correctness for `ffai::ffai_gemm_q8_mpp` and `ffai_grouped_gemm_q8_mpp`
 //! — the cooperative-tensor MMA Q8_0 GEMMs (dense + grouped). Oracle: triple
 //! loop with the SAME Q8 dequant as `gemm_q8_correctness`; the MMA kernels
 //! differ only in the matmul structure (64×64×32 coop_tile vs scalar). Both
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::gemm::gemm_q8_mpp::{mt_gemm_q8_mpp, mt_grouped_gemm_q8_mpp};
+use ffai_kernels_std::kernels::gemm::gemm_q8_mpp::{ffai_gemm_q8_mpp, ffai_grouped_gemm_q8_mpp};
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -83,7 +83,7 @@ fn gemm_q8_mpp_matches_oracle() {
     buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut kernel = mt_gemm_q8_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_gemm_q8_mpp::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let gx = (out_dim as u32).div_ceil(64) as usize;
     let gy = (n_rows as u32).div_ceil(64) as usize;
@@ -151,7 +151,7 @@ fn grouped_gemm_q8_mpp_matches_oracle() {
     buffers.insert("rows_per_group".into(), (rows_per_group as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut kernel = mt_grouped_gemm_q8_mpp::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_grouped_gemm_q8_mpp::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let gx = (out_dim as u32).div_ceil(64) as usize;
     let gy = (n_rows as u32).div_ceil(64) as usize;

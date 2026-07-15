@@ -5,11 +5,11 @@
 //! Catches two classes of regression without touching the GPU:
 //!
 //! 1. **Silent missing-module / undefined symbol** — a downstream
-//!    consumer hits a Metal link-time `undefined symbol: mt_xyz_smoke`
+//!    consumer hits a Metal link-time `undefined symbol: ffai_xyz_smoke`
 //!    error because the kernel was referenced from one place but the
 //!    source module wasn't compiled in (e.g. forgotten `mod foo;`
 //!    declaration). The codegen step here scans every emitted MSL for
-//!    `mt_*` symbols and asserts each one is either:
+//!    `ffai_*` symbols and asserts each one is either:
 //!    a. The name of another registered kernel (cross-kernel call),
 //!    b. A DSL builtin emitted by the codegen preamble, or
 //!    c. Defined locally in the same emit (template/inline function).
@@ -17,8 +17,8 @@
 //! 2. **Empty / unregistered kernel** — every `#[kernel] pub fn name`
 //!    in `crates/ffai-kernels-std/src/kernels/**` should have a matching
 //!    `inventory::submit!` for a BenchSpec that references its
-//!    `kernel_ir_for` function. PR #19 silently emptied a kernel body
-//!    via macro refactor; the inverse failure (kernel defined but
+//!    `kernel_ir_for` function. A proc-macro refactor once silently
+//!    emptied a kernel body; the inverse failure (kernel defined but
 //!    never registered) would slip through the build with no GPU
 //!    dispatch ever happening.
 //!
@@ -45,23 +45,23 @@ use ffai_kernels::codegen::{MslGenerator, msl::MslConfig};
 // Importing them from `ffai_kernels_core` would yield empty registries here.
 use ffai_kernels_std::{all_benches, all_kernels};
 
-// ── DSL builtin whitelist (mt_* and __mt_* symbols emitted by codegen) ──
+// ── DSL builtin whitelist (ffai_* and __ffai_* symbols emitted by codegen) ──
 //
 // Confirmed against `crates/ffai-kernels-codegen/src/msl/preamble.rs` and
-// `crates/ffai-kernels-core/src/ir.rs` — these are the only `mt_*` /
-// `__mt_*` identifiers the codegen ever emits independently of a
+// `crates/ffai-kernels-core/src/ir.rs` — these are the only `ffai_*` /
+// `__ffai_*` identifiers the codegen ever emits independently of a
 // kernel-registered name. If the codegen grows a new helper, add it
-// here; if it grows a new mt_* helper that wasn't intentional, this
+// here; if it grows a new ffai_* helper that wasn't intentional, this
 // test surfaces the omission.
 const DSL_BUILTINS: &[&str] = &[
-    "mt_silu",
-    "mt_gelu",
-    "mt_relu",
-    "mt_sigmoid",
-    "mt_erf_impl",
-    "mt_erfinv_impl",
-    "mt_expm1_impl",
-    "__mt_simd_product",
+    "ffai_silu",
+    "ffai_gelu",
+    "ffai_relu",
+    "ffai_sigmoid",
+    "ffai_erf_impl",
+    "ffai_erfinv_impl",
+    "ffai_expm1_impl",
+    "__ffai_simd_product",
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -88,15 +88,15 @@ fn walk_rs_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Extract `mt_X` / `__mt_X` identifiers from a string. Returns each
+/// Extract `ffai_X` / `__ffai_X` identifiers from a string. Returns each
 /// match as a `String`. Excludes substring-of-larger-ident matches by
 /// requiring word boundaries on both sides.
-fn extract_mt_symbols(src: &str) -> Vec<String> {
+fn extract_ffai_symbols(src: &str) -> Vec<String> {
     let mut out = Vec::new();
     let bytes = src.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        // Skip ahead to the next 'm' that could start "mt_" or "__mt_".
+        // Skip ahead to the next 'm' that could start "ffai_" or "__ffai_".
         let start = i;
         let c = bytes[i];
         let is_ident_char = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
@@ -109,14 +109,14 @@ fn extract_mt_symbols(src: &str) -> Vec<String> {
         while j < bytes.len() && is_ident_char(bytes[j]) {
             j += 1;
         }
-        // Identifier is bytes[start..j]; check it begins with "mt_" or
-        // "__mt_". We require the *whole* identifier match the pattern
+        // Identifier is bytes[start..j]; check it begins with "ffai_" or
+        // "__ffai_". We require the *whole* identifier match the pattern
         // (no leading alphanumerics), enforced by requiring `start` is
         // either 0 or preceded by a non-ident byte.
         let prev_is_boundary = start == 0 || !is_ident_char(bytes[start - 1]);
         if prev_is_boundary {
             let ident = &src[start..j];
-            if (ident.starts_with("mt_") || ident.starts_with("__mt_")) && ident.len() > 3 {
+            if (ident.starts_with("ffai_") || ident.starts_with("__ffai_")) && ident.len() > 3 {
                 out.push(ident.to_string());
             }
         }
@@ -174,7 +174,7 @@ fn collect_locally_defined(msl: &str) -> HashSet<String> {
 }
 
 /// Strip C-style line comments (`// ...`) from a source string. Used so
-/// `extract_mt_symbols` doesn't pick up symbol names mentioned in
+/// `extract_ffai_symbols` doesn't pick up symbol names mentioned in
 /// doc-comments / inline comments. Block comments are not handled
 /// (rare in the kernel source + a doc-block mention is itself a
 /// boundary signal we'd want to surface anyway).
@@ -256,13 +256,13 @@ fn every_registered_benchspec_codegens() {
     );
 }
 
-// ── Test 2: no undefined `mt_*` / `__mt_*` symbols in emitted MSL ──────
+// ── Test 2: no undefined `ffai_*` / `__ffai_*` symbols in emitted MSL ──────
 
 #[test]
-fn no_undefined_mt_symbols_in_emitted_msl() {
+fn no_undefined_ffai_symbols_in_emitted_msl() {
     // Build set of known kernel names from the registry. all_kernels()
     // carries every #[kernel] symbol (including cross-kernel-call callees
-    // that have no #[bench]), which is exactly the set a `mt_*` reference
+    // that have no #[bench]), which is exactly the set a `ffai_*` reference
     // may legitimately resolve to.
     let kernel_names: HashSet<String> = all_kernels().map(|e| e.name().to_string()).collect();
     assert!(!kernel_names.is_empty(), "inventory empty — link issue?");
@@ -282,7 +282,7 @@ fn no_undefined_mt_symbols_in_emitted_msl() {
             };
 
             let local_defs = collect_locally_defined(&msl);
-            let symbols = extract_mt_symbols(&msl);
+            let symbols = extract_ffai_symbols(&msl);
             let mut seen: HashSet<String> = HashSet::new();
             for sym in symbols {
                 if !seen.insert(sym.clone()) {
@@ -322,7 +322,7 @@ fn no_undefined_mt_symbols_in_emitted_msl() {
 #[test]
 fn kernel_annotations_have_matching_inventory_submit() {
     // Collect kernel-named registry entries (kernel_name → matched-via-name)
-    // PLUS kernel_ir function paths (e.g. `mt_softmax_categorical_sample::kernel_ir_for`)
+    // PLUS kernel_ir function paths (e.g. `ffai_softmax_categorical_sample::kernel_ir_for`)
     // so we can match either form. The macro expands `#[kernel]` to
     // give each function a `kernel_ir_for(dt) -> Kernel` associated
     // function inside a module of the same name; `inventory::submit!`
@@ -395,7 +395,7 @@ fn kernel_annotations_have_matching_inventory_submit() {
     // source file. The first check is exact; the second is a
     // static string-match fallback for the rare case where the
     // registered `kernel_name` is monomorphized off the original
-    // (e.g. `mt_argmax_f32` registers but the source fn is `mt_argmax`).
+    // (e.g. `ffai_argmax_f32` registers but the source fn is `ffai_argmax`).
     let mut errors: Vec<String> = Vec::new();
     for (name, path) in &annotated {
         if registered_kernel_names.contains(name) {

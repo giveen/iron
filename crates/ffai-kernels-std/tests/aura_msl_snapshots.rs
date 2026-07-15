@@ -32,12 +32,15 @@ use ffai_kernels::{
     core::{dtype::DType, ir::KernelMode},
 };
 use ffai_kernels_std::kernels::{
-    quant::{aura_dequant_rotated::mt_aura_dequant_rotated_int4, aura_encode::mt_aura_encode_int4},
+    quant::{
+        aura_dequant_rotated::ffai_aura_dequant_rotated_int4,
+        aura_encode::ffai_aura_encode_int4,
+    },
     sdpa::{
-        aura_flash_p1::mt_aura_flash_p1_kb4_vb2_d128,
-        aura_flash_pass2::mt_aura_flash_pass2_d128,
-        aura_score::mt_aura_score_int4,
-        aura_value::mt_aura_value_int4,
+        aura_flash_p1::ffai_aura_flash_p1_kb4_vb2_d128,
+        aura_flash_pass2::ffai_aura_flash_pass2_d128,
+        aura_score::ffai_aura_score_int4,
+        aura_value::ffai_aura_value_int4,
     },
 };
 use insta::assert_snapshot;
@@ -54,51 +57,53 @@ fn aura_msl(kernel_ir: ffai_kernels::core::ir::Kernel, mode: KernelMode) -> Stri
         .expect("AURA kernel must codegen cleanly")
 }
 
-/// `mt_aura_encode` — fused L2-norm + rotation + Lloyd-Max quantize +
+/// `ffai_aura_encode` — fused L2-norm + rotation + Lloyd-Max quantize +
 /// bit-pack. Reduction mode (`simd_sum` over the rotated coordinates).
 #[test]
-fn mt_aura_encode_int4_f32_msl() {
-    let msl = aura_msl(mt_aura_encode_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
+fn ffai_aura_encode_int4_f32_msl() {
+    let msl = aura_msl(ffai_aura_encode_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
     assert_snapshot!(msl);
 }
 
-/// `mt_aura_dequant_rotated` — bulk unpack + de-rotate of a packed AURA
+/// `ffai_aura_dequant_rotated` — bulk unpack + de-rotate of a packed AURA
 /// K/V slab. Grid3D mode (one thread per packed word).
 #[test]
-fn mt_aura_dequant_rotated_int4_f32_msl() {
-    let msl = aura_msl(mt_aura_dequant_rotated_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+fn ffai_aura_dequant_rotated_int4_f32_msl() {
+    let msl =
+        aura_msl(ffai_aura_dequant_rotated_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 
-/// `mt_aura_score` — per-token Q·K score against the packed AURA cache.
+/// `ffai_aura_score` — per-token Q·K score against the packed AURA cache.
 /// Reduction mode.
 #[test]
-fn mt_aura_score_int4_f32_msl() {
-    let msl = aura_msl(mt_aura_score_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
+fn ffai_aura_score_int4_f32_msl() {
+    let msl = aura_msl(ffai_aura_score_int4::kernel_ir_for(DType::F32), KernelMode::Reduction);
     assert_snapshot!(msl);
 }
 
-/// `mt_aura_value` — softmax-weighted accumulation of the packed V cache.
+/// `ffai_aura_value` — softmax-weighted accumulation of the packed V cache.
 /// Grid3D mode.
 #[test]
-fn mt_aura_value_int4_f32_msl() {
-    let msl = aura_msl(mt_aura_value_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+fn ffai_aura_value_int4_f32_msl() {
+    let msl = aura_msl(ffai_aura_value_int4::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 
-/// `mt_aura_flash_p1` — flash-attention pass 1 over the packed cache
+/// `ffai_aura_flash_p1` — flash-attention pass 1 over the packed cache
 /// (kb4 / vb2 / d128 recipe). Grid3D mode.
 #[test]
-fn mt_aura_flash_p1_kb4_vb2_d128_f32_msl() {
+fn ffai_aura_flash_p1_kb4_vb2_d128_f32_msl() {
     let msl =
-        aura_msl(mt_aura_flash_p1_kb4_vb2_d128::kernel_ir_for(DType::F32), KernelMode::Grid3D);
+        aura_msl(ffai_aura_flash_p1_kb4_vb2_d128::kernel_ir_for(DType::F32), KernelMode::Grid3D);
     assert_snapshot!(msl);
 }
 
-/// `mt_aura_flash_pass2` — flash-attention pass 2 reduction (d128 recipe).
+/// `ffai_aura_flash_pass2` — flash-attention pass 2 reduction (d128 recipe).
 /// Reduction mode; storage in bf16, online softmax in fp32.
 #[test]
-fn mt_aura_flash_pass2_d128_bf16_msl() {
-    let msl = aura_msl(mt_aura_flash_pass2_d128::kernel_ir_for(DType::BF16), KernelMode::Reduction);
+fn ffai_aura_flash_pass2_d128_bf16_msl() {
+    let msl =
+        aura_msl(ffai_aura_flash_pass2_d128::kernel_ir_for(DType::BF16), KernelMode::Reduction);
     assert_snapshot!(msl);
 }

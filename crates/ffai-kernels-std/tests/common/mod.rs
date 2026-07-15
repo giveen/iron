@@ -173,7 +173,7 @@ pub fn naive_sdpa_swa_f32(
 /// Q layout `[n_q_heads, q_len, head_dim]`, K/V `[n_kv_heads, k_len, head_dim]`,
 /// out `[n_q_heads, q_len, head_dim]`. For each Q row `qi` in `0..q_len`, the
 /// attended KV range is `[0, q_len_off + qi + 1)` — the same mask the
-/// `mt_sdpa_prefill_mma` kernel applies via
+/// `ffai_sdpa_prefill_mma` kernel applies via
 /// `q_abs = q_tile_first + fm + q_len_off`. With `q_len_off = k_len - q_len`,
 /// this is the standard chunked-prefill / speculative-decode-verify pattern.
 /// GQA via `kv_head = q_head / (n_q_heads / n_kv_heads)`.
@@ -291,8 +291,8 @@ pub fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Naive RMSNorm reference: `out = x * w / sqrt(mean(x²) + eps)`.
-/// Was used by the legacy `tests/rms_norm_gpu_correctness.rs` (removed in
-/// #240). f32 throughout.
+/// Was used by the legacy `tests/rms_norm_gpu_correctness.rs` (since
+/// removed). f32 throughout.
 pub fn naive_rms_norm_f32(x: &[f32], w: &[f32], n: usize, eps: f32) -> Vec<f32> {
     assert_eq!(x.len() % n, 0, "x len must be multiple of row width n");
     assert_eq!(w.len(), n, "w length must equal row width n");

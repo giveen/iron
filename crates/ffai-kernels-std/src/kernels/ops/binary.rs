@@ -11,55 +11,55 @@ pub fn vector_add<T>(a: Tensor<T>, b: Tensor<T>, c: Tensor<T>) {
 }
 
 #[kernel]
-pub fn mt_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], load(a[idx]) * load(b[idx]));
 }
 
 #[kernel]
-pub fn mt_sub<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sub<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], load(a[idx]) - load(b[idx]));
 }
 
 #[kernel]
-pub fn mt_div<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_div<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], load(a[idx]) / load(b[idx]));
 }
 
 #[kernel]
-pub fn mt_max_elem<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_max_elem<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], max(load(a[idx]), load(b[idx])));
 }
 
 #[kernel]
-pub fn mt_min_elem<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_min_elem<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], min(load(a[idx]), load(b[idx])));
 }
 
 #[kernel]
-pub fn mt_pow<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_pow<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], pow(load(a[idx]), load(b[idx])));
 }
 
 #[kernel]
-pub fn mt_atan2<T>(y: Tensor<T>, x: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_atan2<T>(y: Tensor<T>, x: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], atan2(load(y[idx]), load(x[idx])));
 }
 
 #[kernel]
-pub fn mt_remainder<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_remainder<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], remainder(load(a[idx]), load(b[idx])));
 }
 
 #[kernel]
-pub fn mt_logaddexp<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_logaddexp<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], log(exp(load(a[idx])) + exp(load(b[idx]))));
 }
@@ -119,7 +119,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1e-2, 1e-1])]
     fn test_binary_mul(dt: DType) -> TestSetup {
         bin(
-            mt_mul::kernel_ir_for(dt),
+            ffai_mul::kernel_ir_for(dt),
             "out",
             &ramp(17, 0.05, -0.4, 512),
             &ramp(13, 0.04, -0.25, 512),
@@ -129,7 +129,7 @@ pub mod kernel_tests {
     }
 
     /// GPU-vs-GPU reference (`TestSetup::compare_against`, the harness's
-    /// ref_setup path): `mt_mul(a, b)` checked against `mt_div(a, 1/b)`
+    /// ref_setup path): `ffai_mul(a, b)` checked against `ffai_div(a, 1/b)`
     /// dispatched on the same device. `b` is power-of-two so the reciprocal
     /// is exact and both kernels must round identically — any disagreement
     /// is a dispatch/readback bug, not arithmetic. f32-only: the point is
@@ -141,13 +141,13 @@ pub mod kernel_tests {
         let a = ramp(17, 0.05, -0.4, n);
         let b: Vec<f32> = (0..n).map(|i| [0.5f32, 1.0, 2.0, 4.0][i % 4]).collect();
         let recip: Vec<f32> = b.iter().map(|&x| 1.0 / x).collect();
-        TestSetup::new(mt_mul::kernel_ir_for(dt))
+        TestSetup::new(ffai_mul::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
             .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
             .grid_1d(n, 256)
             .compare_against(
-                TestSetup::new(mt_div::kernel_ir_for(dt))
+                TestSetup::new(ffai_div::kernel_ir_for(dt))
                     .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
                     .input(TestBuffer::from_vec("b", pack_f32(&recip, dt), dt))
                     .input(TestBuffer::zeros("out", n, dt))
@@ -158,7 +158,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1e-2, 1e-1])]
     fn test_binary_sub(dt: DType) -> TestSetup {
         bin(
-            mt_sub::kernel_ir_for(dt),
+            ffai_sub::kernel_ir_for(dt),
             "out",
             &ramp(19, 0.07, -0.6, 512),
             &ramp(11, 0.05, -0.3, 512),
@@ -171,7 +171,7 @@ pub mod kernel_tests {
     fn test_binary_div(dt: DType) -> TestSetup {
         // b shifted away from zero.
         bin(
-            mt_div::kernel_ir_for(dt),
+            ffai_div::kernel_ir_for(dt),
             "out",
             &ramp(17, 0.06, -0.4, 512),
             &ramp(13, 0.08, 0.2, 512),
@@ -183,7 +183,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1e-2, 1e-1])]
     fn test_binary_max(dt: DType) -> TestSetup {
         bin(
-            mt_max_elem::kernel_ir_for(dt),
+            ffai_max_elem::kernel_ir_for(dt),
             "out",
             &ramp(17, 0.05, -0.4, 512),
             &ramp(13, 0.06, -0.35, 512),
@@ -195,7 +195,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1e-2, 1e-1])]
     fn test_binary_min(dt: DType) -> TestSetup {
         bin(
-            mt_min_elem::kernel_ir_for(dt),
+            ffai_min_elem::kernel_ir_for(dt),
             "out",
             &ramp(17, 0.05, -0.4, 512),
             &ramp(13, 0.06, -0.35, 512),
@@ -208,7 +208,7 @@ pub mod kernel_tests {
     fn test_binary_pow(dt: DType) -> TestSetup {
         // Base positive to avoid complex results.
         bin(
-            mt_pow::kernel_ir_for(dt),
+            ffai_pow::kernel_ir_for(dt),
             "out",
             &ramp(9, 0.1, 0.2, 256),
             &ramp(5, 0.4, 0.2, 256),
@@ -219,14 +219,14 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 2e-1])]
     fn test_binary_atan2(dt: DType) -> TestSetup {
-        // mt_atan2(y, x, out): first input is y. `bin` packs the first slice as "a"
+        // ffai_atan2(y, x, out): first input is y. `bin` packs the first slice as "a"
         // and the second as "b"; the kernel's params are named y/x, so bind by name.
         let y = ramp(17, 0.1, -0.8, 512);
         let x = ramp(11, 0.1, -0.5, 512);
         let y_dt = unpack_f32(&pack_f32(&y, dt), dt);
         let x_dt = unpack_f32(&pack_f32(&x, dt), dt);
         let expected: Vec<f32> = y_dt.iter().zip(&x_dt).map(|(&yy, &xx)| yy.atan2(xx)).collect();
-        TestSetup::new(mt_atan2::kernel_ir_for(dt))
+        TestSetup::new(ffai_atan2::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("y", pack_f32(&y, dt), dt))
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::zeros("out", 512, dt))
@@ -237,7 +237,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_binary_logaddexp(dt: DType) -> TestSetup {
         bin(
-            mt_logaddexp::kernel_ir_for(dt),
+            ffai_logaddexp::kernel_ir_for(dt),
             "out",
             &ramp(11, 0.3, -1.5, 512),
             &ramp(7, 0.4, -1.0, 512),
@@ -264,8 +264,8 @@ pub mod kernel_benches {
     /// checks FFAI Kernels and MLX agree. `tol_floor` lifts the tolerance for ops
     /// that legitimately diverge by > 1 ULP (`pow`/`atan2`/`logaddexp`).
     ///
-    /// `names` are the MT kernel's param names (vector_add uses a/b/c; atan2 uses
-    /// y/x/out; the rest a/b/out) so MT buffers bind correctly; the reference
+    /// `names` are the FFAI kernel's param names (vector_add uses a/b/c; atan2 uses
+    /// y/x/out; the rest a/b/out) so FFAI buffers bind correctly; the reference
     /// reuses `names[0]`/`names[1]` to share the same inputs.
     fn setup_ref(
         kernel: Kernel,
@@ -287,7 +287,7 @@ pub mod kernel_benches {
                     format!("vvn_{mlx_op}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/binary.metal")),
                 )
-                // a/b shared by name with the MT inputs above (placeholders).
+                // a/b shared by name with the FFAI inputs above (placeholders).
                 .buffer(BenchBuffer::zeros(names[0], n, dt))
                 .buffer(BenchBuffer::zeros(names[1], n, dt))
                 .buffer(BenchBuffer::zeros("out", n, dt).output())
@@ -304,46 +304,46 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mul(dt: DType) -> BenchSetup {
-        setup_ref(mt_mul::kernel_ir_for(dt), ["a", "b", "out"], dt, "Multiply", 0.0)
+        setup_ref(ffai_mul::kernel_ir_for(dt), ["a", "b", "out"], dt, "Multiply", 0.0)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sub(dt: DType) -> BenchSetup {
-        setup_ref(mt_sub::kernel_ir_for(dt), ["a", "b", "out"], dt, "Subtract", 0.0)
+        setup_ref(ffai_sub::kernel_ir_for(dt), ["a", "b", "out"], dt, "Subtract", 0.0)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_div(dt: DType) -> BenchSetup {
-        setup_ref(mt_div::kernel_ir_for(dt), ["a", "b", "out"], dt, "Divide", 0.0)
+        setup_ref(ffai_div::kernel_ir_for(dt), ["a", "b", "out"], dt, "Divide", 0.0)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_max(dt: DType) -> BenchSetup {
-        setup_ref(mt_max_elem::kernel_ir_for(dt), ["a", "b", "out"], dt, "Maximum", 0.0)
+        setup_ref(ffai_max_elem::kernel_ir_for(dt), ["a", "b", "out"], dt, "Maximum", 0.0)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_min(dt: DType) -> BenchSetup {
-        setup_ref(mt_min_elem::kernel_ir_for(dt), ["a", "b", "out"], dt, "Minimum", 0.0)
+        setup_ref(ffai_min_elem::kernel_ir_for(dt), ["a", "b", "out"], dt, "Minimum", 0.0)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_pow(dt: DType) -> BenchSetup {
-        setup_ref(mt_pow::kernel_ir_for(dt), ["a", "b", "out"], dt, "Power", 1e-4)
+        setup_ref(ffai_pow::kernel_ir_for(dt), ["a", "b", "out"], dt, "Power", 1e-4)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_atan2(dt: DType) -> BenchSetup {
-        setup_ref(mt_atan2::kernel_ir_for(dt), ["y", "x", "out"], dt, "ArcTan2", 1e-3)
+        setup_ref(ffai_atan2::kernel_ir_for(dt), ["y", "x", "out"], dt, "ArcTan2", 1e-3)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_remainder(dt: DType) -> BenchSetup {
-        setup_ref(mt_remainder::kernel_ir_for(dt), ["a", "b", "out"], dt, "Remainder", 1e-4)
+        setup_ref(ffai_remainder::kernel_ir_for(dt), ["a", "b", "out"], dt, "Remainder", 1e-4)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_logaddexp(dt: DType) -> BenchSetup {
-        setup_ref(mt_logaddexp::kernel_ir_for(dt), ["a", "b", "out"], dt, "LogAddExp", 1e-2)
+        setup_ref(ffai_logaddexp::kernel_ir_for(dt), ["a", "b", "out"], dt, "LogAddExp", 1e-2)
     }
 }

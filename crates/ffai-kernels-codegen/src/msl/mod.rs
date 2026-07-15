@@ -138,7 +138,7 @@ fn kernel_has_stride_reduce(kernel: &Kernel) -> bool {
 /// kind: the final step divides the simdgroup/threadgroup total by
 /// `float(lsize)` in both the fast and slow paths (see `reduce.rs`).
 /// Other reduce kinds (Sum/Max/Min/Product) lower to a bare
-/// `simd_*(value)` / `__mt_simd_product(value)` call with no `lsize`
+/// `simd_*(value)` / `__ffai_simd_product(value)` call with no `lsize`
 /// reference.
 fn kernel_has_reduce_mean(kernel: &Kernel) -> bool {
     let check = |ops: &[Op]| {
@@ -181,7 +181,7 @@ pub(super) fn kernel_reduce_uses_n_simd(kernel: &Kernel, config: &MslConfig) -> 
 /// (< 32-thread) threadgroup before it pins the GPU; it mirrors the in-kernel
 /// escape-hatch gate (uses the default, conservative config). A Reduction-mode
 /// kernel that neither reduces nor mentions `n_simd` — e.g. the per-thread
-/// `mt_hadamard_m*` matvecs dispatched at TPG = M < 32 — returns `false` and is
+/// `ffai_hadamard_m*` matvecs dispatched at TPG = M < 32 — returns `false` and is
 /// therefore free to run with a small threadgroup.
 pub fn kernel_uses_n_simd(kernel: &Kernel) -> bool {
     kernel_reduce_uses_n_simd(kernel, &MslConfig::default())
@@ -246,7 +246,7 @@ impl ReductionPreambleGates {
 // Signature gating for `uint simd_lane [[thread_index_in_simdgroup]]`
 // and `uint simd_group [[simdgroup_index_in_threadgroup]]` lives on
 // `KernelFeatures::needs_simd_lane` / `needs_simd_group` (see
-// `features.rs`).  Pre-#209/4 hand-rolled `kernel_needs_simd_*_attr`
+// `features.rs`).  Previously hand-rolled `kernel_needs_simd_*_attr`
 // predicates duplicated the work; the OpFlag layer now reflects actual
 // MSL identifier consumption directly.
 
@@ -508,7 +508,7 @@ impl MslGenerator {
         }
         // NOTE: SimdGroup2D mode emits simd_lane and simd_group inline above.
         // Other modes add them conditionally here.  `feat.needs_simd_*`
-        // now reflects actual MSL identifier consumption directly (post-#209/4):
+        // now reflects actual MSL identifier consumption directly:
         // the `needs_simd_lane`/`needs_simd_group` OpFlags live only on
         // `Op::SimdLaneId`/`Op::SimdGroupId`, plus the per-feature multi-op
         // cases (matmul / Reduce slow path) handled in `features.rs`.
@@ -907,7 +907,7 @@ mod tests {
         // drifting up to 1 ULP per cast. Tight-tolerance kernels (e.g.
         // rms_norm) fail Tile Bench quality with reinterpret on. Opt in
         // per kernel only where the drift is provably tolerable.
-        // Regression: PR #47 CI rms_norm bf16 ✗ at B=1024 N=4096.
+        // Regression: CI rms_norm bf16 ✗ at B=1024 N=4096.
         let mut k = Kernel::new("default_bf16_cast");
         k.body.push_op(Op::Const { value: 1 }, ValueId::new(0));
         k.body.push_op(Op::Cast { value: ValueId::new(0), dtype: DType::F32 }, ValueId::new(1));
@@ -975,8 +975,8 @@ mod tests {
         );
         sink(&mut k, ValueId::new(1));
         let msl = MslGenerator::default().generate(&k).unwrap();
-        assert!(msl.contains("mt_silu"), "silu helper function name");
-        assert!(msl.contains("inline T mt_silu"), "silu helper definition");
+        assert!(msl.contains("ffai_silu"), "silu helper function name");
+        assert!(msl.contains("inline T ffai_silu"), "silu helper definition");
     }
 
     #[test]
@@ -984,7 +984,7 @@ mod tests {
         // `silu(a) * b`: the fusion pass folds the Activation into an
         // `Op::FusedElementwise`, hiding the standalone `Op::Activation`.
         // Feature analysis must recurse into the fused chain so the
-        // `mt_silu` helper preamble is still emitted — otherwise the MSL
+        // `ffai_silu` helper preamble is still emitted — otherwise the MSL
         // calls an undeclared identifier and fails to compile.
         use ffai_kernels_core::{
             ir::{ActKind, BinOpKind, IndexExpr, Param},
@@ -1035,7 +1035,7 @@ mod tests {
         });
         let msl = MslGenerator::default().generate(&k).unwrap();
         assert!(
-            msl.contains("inline T mt_silu"),
+            msl.contains("inline T ffai_silu"),
             "fused silu must still emit the helper definition:\n{msl}"
         );
     }
@@ -1298,7 +1298,7 @@ mod tests {
     /// `Op::Reduce` with `Sum` lowers to a bare `simd_sum(value)` — no
     /// `lsize`.  Pre-fix, every Op::Reduce dragged `lsize` in
     /// unconditionally; this case ensures we don't over-emit on the
-    /// cheap path (`mt_rms_norm_small` etc.).
+    /// cheap path (`ffai_rms_norm_small` etc.).
     #[test]
     fn reduction_preamble_omits_lsize_for_simd_only_reduce_sum() {
         use ffai_kernels_core::ir::ReduceKind;
@@ -1432,7 +1432,7 @@ mod tests {
 
     /// `kernel_uses_n_simd` (the signal the runtime dispatch verifier consults)
     /// must distinguish freeze-prone kernels from the per-thread Reduction-mode
-    /// matvecs like `mt_hadamard_m*` that dispatch safely at TPG < 32.
+    /// matvecs like `ffai_hadamard_m*` that dispatch safely at TPG < 32.
     #[test]
     fn kernel_uses_n_simd_flags_only_freeze_prone_kernels() {
         use ffai_kernels_core::ir::ReduceKind;
@@ -1456,7 +1456,7 @@ mod tests {
         );
         assert!(super::kernel_uses_n_simd(&ident), "direct n_simd load → true");
 
-        // (c) Reduction-mode but a plain per-thread loop (mt_hadamard_m* shape):
+        // (c) Reduction-mode but a plain per-thread loop (ffai_hadamard_m* shape):
         // no reduce, no n_simd reference → false, so a TPG < 32 dispatch is
         // allowed and not falsely rejected.
         let mut plain = Kernel::new("h");

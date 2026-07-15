@@ -4,7 +4,7 @@
 //!
 //! PyTorch's `nn.GELU()` default (`approximate='none'`) — the activation the
 //! StyleTTS2 / Kokoro PLBERT (ALBERT) uses in every FFN. The existing
-//! `mt_gelu` is the tanh approximation; over PLBERT's 12 shared layers the
+//! `ffai_gelu` is the tanh approximation; over PLBERT's 12 shared layers the
 //! ~1e-3 per-element gap shifts the prosody predictor's (rounding-sensitive)
 //! durations, so the GPU front-end needs the exact form to match the CPU /
 //! mlx-audio reference.
@@ -18,7 +18,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gelu_erf<T>(input: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_gelu_erf<T>(input: Tensor<T>, out: Tensor<T>) {
     let i = program_id::<0>();
     let x = load(input[i]).cast::<f32>();
     // 0.5·x·(1 + erf(x · (1/√2))).
@@ -29,7 +29,7 @@ pub fn mt_gelu_erf<T>(input: Tensor<T>, out: Tensor<T>) {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gelu_erf;
+    use super::ffai_gelu_erf;
     use crate::utils::{pack_f32, unpack_f32};
 
     // erf via the Abramowitz-Stegun 7.1.26 approximation — only the test
@@ -57,7 +57,7 @@ pub mod kernel_tests {
             .iter()
             .map(|&x| 0.5 * x * (1.0 + erf_approx(x * std::f32::consts::FRAC_1_SQRT_2)))
             .collect();
-        TestSetup::new(mt_gelu_erf::kernel_ir_for(dt))
+        TestSetup::new(ffai_gelu_erf::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -70,12 +70,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gelu_erf;
+    use super::ffai_gelu_erf;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gelu_erf(dt: DType) -> BenchSetup {
         let n = 2048usize * 64usize;
-        BenchSetup::new(mt_gelu_erf::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gelu_erf::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())

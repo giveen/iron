@@ -1,13 +1,13 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Golden MSL snapshots for the steel / hadamard / quantized NAX
-//! kernels in PR #147.
+//! kernels.
 //!
-//! Per @0xClandestine's review on #147: "Would add a test that ensures
+//! Per @0xClandestine's review: "Would add a test that ensures
 //! generated output is as you would expect using this." These kernels
 //! are expressed entirely via the `CoopTile*` / DSL IR ops — no
 //! `Op::InlineMsl` — and the legacy GPU correctness tests under
-//! `tests/steel_*_nax_gpu_correctness.rs` (removed in #240) pinned numerical
+//! `tests/steel_*_nax_gpu_correctness.rs` (since removed) pinned numerical
 //! behaviour. The snapshots here pin the EMIT PATH: any change to op
 //! lowering, preamble emission, scheduling, or vectorization shows up
 //! as a reviewable text diff instead of silent drift through to the
@@ -60,7 +60,7 @@ fn steel_msl(kernel_ir: ffai_kernels::core::ir::Kernel, mode: KernelMode) -> Str
 #[test]
 fn steel_gemm_fused_nax_f16_msl() {
     let msl = steel_msl(
-        steel_gemm_fused_nax::mt_steel_gemm_fused_nax::kernel_ir_for(DType::F16),
+        steel_gemm_fused_nax::ffai_steel_gemm_fused_nax::kernel_ir_for(DType::F16),
         KernelMode::Reduction,
     );
     assert_snapshot!(msl);
@@ -74,7 +74,7 @@ fn steel_gemm_fused_nax_f16_msl() {
 #[test]
 fn steel_gemm_gather_nax_f16_msl() {
     let msl = steel_msl(
-        steel_gemm_gather_nax::mt_steel_gemm_gather_nax::kernel_ir_for(DType::F16),
+        steel_gemm_gather_nax::ffai_steel_gemm_gather_nax::kernel_ir_for(DType::F16),
         KernelMode::Reduction,
     );
     assert_snapshot!(msl);
@@ -89,7 +89,7 @@ fn steel_gemm_gather_nax_f16_msl() {
 #[test]
 fn steel_gemm_splitk_nax_f16_msl() {
     let msl = steel_msl(
-        steel_gemm_splitk_nax::mt_steel_gemm_splitk_nax::kernel_ir_for(DType::F16),
+        steel_gemm_splitk_nax::ffai_steel_gemm_splitk_nax::kernel_ir_for(DType::F16),
         KernelMode::Reduction,
     );
     assert_snapshot!(msl);
@@ -98,7 +98,7 @@ fn steel_gemm_splitk_nax_f16_msl() {
 #[test]
 fn steel_gemm_splitk_nax_accum_f32_msl() {
     let msl = steel_msl(
-        steel_gemm_splitk_nax::mt_steel_gemm_splitk_accum_nax::kernel_ir_for(DType::F32),
+        steel_gemm_splitk_nax::ffai_steel_gemm_splitk_accum_nax::kernel_ir_for(DType::F32),
         KernelMode::Grid3D,
     );
     assert_snapshot!(msl);
@@ -106,26 +106,26 @@ fn steel_gemm_splitk_nax_accum_f32_msl() {
 
 // ── quantized_nax ────────────────────────────────────────────────────
 //
-// `mt_qmm_mma_mpp` — quantized matmul over MPP cooperative tensors.
+// `ffai_qmm_mma_mpp` — quantized matmul over MPP cooperative tensors.
 // F16 activation × int4 packed weight is the production Qwen3.6 path.
 
 #[test]
 fn quantized_nax_f16_msl() {
     let msl =
-        steel_msl(quantized_nax::mt_qmm_nax::kernel_ir_for(DType::F16), KernelMode::Reduction);
+        steel_msl(quantized_nax::ffai_qmm_nax::kernel_ir_for(DType::F16), KernelMode::Reduction);
     assert_snapshot!(msl);
 }
 
 // ── fp_quantized_nax ─────────────────────────────────────────────────
 //
-// `mt_fp_qmm_nax` — fp4 (E2M1) quantized matmul. Same MPP coop-load /
+// `ffai_fp_qmm_nax` — fp4 (E2M1) quantized matmul. Same MPP coop-load /
 // `matmul2d` shape as `quantized_nax`, with the FP4 codebook dequant
 // replacing int4 nibble · scale + bias. F16 pins the production dtype.
 
 #[test]
 fn fp_quantized_nax_f16_msl() {
     let msl = steel_msl(
-        fp_quantized_nax::mt_fp_qmm_nax::kernel_ir_for(DType::F16),
+        fp_quantized_nax::ffai_fp_qmm_nax::kernel_ir_for(DType::F16),
         KernelMode::Reduction,
     );
     assert_snapshot!(msl);
@@ -140,6 +140,6 @@ fn fp_quantized_nax_f16_msl() {
 #[test]
 fn hadamard_m_m20_f32_msl() {
     let msl =
-        steel_msl(hadamard_m::mt_hadamard_m20::kernel_ir_for(DType::F32), KernelMode::Reduction);
+        steel_msl(hadamard_m::ffai_hadamard_m20::kernel_ir_for(DType::F32), KernelMode::Reduction);
     assert_snapshot!(msl);
 }

@@ -148,10 +148,10 @@ Each attribute wraps a setup function that returns a builder:
 
 ```rust,ignore
 #[bench(dtypes = [f32, f16, bf16])]
-fn bench_mt_scale(dt: DType) -> BenchSetup { /* BenchSetup::new(...).buffer(...).bytes_moved(...) */ }
+fn bench_ffai_scale(dt: DType) -> BenchSetup { /* BenchSetup::new(...).buffer(...).bytes_moved(...) */ }
 
 #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-3, 1e-3])]
-fn test_mt_scale(dt: DType) -> TestSetup { /* TestSetup::new(...).input(...).expect(...) */ }
+fn test_ffai_scale(dt: DType) -> TestSetup { /* TestSetup::new(...).input(...).expect(...) */ }
 ```
 
 `dtypes` selects the float types to run; `tol` is the per-dtype absolute

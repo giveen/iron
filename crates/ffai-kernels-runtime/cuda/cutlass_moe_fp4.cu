@@ -410,9 +410,9 @@ extern "C" int moe_grouped_gemm_cutlass_fp4(
     uint8_t* blob = nullptr;
     uint8_t* work = nullptr;
     int rc = 0;
-#define MT_CUDA_CK(call) do { if ((call) != cudaSuccess) { rc = 3; goto cleanup; } } while (0)
-    MT_CUDA_CK(cudaMallocAsync((void**)&blob, blob_bytes, stream));
-    MT_CUDA_CK(cudaMemcpyAsync(blob, staging.data(), blob_bytes, cudaMemcpyHostToDevice, stream));
+#define FFAI_CUDA_CK(call) do { if ((call) != cudaSuccess) { rc = 3; goto cleanup; } } while (0)
+    FFAI_CUDA_CK(cudaMallocAsync((void**)&blob, blob_bytes, stream));
+    FFAI_CUDA_CK(cudaMemcpyAsync(blob, staging.data(), blob_bytes, cudaMemcpyHostToDevice, stream));
 
     {
         cutlass::KernelHardwareInfo hw_info;
@@ -443,13 +443,13 @@ extern "C" int moe_grouped_gemm_cutlass_fp4(
         Gemm gemm;
         if (gemm.can_implement(args) != cutlass::Status::kSuccess) { rc = 10; goto cleanup; }
         size_t ws = Gemm::get_workspace_size(args);
-        if (ws) MT_CUDA_CK(cudaMallocAsync((void**)&work, ws, stream));
+        if (ws) FFAI_CUDA_CK(cudaMallocAsync((void**)&work, ws, stream));
         cutlass::Status st = gemm.initialize(args, work, stream);
         if (st != cutlass::Status::kSuccess) { rc = 1; goto cleanup; }
         st = gemm.run(stream);
         if (st != cutlass::Status::kSuccess) { rc = 2; goto cleanup; }
     }
-#undef MT_CUDA_CK
+#undef FFAI_CUDA_CK
 
 cleanup:
     if (blob) cudaFreeAsync(blob, stream);
@@ -701,9 +701,9 @@ extern "C" int moe_grouped_gemm_w4a8(
     std::memcpy(stg.data()+o_lSFB,lSFB_h.data(),n_groups*sizeof(LSFB));
     if (alpha_vec){ std::vector<const float*> al(n_groups); for(int g=0;g<n_groups;++g) al[g]=(const float*)alpha_vec+g; std::memcpy(stg.data()+o_pAl,al.data(),n_groups*sizeof(float*)); }
     uint8_t* blob=nullptr; uint8_t* work=nullptr; int rc=0;
-#define MT_CK(c) do{ if((c)!=cudaSuccess){rc=3;goto cleanup;} }while(0)
-    MT_CK(cudaMallocAsync((void**)&blob,blob_bytes,stream));
-    MT_CK(cudaMemcpyAsync(blob,stg.data(),blob_bytes,cudaMemcpyHostToDevice,stream));
+#define FFAI_CK(c) do{ if((c)!=cudaSuccess){rc=3;goto cleanup;} }while(0)
+    FFAI_CK(cudaMallocAsync((void**)&blob,blob_bytes,stream));
+    FFAI_CK(cudaMemcpyAsync(blob,stg.data(),blob_bytes,cudaMemcpyHostToDevice,stream));
     {
         cutlass::KernelHardwareInfo hw; hw.device_id=0; hw.sm_count=queried_sm_count();
         typename G::Arguments args{
@@ -722,11 +722,11 @@ extern "C" int moe_grouped_gemm_w4a8(
         G gemm;
         if (gemm.can_implement(args)!=cutlass::Status::kSuccess){ rc=10; goto cleanup; }
         size_t ws=G::get_workspace_size(args);
-        if (ws) MT_CK(cudaMallocAsync((void**)&work,ws,stream));
+        if (ws) FFAI_CK(cudaMallocAsync((void**)&work,ws,stream));
         if (gemm.initialize(args,work,stream)!=cutlass::Status::kSuccess){ rc=1; goto cleanup; }
         if (gemm.run(stream)!=cutlass::Status::kSuccess){ rc=2; goto cleanup; }
     }
-#undef MT_CK
+#undef FFAI_CK
 cleanup:
     if (blob) cudaFreeAsync(blob,stream);
     if (work) cudaFreeAsync(work,stream);
@@ -808,9 +808,9 @@ extern "C" int moe_grouped_gemm_w8a8(
     std::memcpy(stg.data()+o_lSFB,lSFB_h.data(),n_groups*sizeof(LSFB));
     if (alpha_vec){ std::vector<const float*> al(n_groups); for(int g=0;g<n_groups;++g) al[g]=(const float*)alpha_vec+g; std::memcpy(stg.data()+o_pAl,al.data(),n_groups*sizeof(float*)); }
     uint8_t* blob=nullptr; uint8_t* work=nullptr; int rc=0;
-#define MT_CK(c) do{ if((c)!=cudaSuccess){rc=3;goto cleanup;} }while(0)
-    MT_CK(cudaMallocAsync((void**)&blob,blob_bytes,stream));
-    MT_CK(cudaMemcpyAsync(blob,stg.data(),blob_bytes,cudaMemcpyHostToDevice,stream));
+#define FFAI_CK(c) do{ if((c)!=cudaSuccess){rc=3;goto cleanup;} }while(0)
+    FFAI_CK(cudaMallocAsync((void**)&blob,blob_bytes,stream));
+    FFAI_CK(cudaMemcpyAsync(blob,stg.data(),blob_bytes,cudaMemcpyHostToDevice,stream));
     {
         cutlass::KernelHardwareInfo hw; hw.device_id=0; hw.sm_count=queried_sm_count();
         typename G::Arguments args{
@@ -829,11 +829,11 @@ extern "C" int moe_grouped_gemm_w8a8(
         G gemm;
         if (gemm.can_implement(args)!=cutlass::Status::kSuccess){ rc=10; goto cleanup; }
         size_t ws=G::get_workspace_size(args);
-        if (ws) MT_CK(cudaMallocAsync((void**)&work,ws,stream));
+        if (ws) FFAI_CK(cudaMallocAsync((void**)&work,ws,stream));
         if (gemm.initialize(args,work,stream)!=cutlass::Status::kSuccess){ rc=1; goto cleanup; }
         if (gemm.run(stream)!=cutlass::Status::kSuccess){ rc=2; goto cleanup; }
     }
-#undef MT_CK
+#undef FFAI_CK
 cleanup:
     if (blob) cudaFreeAsync(blob,stream);
     if (work) cudaFreeAsync(work,stream);
@@ -868,7 +868,7 @@ struct Fp4GroupedHandle {
 // written as 3 contiguous ints (asserted == UnderlyingProblemShape below).
 // sfa blocks are laid out densely: group g's blob starts at
 // (sum over j<g of ceil(M_j/128)) * 512 * ceil(K/64) bytes.
-__global__ void mt_fp4_fill_group_args(
+__global__ void ffai_fp4_fill_group_args(
     const unsigned* __restrict__ off,   // [n_groups+1] device row offsets
     const uint8_t* A, const uint8_t* SFA, uint8_t* D,
     int* ps3,                            // [n_groups*3] (M,N,K) triples
@@ -1012,7 +1012,7 @@ extern "C" int moe_grouped_gemm_cutlass_fp4_run(
     cudaStream_t stream = (cudaStream_t)stream_v;
     int threads = 128;
     int blocks = (h->n_groups + threads - 1) / threads;
-    mt_fp4_fill_group_args<<<blocks, threads, 0, stream>>>(
+    ffai_fp4_fill_group_args<<<blocks, threads, 0, stream>>>(
         (const unsigned*)off_dev,
         (const uint8_t*)A, (const uint8_t*)SFA, (uint8_t*)D,
         (int*)(h->blob + h->off_ps),
@@ -1058,7 +1058,7 @@ struct Fp4FusedHandle {
 
 // one thread per group: derive M-dependent sections (ps, pA, pSFA, pD, pSFD)
 // from the device row offsets. pD/pSFD are the fused output (e2m1 + ue4m3).
-__global__ void mt_fp4_fill_group_args_fused(
+__global__ void ffai_fp4_fill_group_args_fused(
     const unsigned* __restrict__ off,   // [n_groups+1] device row offsets
     const uint8_t* A, const uint8_t* SFA, uint8_t* D, uint8_t* SFD,
     int* ps3,
@@ -1203,7 +1203,7 @@ extern "C" int moe_grouped_gemm_cutlass_fp4_FUSEDACT_run(
     cudaStream_t stream = (cudaStream_t)stream_v;
     int threads = 128;
     int blocks = (h->n_groups + threads - 1) / threads;
-    mt_fp4_fill_group_args_fused<<<blocks, threads, 0, stream>>>(
+    ffai_fp4_fill_group_args_fused<<<blocks, threads, 0, stream>>>(
         (const unsigned*)off_dev,
         (const uint8_t*)A, (const uint8_t*)SFA, (uint8_t*)D, (uint8_t*)SFD,
         (int*)(h->blob + h->off_ps),
@@ -1213,11 +1213,11 @@ extern "C" int moe_grouped_gemm_cutlass_fp4_FUSEDACT_run(
         (void**)(h->blob + h->off_pSFD),
         h->n_groups, h->N, h->K);
     if (cudaGetLastError() != cudaSuccess) return 3;
-    // DIAGNOSTIC (MT_FUSE_REINIT=1): re-initialize after the fill kernel so the
+    // DIAGNOSTIC (FFAI_FUSE_REINIT=1): re-initialize after the fill kernel so the
     // fusion block_scale_factor_ptr snapshot reflects the now-populated pSFD blob.
     // Confirms the init-time-snapshot theory (NOT graph-safe).
     static int reinit = -1;
-    if (reinit < 0) { const char* e = getenv("MT_FUSE_REINIT"); reinit = (e && e[0]=='1') ? 1 : 0; }
+    if (reinit < 0) { const char* e = getenv("FFAI_FUSE_REINIT"); reinit = (e && e[0]=='1') ? 1 : 0; }
     if (reinit) {
         if (h->gemm.initialize(h->args, h->work, stream) != cutlass::Status::kSuccess) return 4;
     }
@@ -1364,7 +1364,7 @@ extern "C" int moe_grouped_gemm_cutlass_fp4_AMAX_run(
     if (cudaMemsetAsync(h->d_amax, 0, (size_t)h->n_groups * sizeof(float), stream) != cudaSuccess) return 4;
     int threads = 128;
     int blocks = (h->n_groups + threads - 1) / threads;
-    mt_fp4_fill_group_args<<<blocks, threads, 0, stream>>>(
+    ffai_fp4_fill_group_args<<<blocks, threads, 0, stream>>>(
         (const unsigned*)off_dev,
         (const uint8_t*)A, (const uint8_t*)SFA, (uint8_t*)D,
         (int*)(h->blob + h->off_ps),

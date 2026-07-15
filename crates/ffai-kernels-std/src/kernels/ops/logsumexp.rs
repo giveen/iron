@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_logsumexp<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_logsumexp<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -39,13 +39,13 @@ pub fn mt_logsumexp<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     }
 }
 
-/// New-syntax correctness for `mt_logsumexp` (Reduction, one threadgroup per
+/// New-syntax correctness for `ffai_logsumexp` (Reduction, one threadgroup per
 /// row, tpg=256). Per-row oracle: `max + log(sum(exp(x - max)))`; one output
 /// element per row.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_logsumexp;
+    use super::ffai_logsumexp;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
@@ -69,7 +69,7 @@ pub mod kernel_tests {
             expected.push(m + s.ln());
             inp.extend_from_slice(&row);
         }
-        TestSetup::new(mt_logsumexp::kernel_ir_for(dt))
+        TestSetup::new(ffai_logsumexp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", rows, dt))
@@ -79,7 +79,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
-    fn test_mt_logsumexp(dt: DType) -> TestSetup { setup(4, 1024, dt) }
+    fn test_ffai_logsumexp(dt: DType) -> TestSetup { setup(4, 1024, dt) }
 
     // Large-magnitude logits (50..120): pins the online-max overflow guard
     // (`m + ln(sum exp(x-m))`). Without the max-subtraction `exp(120)` is
@@ -87,32 +87,32 @@ pub mod kernel_tests {
     // the same-max CPU oracle exactly. f32-only — at large magnitudes
     // narrow-dtype input rounding, not the guard, dominates.
     #[test_kernel(dtypes = [f32], tol = [1e-3])]
-    fn test_mt_logsumexp_large_values(dt: DType) -> TestSetup {
+    fn test_ffai_logsumexp_large_values(dt: DType) -> TestSetup {
         setup_with(2, 1024, dt, |_r, i| 50.0 + (i % 7) as f32 * 10.0)
     }
 }
 
-/// New-syntax benchmark for `mt_logsumexp` (vs MLX `metal/logsumexp.metal`).
+/// New-syntax benchmark for `ffai_logsumexp` (vs MLX `metal/logsumexp.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_logsumexp;
+    use super::ffai_logsumexp;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // MLX `looped_logsumexp_*` buffer order: `in`[[buffer(0)]],
     // `out`[[buffer(1)]] (one element per row), `axis_size`(int)[[buffer(2)]].
-    // `inp` is shared by name with the MT input.
+    // `inp` is shared by name with the FFAI input.
     //
     // MLX dispatch geometry: one threadgroup per row (grid=[rows,1,1]) at
-    // tpg=1024 — NOT the MT tpg=256. Same threadgroup-array hazard as
+    // tpg=1024 — NOT the FFAI tpg=256. Same threadgroup-array hazard as
     // `looped_softmax_*`: `local_max[32]`/`local_normalizer[32]` are only valid
-    // when n_simd==32 (tpg=1024); at MT's tpg=256 the stale slots produce NaN.
+    // when n_simd==32 (tpg=1024); at FFAI's tpg=256 the stale slots produce NaN.
     // Pin tpg=1024 (mirrors the legacy RowNorm `mlx_tpg: 1024`).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_logsumexp(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 1024usize);
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_logsumexp::kernel_ir_for(dt))
+        BenchSetup::new(ffai_logsumexp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("inp", rows * n, dt, InputDomain::Signed))
             .buffer(BenchBuffer::zeros("out", rows, dt).output())
@@ -124,7 +124,7 @@ pub mod kernel_benches {
                     format!("looped_logsumexp_{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/logsumexp.metal")),
                 )
-                // `inp` shared by name with the MT input above (placeholder).
+                // `inp` shared by name with the FFAI input above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", rows * n, dt))
                 .buffer(BenchBuffer::zeros("out", rows, dt).output())
                 .buffer(BenchBuffer::from_vec(

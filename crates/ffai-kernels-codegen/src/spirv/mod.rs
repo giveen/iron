@@ -100,7 +100,7 @@ type Types = BTreeMap<ValueId, &'static str>;
 /// `rem`, `src_off`, `acc`). Threaded the same way so `DeclareLocal`
 /// picks the right declared type and `SetLocal`/`Load(__ml_X)`
 /// preserve it. The strided_copy_nd `let mut rem = p` was the bug —
-/// declaring `float mt_loc_rem` turned `rem / extent` into float
+/// declaring `float ffai_loc_rem` turned `rem / extent` into float
 /// division and every thread ended up reading `src[0]`.
 type LocalTypes = BTreeMap<String, &'static str>;
 
@@ -147,7 +147,7 @@ impl GlslGenerator {
     }
 
     /// True when the gated `VK_KHR_cooperative_matrix` codegen path is
-    /// active (set via `MT_VK_COOPMAT=1`, see `TargetProfile::vulkan`).
+    /// active (set via `FFAI_VK_COOPMAT=1`, see `TargetProfile::vulkan`).
     /// All coopmat-specific emission (extensions, fp16 staging tiles,
     /// fragment MMA) branches on this.
     fn coopmat_on(&self) -> bool {
@@ -264,10 +264,10 @@ impl GlslGenerator {
         writeln!(out, "#extension GL_KHR_shader_subgroup_shuffle_relative : enable").ok();
         // bfloat16 is much newer (VK_KHR_shader_bfloat16, 2024). When the
         // device doesn't support it, we fall back to a software shim that
-        // promotes bf16 through f32 (see `mt_bf16_to_f32` helpers).
+        // promotes bf16 through f32 (see `ffai_bf16_to_f32` helpers).
         writeln!(out, "#extension GL_EXT_bfloat16 : enable").ok();
         // Real cooperative-matrix path (gated by MmaStrategy::VkCooperativeMatrix
-        // via `MT_VK_COOPMAT=1`). Emits coopMatLoad/coopMatMulAdd/coopMatStore
+        // via `FFAI_VK_COOPMAT=1`). Emits coopMatLoad/coopMatMulAdd/coopMatStore
         // 16×16×16 fp16→fp32 fragment ops on RDNA4. Requires the Vulkan memory
         // model + explicit fp16 storage; the runtime requests the matching
         // device features and pins subgroupSize=64 for these kernels.
@@ -289,10 +289,10 @@ impl GlslGenerator {
         // the high half of a uint32 (which IS an IEEE-754 f32 sharing the
         // bf16 sign + exponent + 7 mantissa bits) and uses
         // `uintBitsToFloat`. Round-to-nearest-even on the store side.
-        writeln!(out, "float mt_bf16_to_f32(uint16_t b) {{").ok();
+        writeln!(out, "float ffai_bf16_to_f32(uint16_t b) {{").ok();
         writeln!(out, "    return uintBitsToFloat(uint(b) << 16);").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "uint16_t mt_f32_to_bf16(float f) {{").ok();
+        writeln!(out, "uint16_t ffai_f32_to_bf16(float f) {{").ok();
         writeln!(out, "    uint u = floatBitsToUint(f);").ok();
         // RNE rounding bias = 0x7fff + (mantissa-bit-16 ? 1 : 0).
         writeln!(out, "    uint rne = (u + 0x7fffu + ((u >> 16) & 1u)) >> 16;").ok();
@@ -303,7 +303,7 @@ impl GlslGenerator {
         // Pure arithmetic, so they transcribe directly to GLSL. The corpus
         // hit ~30 dequant kernels through the `/*TODO-decode-*/` stub in
         // Phase 2.1; landing the real decode unlocks all of them.
-        writeln!(out, "float mt_decode_e2m1(uint code) {{").ok();
+        writeln!(out, "float ffai_decode_e2m1(uint code) {{").ok();
         writeln!(out, "    uint m = code & 7u;").ok();
         writeln!(
             out,
@@ -314,7 +314,7 @@ impl GlslGenerator {
             .ok();
         writeln!(out, "    return ((code & 8u) != 0u) ? -mag : mag;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_decode_e4m3(uint bits) {{").ok();
+        writeln!(out, "float ffai_decode_e4m3(uint bits) {{").ok();
         writeln!(out, "    uint e = (bits >> 3u) & 15u;").ok();
         writeln!(out, "    uint m = bits & 7u;").ok();
         writeln!(out, "    float mag = (e < 1u) ? (float(m) * 0.001953125)").ok();
@@ -322,7 +322,7 @@ impl GlslGenerator {
             .ok();
         writeln!(out, "    return (((bits >> 7u) & 1u) != 0u) ? -mag : mag;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_decode_e5m2(uint bits) {{").ok();
+        writeln!(out, "float ffai_decode_e5m2(uint bits) {{").ok();
         writeln!(out, "    uint e = (bits >> 2u) & 31u;").ok();
         writeln!(out, "    uint m = bits & 3u;").ok();
         writeln!(out, "    float mag = (e < 1u) ? (float(m) * 0.0000152587890625)").ok();
@@ -330,7 +330,7 @@ impl GlslGenerator {
             .ok();
         writeln!(out, "    return (((bits >> 7u) & 1u) != 0u) ? -mag : mag;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_decode_int8(uint bits) {{").ok();
+        writeln!(out, "float ffai_decode_int8(uint bits) {{").ok();
         // Sign-extend low 8 bits — GLSL doesn't have signed-byte casts so
         // we do the bit-shift trick: shift up to MSB then arithmetic-shift
         // back down. `int` arith shift is GLSL-defined as signed >>.
@@ -340,10 +340,10 @@ impl GlslGenerator {
         writeln!(out).ok();
         // GLSL.std.450 lacks erf / erfinv / expm1 / log10. Provide
         // software stand-ins so the unary intrinsic table can reference
-        // them. mt_erfinv is a coarse Winitzki approximation; tune later.
-        writeln!(out, "float mt_expm1(float x) {{ return exp(x) - 1.0; }}").ok();
-        writeln!(out, "float mt_log10(float x) {{ return log(x) / log(10.0); }}").ok();
-        writeln!(out, "float mt_erf(float x) {{").ok();
+        // them. ffai_erfinv is a coarse Winitzki approximation; tune later.
+        writeln!(out, "float ffai_expm1(float x) {{ return exp(x) - 1.0; }}").ok();
+        writeln!(out, "float ffai_log10(float x) {{ return log(x) / log(10.0); }}").ok();
+        writeln!(out, "float ffai_erf(float x) {{").ok();
         writeln!(out, "    float t = 1.0 / (1.0 + 0.3275911 * abs(x));").ok();
         writeln!(out, "    float y = 1.0 - (((((1.061405429 * t - 1.453152027) * t)").ok();
         writeln!(
@@ -353,7 +353,7 @@ impl GlslGenerator {
         .ok();
         writeln!(out, "    return sign(x) * y;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_erfinv(float x) {{").ok();
+        writeln!(out, "float ffai_erfinv(float x) {{").ok();
         writeln!(out, "    float ln = log(1.0 - x*x);").ok();
         writeln!(out, "    float a = 0.147;").ok();
         writeln!(out, "    float t = 2.0/(3.14159265 * a) + ln*0.5;").ok();
@@ -371,7 +371,7 @@ impl GlslGenerator {
         // Newton-Raphson refinement step on top of the hardware reciprocal
         // gives a correctly-rounded result, assuming hardware FMA is
         // correctly rounded — which it is on every AMDGPU since GCN.
-        writeln!(out, "float mt_fdiv(float a, float b) {{").ok();
+        writeln!(out, "float ffai_fdiv(float a, float b) {{").ok();
         writeln!(out, "    float r = 1.0 / b;").ok();
         writeln!(out, "    float q = a * r;").ok();
         writeln!(out, "    float err = fma(-b, q, a);").ok();
@@ -382,7 +382,7 @@ impl GlslGenerator {
         // accumulation-heavy recurrences (gated DeltaNet) compound
         // each ULP through the state. One Newton-Raphson step:
         // r' = r * (1.5 - 0.5 * x * r * r), brings rsqrt to ≤1 ULP.
-        writeln!(out, "float mt_rsqrt(float x) {{").ok();
+        writeln!(out, "float ffai_rsqrt(float x) {{").ok();
         writeln!(out, "    float r = inversesqrt(x);").ok();
         writeln!(out, "    return r * fma(-0.5 * x * r, r, 1.5);").ok();
         writeln!(out, "}}").ok();
@@ -393,17 +393,17 @@ impl GlslGenerator {
         // in accumulation-heavy recurrences (gated DeltaNet over 4
         // tokens with state amplified to magnitude 24256) the drift
         // compounds to ~3 ULPs and exceeds tight absolute tolerances.
-        // `mt_subgroup_add` linearly broadcasts and accumulates so the
+        // `ffai_subgroup_add` linearly broadcasts and accumulates so the
         // result matches Rust's `iter().sum()` bit-exactly.
         let lw = self.profile.lane_width;
-        writeln!(out, "float mt_subgroup_add(float v) {{").ok();
+        writeln!(out, "float ffai_subgroup_add(float v) {{").ok();
         writeln!(out, "    float s = 0.0;").ok();
         writeln!(out, "    for (uint i = 0u; i < {lw}u; i++) {{").ok();
         writeln!(out, "        s += subgroupShuffle(v, i);").ok();
         writeln!(out, "    }}").ok();
         writeln!(out, "    return s;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_atan2(float y, float x) {{").ok();
+        writeln!(out, "float ffai_atan2(float y, float x) {{").ok();
         writeln!(out, "    const float PI = 3.14159265358979;").ok();
         writeln!(out, "    if (x > 0.0) return atan(y / x);").ok();
         writeln!(out, "    if (x < 0.0) return atan(y / x) + (y >= 0.0 ? PI : -PI);").ok();
@@ -411,10 +411,10 @@ impl GlslGenerator {
         writeln!(out, "    if (y < 0.0) return -PI * 0.5;").ok();
         writeln!(out, "    return 0.0;").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "float mt_silu(float x) {{ return x / (1.0 + exp(-x)); }}").ok();
-        writeln!(out, "float mt_relu(float x) {{ return max(0.0, x); }}").ok();
-        writeln!(out, "float mt_sigmoid(float x) {{ return 1.0 / (1.0 + exp(-x)); }}").ok();
-        writeln!(out, "float mt_gelu(float x) {{").ok();
+        writeln!(out, "float ffai_silu(float x) {{ return x / (1.0 + exp(-x)); }}").ok();
+        writeln!(out, "float ffai_relu(float x) {{ return max(0.0, x); }}").ok();
+        writeln!(out, "float ffai_sigmoid(float x) {{ return 1.0 / (1.0 + exp(-x)); }}").ok();
+        writeln!(out, "float ffai_gelu(float x) {{").ok();
         writeln!(out, "    const float k = 0.7978845608;").ok();
         writeln!(out, "    float arg = clamp(k * (x + 0.044715 * x*x*x), -15.0, 15.0);").ok();
         writeln!(out, "    return 0.5 * x * (1.0 + tanh(arg));").ok();
@@ -927,7 +927,7 @@ impl GlslGenerator {
                         // Mutable-local read. Use the declared type so
                         // `rem / extent` (uint local) stays uint.
                         let lt = local_types.get(local_name).copied().unwrap_or("float");
-                        writeln!(out, "{pad}{lt} {v} = mt_loc_{local_name};").ok();
+                        writeln!(out, "{pad}{lt} {v} = ffai_loc_{local_name};").ok();
                         if let Some(id) = vid {
                             types.insert(id, lt);
                         }
@@ -951,7 +951,7 @@ impl GlslGenerator {
                     // arithmetic stays in floating point.
                     match dtype {
                         Some(DType::BF16) => {
-                            writeln!(out, "{pad}float {v} = mt_bf16_to_f32({arr}[uint({idx})]);")
+                            writeln!(out, "{pad}float {v} = ffai_bf16_to_f32({arr}[uint({idx})]);")
                                 .ok();
                             if let Some(id) = vid {
                                 types.insert(id, "float");
@@ -986,7 +986,7 @@ impl GlslGenerator {
                 // bf16 destination needs the rounding helper, not a
                 // numerical (uint16_t)(float) cast.
                 let store_expr = match p.map(|p| p.dtype) {
-                    Some(DType::BF16) => format!("mt_f32_to_bf16({val})"),
+                    Some(DType::BF16) => format!("ffai_f32_to_bf16({val})"),
                     Some(dt) => {
                         let ty = Self::glsl_scalar_type(dt)?;
                         format!("{ty}({val})")
@@ -1057,10 +1057,10 @@ impl GlslGenerator {
                 // step on top of the hardware reciprocal gives correctly-
                 // rounded f32 divide assuming hardware fma is correctly
                 // rounded (true on AMD GFX1xxx V_FMAC_F32). Without this
-                // `test_mt_logits_repetition_penalty` misses bit-exact tol=0
+                // `test_ffai_logits_repetition_penalty` misses bit-exact tol=0
                 // by 1 ULP on 2 elements out of 8192.
                 if matches!(bop, BinOpKind::Div) && ty == "float" {
-                    writeln!(out, "{pad}{ty} {v} = mt_fdiv({l}, {r});").ok();
+                    writeln!(out, "{pad}{ty} {v} = ffai_fdiv({l}, {r});").ok();
                 } else if signed_shift {
                     let sym = if matches!(bop, BinOpKind::Shl) { "<<" } else { ">>" };
                     writeln!(out, "{pad}int {v} = (int({l}) {sym} int({r}));").ok();
@@ -1136,10 +1136,10 @@ impl GlslGenerator {
             Op::DeclareLocal { name, value } => {
                 let rv = self.vname(Some(*value), block, ov);
                 // Type-aware declaration. `let mut rem = p` for uint
-                // `p` MUST declare `uint mt_loc_rem`, else `rem /
+                // `p` MUST declare `uint ffai_loc_rem`, else `rem /
                 // extent` is float division (the strided_copy_nd bug).
                 let ty = types.get(value).copied().unwrap_or("float");
-                writeln!(out, "{pad}{ty} mt_loc_{name} = {rv};").ok();
+                writeln!(out, "{pad}{ty} ffai_loc_{name} = {rv};").ok();
                 local_types.insert(name.clone(), ty);
             },
             Op::SetLocal { name, value } => {
@@ -1147,19 +1147,19 @@ impl GlslGenerator {
                 let lt = local_types.get(name).copied().unwrap_or("float");
                 let rt = types.get(value).copied().unwrap_or("float");
                 if rt == lt {
-                    writeln!(out, "{pad}mt_loc_{name} = {rv};").ok();
+                    writeln!(out, "{pad}ffai_loc_{name} = {rv};").ok();
                 } else {
-                    writeln!(out, "{pad}mt_loc_{name} = {lt}({rv});").ok();
+                    writeln!(out, "{pad}ffai_loc_{name} = {lt}({rv});").ok();
                 }
             },
             Op::Activation { kind, value } => {
                 let v = self.vname(vid, block, ov);
                 let rv = self.vname(Some(*value), block, ov);
                 let expr = match kind {
-                    ActKind::Silu => format!("mt_silu({rv})"),
-                    ActKind::Gelu => format!("mt_gelu({rv})"),
-                    ActKind::Relu => format!("mt_relu({rv})"),
-                    ActKind::Sigmoid => format!("mt_sigmoid({rv})"),
+                    ActKind::Silu => format!("ffai_silu({rv})"),
+                    ActKind::Gelu => format!("ffai_gelu({rv})"),
+                    ActKind::Relu => format!("ffai_relu({rv})"),
+                    ActKind::Sigmoid => format!("ffai_sigmoid({rv})"),
                     ActKind::Tanh => format!("tanh({rv})"),
                 };
                 writeln!(out, "{pad}float {v} = {expr};").ok();
@@ -1193,13 +1193,13 @@ impl GlslGenerator {
                 };
                 let src_arr = safe_glsl_ident(src);
                 // Use dtype-aware reads so bf16 SSBOs go through
-                // mt_bf16_to_f32 (the systematic `all_reduce_*[bf16]`
+                // ffai_bf16_to_f32 (the systematic `all_reduce_*[bf16]`
                 // bug — `float(uint16_t)` is a numerical conversion,
                 // not the bit-reinterpret bf16 needs).
                 let src_dtype = kernel.params.iter().find(|p| p.name == *src).map(|p| p.dtype);
                 let load_src = |ix: &str| -> String {
                     if matches!(src_dtype, Some(DType::BF16)) {
-                        format!("mt_bf16_to_f32({src_arr}[{ix}])")
+                        format!("ffai_bf16_to_f32({src_arr}[{ix}])")
                     } else {
                         format!("float({src_arr}[{ix}])")
                     }
@@ -1211,7 +1211,7 @@ impl GlslGenerator {
                         let sec_dtype =
                             kernel.params.iter().find(|p| p.name == *sec).map(|p| p.dtype);
                         let load_sec = if matches!(sec_dtype, Some(DType::BF16)) {
-                            format!("mt_bf16_to_f32({sec_arr}[uint(_i) - uint({bv})])")
+                            format!("ffai_bf16_to_f32({sec_arr}[uint(_i) - uint({bv})])")
                         } else {
                             format!("float({sec_arr}[uint(_i) - uint({bv})])")
                         };
@@ -1227,10 +1227,10 @@ impl GlslGenerator {
                             e = match sub {
                                 Op::UnaryOp { op, .. } => self.glsl_unary(*op, &e),
                                 Op::Activation { kind, .. } => match kind {
-                                    ActKind::Silu => format!("mt_silu({e})"),
-                                    ActKind::Gelu => format!("mt_gelu({e})"),
-                                    ActKind::Relu => format!("mt_relu({e})"),
-                                    ActKind::Sigmoid => format!("mt_sigmoid({e})"),
+                                    ActKind::Silu => format!("ffai_silu({e})"),
+                                    ActKind::Gelu => format!("ffai_gelu({e})"),
+                                    ActKind::Relu => format!("ffai_relu({e})"),
+                                    ActKind::Sigmoid => format!("ffai_sigmoid({e})"),
                                     ActKind::Tanh => format!("tanh({e})"),
                                 },
                                 Op::Cast { dtype, .. } => {
@@ -1377,14 +1377,14 @@ impl GlslGenerator {
             Op::SimdReduce { value, op: rk } => {
                 let v = self.vname(vid, block, ov);
                 let rv = self.vname(Some(*value), block, ov);
-                // Sum/Mean go through `mt_subgroup_add` (linear-order
+                // Sum/Mean go through `ffai_subgroup_add` (linear-order
                 // broadcast loop) so the result matches the CPU oracle's
                 // left-to-right `iter().sum()` rounding exactly. Other
                 // reductions (Max/Min order-independent, Product rarely
                 // accumulation-heavy) stay on the fast hardware subgroup
                 // intrinsic.
                 let expr = match rk {
-                    ReduceKind::Sum | ReduceKind::Mean => format!("mt_subgroup_add({rv})"),
+                    ReduceKind::Sum | ReduceKind::Mean => format!("ffai_subgroup_add({rv})"),
                     ReduceKind::Max => format!("subgroupMax({rv})"),
                     ReduceKind::Min => format!("subgroupMin({rv})"),
                     ReduceKind::Product => format!("subgroupMul({rv})"),
@@ -1859,11 +1859,11 @@ impl GlslGenerator {
             Neg => format!("(-{arg})"),
             // Route reciprocal through the Markstein-corrected divide
             // helper so `1/x` is correctly rounded (matching `Op::BinOp::Div`).
-            Recip => format!("mt_fdiv(1.0, {arg})"),
-            // Rsqrt → mt_rsqrt with one Newton-Raphson refinement step
+            Recip => format!("ffai_fdiv(1.0, {arg})"),
+            // Rsqrt → ffai_rsqrt with one Newton-Raphson refinement step
             // on top of `inversesqrt`. Improves AMD's 1.4-ULP hardware
             // estimate to ≤1 ULP, which the gated-delta recurrence needs.
-            Rsqrt => format!("mt_rsqrt({arg})"),
+            Rsqrt => format!("ffai_rsqrt({arg})"),
             // Block-scaled quant decode — preamble helpers; pure arithmetic
             // ports of the CUDA preamble.
             _ => format!("{}({arg})", self.profile.unary_intrinsic(op)),
@@ -1881,10 +1881,10 @@ fn glsl_binop(op: BinOpKind, l: &str, r: &str) -> String {
         Max => format!("max({l}, {r})"),
         Min => format!("min({l}, {r})"),
         Pow => format!("pow({l}, {r})"),
-        // Use the explicit `mt_atan2` helper from the preamble — AMD's
+        // Use the explicit `ffai_atan2` helper from the preamble — AMD's
         // GLSL 2-arg `atan(y, x)` returns the wrong quadrant for some
         // inputs (off by π).
-        ATan2 => format!("mt_atan2(float({l}), float({r}))"),
+        ATan2 => format!("ffai_atan2(float({l}), float({r}))"),
         // GLSL `mod` is floor-mod (sign follows the divisor); Rust `%` and
         // CUDA `fmodf` are trunc-mod (sign follows the dividend). Emit the
         // trunc form so negative lhs matches the other backends.
@@ -2026,7 +2026,7 @@ fn uses_simdgroup(kernel: &Kernel) -> bool {
 ///   emitted SSBO array stays distinct from the keyword.
 /// - GLSL forbids identifiers containing `__` (reserved for the
 ///   implementation). The ffai-kernels macro emits mutable-local reads as
-///   `Op::Load { src: "__ml_<name>" }`; rewrite the prefix to `mt_loc_`
+///   `Op::Load { src: "__ml_<name>" }`; rewrite the prefix to `ffai_loc_`
 ///   to match the declaration emitted by `Op::DeclareLocal` /
 ///   `Op::SetLocal` after the same prefix swap.
 ///
@@ -2035,7 +2035,7 @@ fn uses_simdgroup(kernel: &Kernel) -> bool {
 pub fn safe_glsl_ident(name: &str) -> String {
     // Rewrite the macro-internal mutable-local prefix.
     if let Some(rest) = name.strip_prefix("__ml_") {
-        return format!("mt_loc_{rest}");
+        return format!("ffai_loc_{rest}");
     }
     // The set of GLSL reserved words a ffai-kernels kernel param is at all
     // likely to hit. Not exhaustive — the compiler will catch anything we
@@ -2098,7 +2098,7 @@ pub fn safe_glsl_ident(name: &str) -> String {
         "image3D",
         // GLSL reserves these for future use, even though they aren't
         // currently used; shaderc rejects them. The corpus hit them on
-        // conv* / depthwise_conv2d / aura_value_int4 / mt_gemm kernels.
+        // conv* / depthwise_conv2d / aura_value_int4 / ffai_gemm kernels.
         "input",
         "output",
         "texture",

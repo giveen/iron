@@ -8,33 +8,33 @@
 //! a full-tensor read-modify-write versus separate `silu` + `mul` launches (the
 //! intermediate stays in registers). One file covers the variants:
 //!
-//!   - `mt_swiglu` — `silu(gate) · up` (Llama/Qwen/Gemma/Mistral)
-//!   - `mt_clamped_swiglu` — `clip(silu(gate), L) · clip(up, ±L)`; a per-layer
+//!   - `ffai_swiglu` — `silu(gate) · up` (Llama/Qwen/Gemma/Mistral)
+//!   - `ffai_clamped_swiglu` — `clip(silu(gate), L) · clip(up, ±L)`; a per-layer
 //!     activation-clip limit (gpt-oss, StepFun Step-3). `limit <= 0` ⇒ plain SwiGLU
-//!   - `mt_fused_gate_gelu` — `gelu_approx(gate) · up`
-//!   - `mt_fused_gate_clipped_swiglu` — GPT-OSS clipped: clamp `±7`,
+//!   - `ffai_fused_gate_gelu` — `gelu_approx(gate) · up`
+//!   - `ffai_fused_gate_clipped_swiglu` — GPT-OSS clipped: clamp `±7`,
 //!     `sigmoid(1.702·g)` gate, `+1` up bias
 //!
 //! All are one-thread-per-output elementwise kernels computed in f32. The plain
-//! ungated `silu` activation lives in `ops/unary.rs` (`mt_silu`); `mt_swiglu`
+//! ungated `silu` activation lives in `ops/unary.rs` (`ffai_silu`); `ffai_swiglu`
 //! cross-kernel-calls it (inlined at codegen by `KernelInlinePass`).
 //!
 //! MLX reference: `mx.fast.swiglu` + `fused_gate_activation.metal`
-//! (`apply_gate<activation_type ∈ {0,1,2}>`; type 0 = silu = `mt_swiglu`).
+//! (`apply_gate<activation_type ∈ {0,1,2}>`; type 0 = silu = `ffai_swiglu`).
 
 use ffai_kernels::kernel;
 
 // ── SwiGLU: silu(gate) · up ───────────────────────────────────────────────────
 
 #[kernel]
-pub fn mt_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
     let idx = tid;
     let g = load(gate[idx]).cast::<f32>();
     let u = load(up[idx]).cast::<f32>();
-    // Cross-kernel call: KernelInlinePass splices mt_silu's scalar body here.
-    // mt_silu's input-param load is replaced by g (already f32), so silu runs in
+    // Cross-kernel call: KernelInlinePass splices ffai_silu's scalar body here.
+    // ffai_silu's input-param load is replaced by g (already f32), so silu runs in
     // f32. Future fusion passes can identify the (silu, mul) → swiglu pattern.
-    let s = mt_silu(g);
+    let s = ffai_silu(g);
     store(out[idx], (s * u).cast::<T>());
 }
 
@@ -43,7 +43,7 @@ pub fn mt_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
 // Bare `#[kernel]` with a runtime `limit: f32` constexpr. `limit <= 0` collapses
 // to plain SwiGLU (the per-layer dispatch reaches for this only on marked layers).
 #[kernel]
-pub fn mt_clamped_swiglu<T>(
+pub fn ffai_clamped_swiglu<T>(
     gate: Tensor<T>,
     up: Tensor<T>,
     out: Tensor<T>,
@@ -75,7 +75,7 @@ pub fn mt_clamped_swiglu<T>(
 /// `fused_gate_activation.metal`. Computed in f32 so the cubic + tanh keep
 /// precision regardless of `T`.
 #[kernel]
-pub fn mt_fused_gate_gelu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_fused_gate_gelu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
     let idx = program_id::<0>();
     let g = load(gate[idx]).cast::<f32>();
     let u = load(up[idx]).cast::<f32>();
@@ -93,7 +93,7 @@ pub fn mt_fused_gate_gelu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
 /// Matches `clipped_swiglu` in `fused_gate_activation.metal`. Clamp is composed
 /// from two `select`s (the DSL has no `clamp` builtin).
 #[kernel]
-pub fn mt_fused_gate_clipped_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_fused_gate_clipped_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tensor<T>) {
     let idx = program_id::<0>();
     let g_raw = load(gate[idx]).cast::<f32>();
     let u_raw = load(up[idx]).cast::<f32>();
@@ -111,10 +111,15 @@ pub fn mt_fused_gate_clipped_swiglu<T>(gate: Tensor<T>, up: Tensor<T>, out: Tens
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_clamped_swiglu, mt_fused_gate_clipped_swiglu, mt_fused_gate_gelu, mt_swiglu};
+    use super::{
+        ffai_clamped_swiglu,
+        ffai_fused_gate_clipped_swiglu,
+        ffai_fused_gate_gelu,
+        ffai_swiglu,
+    };
     use crate::utils::{pack_f32, unpack_f32};
 
-    // ── mt_swiglu ─────────────────────────────────────────────────────────────
+    // ── ffai_swiglu ─────────────────────────────────────────────────────────────
 
     fn swiglu_setup(n: usize, dt: DType) -> TestSetup {
         let gate: Vec<f32> = (0..n).map(|i| (i % 17) as f32 * 0.35 - 3.0).collect();
@@ -123,7 +128,7 @@ pub mod kernel_tests {
         let u_dt = unpack_f32(&pack_f32(&up, dt), dt);
         let expected: Vec<f32> =
             g_dt.iter().zip(&u_dt).map(|(&g, &u)| (g / (1.0 + (-g).exp())) * u).collect();
-        TestSetup::new(mt_swiglu::kernel_ir_for(dt))
+        TestSetup::new(ffai_swiglu::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
             .input(TestBuffer::from_vec("up", pack_f32(&up, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -132,9 +137,9 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
-    fn test_mt_swiglu(dt: DType) -> TestSetup { swiglu_setup(1024, dt) }
+    fn test_ffai_swiglu(dt: DType) -> TestSetup { swiglu_setup(1024, dt) }
 
-    // ── mt_clamped_swiglu ─────────────────────────────────────────────────────
+    // ── ffai_clamped_swiglu ─────────────────────────────────────────────────────
 
     fn clamped_setup(n: usize, limit: f32, dt: DType) -> TestSetup {
         let gate: Vec<f32> = (0..n).map(|i| (i % 17) as f32 * 0.35 - 3.0).collect();
@@ -151,7 +156,7 @@ pub mod kernel_tests {
                 s_c * u_c
             })
             .collect();
-        TestSetup::new(mt_clamped_swiglu::kernel_ir_for(dt))
+        TestSetup::new(ffai_clamped_swiglu::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
             .input(TestBuffer::from_vec("up", pack_f32(&up, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -161,16 +166,16 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
-    fn test_mt_clamped_swiglu_active(dt: DType) -> TestSetup { clamped_setup(1024, 7.0, dt) }
+    fn test_ffai_clamped_swiglu_active(dt: DType) -> TestSetup { clamped_setup(1024, 7.0, dt) }
 
-    /// `limit == 0` collapses to plain SwiGLU — equivalence with `mt_swiglu` is
+    /// `limit == 0` collapses to plain SwiGLU — equivalence with `ffai_swiglu` is
     /// the invariant the per-layer dispatch ships on.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
-    fn test_mt_clamped_swiglu_zero_limit_equals_plain(dt: DType) -> TestSetup {
+    fn test_ffai_clamped_swiglu_zero_limit_equals_plain(dt: DType) -> TestSetup {
         clamped_setup(1024, 0.0, dt)
     }
 
-    // ── mt_fused_gate_{gelu,clipped_swiglu} ───────────────────────────────────
+    // ── ffai_fused_gate_{gelu,clipped_swiglu} ───────────────────────────────────
 
     fn inputs(n: usize, dt: DType) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
         // Range spans beyond +/-7 so clipped_swiglu's clamp is exercised.
@@ -205,7 +210,7 @@ pub mod kernel_tests {
             .zip(&u)
             .map(|(&g, &u)| 0.5 * g * (1.0 + (C * (g + 0.044715 * g * g * g)).tanh()) * u)
             .collect();
-        build(mt_fused_gate_gelu::kernel_ir_for(dt), &gate, &up, &expected, dt)
+        build(ffai_fused_gate_gelu::kernel_ir_for(dt), &gate, &up, &expected, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
@@ -220,7 +225,7 @@ pub mod kernel_tests {
                 g * (1.0 / (1.0 + (-1.702 * g).exp())) * (u + 1.0)
             })
             .collect();
-        build(mt_fused_gate_clipped_swiglu::kernel_ir_for(dt), &gate, &up, &expected, dt)
+        build(ffai_fused_gate_clipped_swiglu::kernel_ir_for(dt), &gate, &up, &expected, dt)
     }
 }
 
@@ -228,12 +233,17 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_clamped_swiglu, mt_fused_gate_clipped_swiglu, mt_fused_gate_gelu, mt_swiglu};
+    use super::{
+        ffai_clamped_swiglu,
+        ffai_fused_gate_clipped_swiglu,
+        ffai_fused_gate_gelu,
+        ffai_swiglu,
+    };
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_swiglu(dt: DType) -> BenchSetup {
         let n = 1024 * 1024usize;
-        BenchSetup::new(mt_swiglu::kernel_ir_for(dt))
+        BenchSetup::new(ffai_swiglu::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", n, dt))
             .buffer(BenchBuffer::random("up", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
@@ -244,7 +254,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_clamped_swiglu(dt: DType) -> BenchSetup {
         let n = 1024 * 1024usize;
-        BenchSetup::new(mt_clamped_swiglu::kernel_ir_for(dt))
+        BenchSetup::new(ffai_clamped_swiglu::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", n, dt))
             .buffer(BenchBuffer::random("up", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
@@ -264,10 +274,10 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_gelu(dt: DType) -> BenchSetup { fb(mt_fused_gate_gelu::kernel_ir_for(dt), dt) }
+    fn bench_gelu(dt: DType) -> BenchSetup { fb(ffai_fused_gate_gelu::kernel_ir_for(dt), dt) }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_clipped(dt: DType) -> BenchSetup {
-        fb(mt_fused_gate_clipped_swiglu::kernel_ir_for(dt), dt)
+        fb(ffai_fused_gate_clipped_swiglu::kernel_ir_for(dt), dt)
     }
 }

@@ -480,15 +480,15 @@ fn load_results(path: &str, label: &str) -> Result<Vec<Value>, CliError> {
     }
 }
 
-/// Build a map from (op, shape) -> (ref_perf, mt_perf).
+/// Build a map from (op, shape) -> (ref_perf, ffai_perf).
 fn build_result_map(results: &[Value]) -> HashMap<RowKey, (f64, f64)> {
     let mut map = HashMap::new();
     for item in results {
         let op = item.get("op").and_then(|v| v.as_str()).unwrap_or("?").to_string();
         let shape = item.get("shape").and_then(|v| v.as_str()).unwrap_or("?").to_string();
         let ref_perf = item.get("ref").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let mt_perf = item.get("mt").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        map.insert(RowKey { op, shape }, (ref_perf, mt_perf));
+        let ffai_perf = item.get("ffai").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        map.insert(RowKey { op, shape }, (ref_perf, ffai_perf));
     }
     map
 }
@@ -503,7 +503,7 @@ mod tests {
         pairs
             .iter()
             .map(|(op, shape, r, m)| {
-                json!({ "op": op, "shape": shape, "metric": "GB/s", "ref": r, "mt": m })
+                json!({ "op": op, "shape": shape, "metric": "GB/s", "ref": r, "ffai": m })
             })
             .collect()
     }

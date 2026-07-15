@@ -21,7 +21,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_bgemm_iq2xxs_view<T>(
+pub fn ffai_moe_bgemm_iq2xxs_view<T>(
     x: Tensor<T>,
     view_u8: Tensor<u8>,
     grid: Tensor<u8>,
@@ -174,7 +174,7 @@ pub fn mt_moe_bgemm_iq2xxs_view<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_bgemm_iq2xxs_view;
+    use super::ffai_moe_bgemm_iq2xxs_view;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bgemm_iq2xxs_view(dt: DType) -> BenchSetup {
@@ -185,7 +185,7 @@ pub mod kernel_benches {
         let nblk = n_out * k_in / 256;
         // view holds n_experts × nblk IQ2 blocks of 66 bytes each.
         let view_bytes = n_experts * nblk * 66;
-        BenchSetup::new(mt_moe_bgemm_iq2xxs_view::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_bgemm_iq2xxs_view::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", t_rows * k_in, dt))
             .buffer(BenchBuffer::random("view_u8", view_bytes, DType::U8))

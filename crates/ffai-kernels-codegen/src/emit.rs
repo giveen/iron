@@ -10,7 +10,7 @@
 //! emit pipeline without depending on the CLI binary.
 //!
 //! Naming convention: kernels are written under their per-dtype
-//! monomorphized name (e.g. `mt_add_f32`, `mt_add_f16`, `mt_add_bf16`).
+//! monomorphized name (e.g. `ffai_add_f32`, `ffai_add_f16`, `ffai_add_bf16`).
 //! The caller sets `kernel.name` before passing it in — see the CLI's
 //! `cmd::build` for the canonical iteration over `BenchSpec`s.
 
@@ -648,8 +648,8 @@ mod tests {
 
     #[test]
     fn no_indirect_wrapper_for_other_kernels() {
-        let swift = render_swift_wrappers(&[dummy_kernel("mt_add_f32")]);
-        assert!(swift.contains("func mt_add_f32("));
+        let swift = render_swift_wrappers(&[dummy_kernel("ffai_add_f32")]);
+        assert!(swift.contains("func ffai_add_f32("));
         assert!(!swift.contains("_indirect("));
     }
 
@@ -662,7 +662,7 @@ mod tests {
     /// emit path lands with a fixture exercising it).
     #[test]
     fn emits_threadgroups_wrapper_with_bindings_and_dispatch() {
-        let mut k = dummy_kernel("mt_moe_bgemm_mma");
+        let mut k = dummy_kernel("ffai_moe_bgemm_mma");
         // A second buffer + a constexpr so both binding loops are exercised.
         k.params.push(Param {
             name: "x".into(),
@@ -679,8 +679,8 @@ mod tests {
         let swift = render_swift_wrappers(&[k]);
 
         // The threadgroups variant exists alongside the direct wrapper.
-        assert!(swift.contains("func mt_moe_bgemm_mma("));
-        assert!(swift.contains("public static func mt_moe_bgemm_mma_threadgroups("));
+        assert!(swift.contains("func ffai_moe_bgemm_mma("));
+        assert!(swift.contains("public static func ffai_moe_bgemm_mma_threadgroups("));
         // gridSize is in THREADGROUPS and dispatch uses dispatchThreadgroups.
         assert!(swift.contains("gridSize: MTLSize,"));
         assert!(swift.contains("threadgroupSize: MTLSize,"));
@@ -694,6 +694,6 @@ mod tests {
         assert!(swift.contains("var k_in_v = k_in"));
         assert!(swift.contains("enc.setBytes(&k_in_v, length: 4, index: 2)"));
         // PSO lookup uses the base kernel name (no `_threadgroups` PSO exists).
-        assert!(swift.contains("pipelineState(for: \"mt_moe_bgemm_mma\")"));
+        assert!(swift.contains("pipelineState(for: \"ffai_moe_bgemm_mma\")"));
     }
 }

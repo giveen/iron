@@ -3,7 +3,7 @@
 //! Flash **block-scaled** SDPA — single-pass online-softmax attention over a
 //! block-scaled-quantized K/V cache, for the spec-conformant formats
 //! (mxfp4 / nvfp4 / mxfp8 e4m3+e5m2 / nvfp8). The block-scaled counterpart of
-//! the affine `ffai/mt_flash_quantized_sdpa.rs`: K and V are dequantized inline
+//! the affine `ffai/ffai_flash_quantized_sdpa.rs`: K and V are dequantized inline
 //! per thread via `element_decode(code) · block_scale` (no bias) instead of the
 //! affine `q·scale + bias`.
 //!
@@ -88,8 +88,8 @@ macro_rules! mxfp4_flash {
                             let ksc = exp2(
                                 load(k_scales[k_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
-                            dot_partial =
-                                dot_partial + stack_load("q_vals", i) * (mt_decode_e2m1(nib) * ksc);
+                            dot_partial = dot_partial
+                                + stack_load("q_vals", i) * (ffai_decode_e2m1(nib) * ksc);
                         }
                     }
                     let score = simd_sum(dot_partial);
@@ -111,7 +111,7 @@ macro_rules! mxfp4_flash {
                             stack_store(
                                 "o",
                                 i,
-                                prev * exp_diff + exp_score * (mt_decode_e2m1(nib) * vsc),
+                                prev * exp_diff + exp_score * (ffai_decode_e2m1(nib) * vsc),
                             );
                         }
                     }
@@ -131,11 +131,11 @@ macro_rules! mxfp4_flash {
         }
     };
 }
-mxfp4_flash!(mt_mxfp4_flash_sdpa_d64, 2u32);
-mxfp4_flash!(mt_mxfp4_flash_sdpa_d96, 3u32);
-mxfp4_flash!(mt_mxfp4_flash_sdpa_d128, 4u32);
-mxfp4_flash!(mt_mxfp4_flash_sdpa_d256, 8u32);
-mxfp4_flash!(mt_mxfp4_flash_sdpa_d512, 16u32);
+mxfp4_flash!(ffai_mxfp4_flash_sdpa_d64, 2u32);
+mxfp4_flash!(ffai_mxfp4_flash_sdpa_d96, 3u32);
+mxfp4_flash!(ffai_mxfp4_flash_sdpa_d128, 4u32);
+mxfp4_flash!(ffai_mxfp4_flash_sdpa_d256, 8u32);
+mxfp4_flash!(ffai_mxfp4_flash_sdpa_d512, 16u32);
 
 /// nvfp4 flash SDPA — E2M1 K/V (block 16), E4M3 micro-scale × global.
 macro_rules! nvfp4_flash {
@@ -194,11 +194,11 @@ macro_rules! nvfp4_flash {
                             let nib = (load(k_packed[k_word_row + d / 8u32])
                                 >> ((d % 8u32) * 4u32))
                                 & 0xFu32;
-                            let ksc = mt_decode_e4m3(
+                            let ksc = ffai_decode_e4m3(
                                 load(k_scales[k_blk_row + d / block_size]).cast::<u32>(),
                             ) * global;
-                            dot_partial =
-                                dot_partial + stack_load("q_vals", i) * (mt_decode_e2m1(nib) * ksc);
+                            dot_partial = dot_partial
+                                + stack_load("q_vals", i) * (ffai_decode_e2m1(nib) * ksc);
                         }
                     }
                     let score = simd_sum(dot_partial);
@@ -213,14 +213,14 @@ macro_rules! nvfp4_flash {
                             let nib = (load(v_packed[v_word_row + d / 8u32])
                                 >> ((d % 8u32) * 4u32))
                                 & 0xFu32;
-                            let vsc = mt_decode_e4m3(
+                            let vsc = ffai_decode_e4m3(
                                 load(v_scales[v_blk_row + d / block_size]).cast::<u32>(),
                             ) * global;
                             let prev = stack_load("o", i);
                             stack_store(
                                 "o",
                                 i,
-                                prev * exp_diff + exp_score * (mt_decode_e2m1(nib) * vsc),
+                                prev * exp_diff + exp_score * (ffai_decode_e2m1(nib) * vsc),
                             );
                         }
                     }
@@ -240,11 +240,11 @@ macro_rules! nvfp4_flash {
         }
     };
 }
-nvfp4_flash!(mt_nvfp4_flash_sdpa_d64, 2u32);
-nvfp4_flash!(mt_nvfp4_flash_sdpa_d96, 3u32);
-nvfp4_flash!(mt_nvfp4_flash_sdpa_d128, 4u32);
-nvfp4_flash!(mt_nvfp4_flash_sdpa_d256, 8u32);
-nvfp4_flash!(mt_nvfp4_flash_sdpa_d512, 16u32);
+nvfp4_flash!(ffai_nvfp4_flash_sdpa_d64, 2u32);
+nvfp4_flash!(ffai_nvfp4_flash_sdpa_d96, 3u32);
+nvfp4_flash!(ffai_nvfp4_flash_sdpa_d128, 4u32);
+nvfp4_flash!(ffai_nvfp4_flash_sdpa_d256, 8u32);
+nvfp4_flash!(ffai_nvfp4_flash_sdpa_d512, 16u32);
 
 /// mxfp8 (E4M3) flash SDPA — 8-bit K/V (block 32), E8M0 pow-2 scale.
 macro_rules! mxfp8_e4m3_flash {
@@ -298,7 +298,7 @@ macro_rules! mxfp8_e4m3_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = exp2(
                                 load(k_scales[k_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -314,7 +314,7 @@ macro_rules! mxfp8_e4m3_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = exp2(
                                 load(v_scales[v_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -338,11 +338,11 @@ macro_rules! mxfp8_e4m3_flash {
         }
     };
 }
-mxfp8_e4m3_flash!(mt_mxfp8_e4m3_flash_sdpa_d64, 2u32);
-mxfp8_e4m3_flash!(mt_mxfp8_e4m3_flash_sdpa_d96, 3u32);
-mxfp8_e4m3_flash!(mt_mxfp8_e4m3_flash_sdpa_d128, 4u32);
-mxfp8_e4m3_flash!(mt_mxfp8_e4m3_flash_sdpa_d256, 8u32);
-mxfp8_e4m3_flash!(mt_mxfp8_e4m3_flash_sdpa_d512, 16u32);
+mxfp8_e4m3_flash!(ffai_mxfp8_e4m3_flash_sdpa_d64, 2u32);
+mxfp8_e4m3_flash!(ffai_mxfp8_e4m3_flash_sdpa_d96, 3u32);
+mxfp8_e4m3_flash!(ffai_mxfp8_e4m3_flash_sdpa_d128, 4u32);
+mxfp8_e4m3_flash!(ffai_mxfp8_e4m3_flash_sdpa_d256, 8u32);
+mxfp8_e4m3_flash!(ffai_mxfp8_e4m3_flash_sdpa_d512, 16u32);
 
 /// mxfp8 (E5M2) flash SDPA — 8-bit K/V (block 32), E8M0 pow-2 scale.
 macro_rules! mxfp8_e5m2_flash {
@@ -396,7 +396,7 @@ macro_rules! mxfp8_e5m2_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = exp2(
                                 load(k_scales[k_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -412,7 +412,7 @@ macro_rules! mxfp8_e5m2_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = exp2(
                                 load(v_scales[v_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -436,11 +436,11 @@ macro_rules! mxfp8_e5m2_flash {
         }
     };
 }
-mxfp8_e5m2_flash!(mt_mxfp8_e5m2_flash_sdpa_d64, 2u32);
-mxfp8_e5m2_flash!(mt_mxfp8_e5m2_flash_sdpa_d96, 3u32);
-mxfp8_e5m2_flash!(mt_mxfp8_e5m2_flash_sdpa_d128, 4u32);
-mxfp8_e5m2_flash!(mt_mxfp8_e5m2_flash_sdpa_d256, 8u32);
-mxfp8_e5m2_flash!(mt_mxfp8_e5m2_flash_sdpa_d512, 16u32);
+mxfp8_e5m2_flash!(ffai_mxfp8_e5m2_flash_sdpa_d64, 2u32);
+mxfp8_e5m2_flash!(ffai_mxfp8_e5m2_flash_sdpa_d96, 3u32);
+mxfp8_e5m2_flash!(ffai_mxfp8_e5m2_flash_sdpa_d128, 4u32);
+mxfp8_e5m2_flash!(ffai_mxfp8_e5m2_flash_sdpa_d256, 8u32);
+mxfp8_e5m2_flash!(ffai_mxfp8_e5m2_flash_sdpa_d512, 16u32);
 
 /// nvfp8 flash SDPA — E4M3 K/V (block 16), per-block FP32 scale.
 macro_rules! nvfp8_flash {
@@ -494,7 +494,7 @@ macro_rules! nvfp8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]);
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -508,7 +508,7 @@ macro_rules! nvfp8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]);
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -530,16 +530,16 @@ macro_rules! nvfp8_flash {
         }
     };
 }
-nvfp8_flash!(mt_nvfp8_flash_sdpa_d64, 2u32);
-nvfp8_flash!(mt_nvfp8_flash_sdpa_d96, 3u32);
-nvfp8_flash!(mt_nvfp8_flash_sdpa_d128, 4u32);
-nvfp8_flash!(mt_nvfp8_flash_sdpa_d256, 8u32);
-nvfp8_flash!(mt_nvfp8_flash_sdpa_d512, 16u32);
+nvfp8_flash!(ffai_nvfp8_flash_sdpa_d64, 2u32);
+nvfp8_flash!(ffai_nvfp8_flash_sdpa_d96, 3u32);
+nvfp8_flash!(ffai_nvfp8_flash_sdpa_d128, 4u32);
+nvfp8_flash!(ffai_nvfp8_flash_sdpa_d256, 8u32);
+nvfp8_flash!(ffai_nvfp8_flash_sdpa_d512, 16u32);
 
 // ── Legacy float-scale (fp4 / fp8) + symmetric int8 flash SDPA ─────────────
 // These share the block-scaled attention body but store a raw per-group FP32
 // scale (no E8M0/E4M3/global). fp8_e4m3 has the same shape as nvfp8 (8-bit
-// E4M3 + f32 scale), so it reuses `mt_nvfp8_flash_sdpa_d128`; only fp4 (4-bit
+// E4M3 + f32 scale), so it reuses `ffai_nvfp8_flash_sdpa_d128`; only fp4 (4-bit
 // E2M1), fp8_e5m2 (8-bit E5M2), and int8 (8-bit symmetric) need their own
 // decode here.
 
@@ -600,8 +600,8 @@ macro_rules! fp4_flash {
                                 >> ((d % 8u32) * 4u32))
                                 & 0xFu32;
                             let ksc = load(k_scales[k_blk_row + d / block_size]);
-                            dot_partial =
-                                dot_partial + stack_load("q_vals", i) * (mt_decode_e2m1(nib) * ksc);
+                            dot_partial = dot_partial
+                                + stack_load("q_vals", i) * (ffai_decode_e2m1(nib) * ksc);
                         }
                     }
                     let score = simd_sum(dot_partial);
@@ -621,7 +621,7 @@ macro_rules! fp4_flash {
                             stack_store(
                                 "o",
                                 i,
-                                prev * exp_diff + exp_score * (mt_decode_e2m1(nib) * vsc),
+                                prev * exp_diff + exp_score * (ffai_decode_e2m1(nib) * vsc),
                             );
                         }
                     }
@@ -641,11 +641,11 @@ macro_rules! fp4_flash {
         }
     };
 }
-fp4_flash!(mt_fp4_flash_sdpa_d64, 2u32);
-fp4_flash!(mt_fp4_flash_sdpa_d96, 3u32);
-fp4_flash!(mt_fp4_flash_sdpa_d128, 4u32);
-fp4_flash!(mt_fp4_flash_sdpa_d256, 8u32);
-fp4_flash!(mt_fp4_flash_sdpa_d512, 16u32);
+fp4_flash!(ffai_fp4_flash_sdpa_d64, 2u32);
+fp4_flash!(ffai_fp4_flash_sdpa_d96, 3u32);
+fp4_flash!(ffai_fp4_flash_sdpa_d128, 4u32);
+fp4_flash!(ffai_fp4_flash_sdpa_d256, 8u32);
+fp4_flash!(ffai_fp4_flash_sdpa_d512, 16u32);
 
 /// Legacy fp8 (E5M2) flash SDPA — 8-bit K/V (group 32), FP32 scale.
 macro_rules! fp8_e5m2_flash {
@@ -699,7 +699,7 @@ macro_rules! fp8_e5m2_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]);
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -713,7 +713,7 @@ macro_rules! fp8_e5m2_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]);
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -735,11 +735,11 @@ macro_rules! fp8_e5m2_flash {
         }
     };
 }
-fp8_e5m2_flash!(mt_fp8_e5m2_flash_sdpa_d64, 2u32);
-fp8_e5m2_flash!(mt_fp8_e5m2_flash_sdpa_d96, 3u32);
-fp8_e5m2_flash!(mt_fp8_e5m2_flash_sdpa_d128, 4u32);
-fp8_e5m2_flash!(mt_fp8_e5m2_flash_sdpa_d256, 8u32);
-fp8_e5m2_flash!(mt_fp8_e5m2_flash_sdpa_d512, 16u32);
+fp8_e5m2_flash!(ffai_fp8_e5m2_flash_sdpa_d64, 2u32);
+fp8_e5m2_flash!(ffai_fp8_e5m2_flash_sdpa_d96, 3u32);
+fp8_e5m2_flash!(ffai_fp8_e5m2_flash_sdpa_d128, 4u32);
+fp8_e5m2_flash!(ffai_fp8_e5m2_flash_sdpa_d256, 8u32);
+fp8_e5m2_flash!(ffai_fp8_e5m2_flash_sdpa_d512, 16u32);
 
 /// Symmetric int8 flash SDPA — 8-bit codes (group 64), per-group FP32
 /// scale (affine, scale-only). Decode is sign-extend → `code · scale`.
@@ -797,7 +797,7 @@ macro_rules! int8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]);
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -811,7 +811,7 @@ macro_rules! int8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]);
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -833,13 +833,13 @@ macro_rules! int8_flash {
         }
     };
 }
-int8_flash!(mt_int8_flash_sdpa_d64, 2u32);
+int8_flash!(ffai_int8_flash_sdpa_d64, 2u32);
 // d96 (GPT-NeoX): int8 group 64 doesn't divide 96, so the cache tiles as a
 // 64-block + a ragged 32-block (host `pack`/kernel `n_blocks` both round up).
-int8_flash!(mt_int8_flash_sdpa_d96, 3u32);
-int8_flash!(mt_int8_flash_sdpa_d128, 4u32);
-int8_flash!(mt_int8_flash_sdpa_d256, 8u32);
-int8_flash!(mt_int8_flash_sdpa_d512, 16u32);
+int8_flash!(ffai_int8_flash_sdpa_d96, 3u32);
+int8_flash!(ffai_int8_flash_sdpa_d128, 4u32);
+int8_flash!(ffai_int8_flash_sdpa_d256, 8u32);
+int8_flash!(ffai_int8_flash_sdpa_d512, 16u32);
 
 // ── Symmetric sub-byte integers (int2/3/4/5/6 + MXINT2..6) + MXINT8 ─────────
 // Cache elements are signed N-bit two's-complement codes, tight-bit-packed
@@ -982,31 +982,31 @@ macro_rules! int_flash_f32 {
         }
     };
 }
-int_flash_f32!(mt_int2_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
-int_flash_f32!(mt_int2_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
-int_flash_f32!(mt_int2_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
-int_flash_f32!(mt_int2_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
-int_flash_f32!(mt_int2_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
-int_flash_f32!(mt_int3_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
-int_flash_f32!(mt_int3_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
-int_flash_f32!(mt_int3_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
-int_flash_f32!(mt_int3_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
-int_flash_f32!(mt_int3_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
-int_flash_f32!(mt_int4_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
-int_flash_f32!(mt_int4_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
-int_flash_f32!(mt_int4_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
-int_flash_f32!(mt_int4_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
-int_flash_f32!(mt_int4_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
-int_flash_f32!(mt_int5_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
-int_flash_f32!(mt_int5_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
-int_flash_f32!(mt_int5_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
-int_flash_f32!(mt_int5_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
-int_flash_f32!(mt_int5_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
-int_flash_f32!(mt_int6_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
-int_flash_f32!(mt_int6_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
-int_flash_f32!(mt_int6_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
-int_flash_f32!(mt_int6_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
-int_flash_f32!(mt_int6_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
+int_flash_f32!(ffai_int2_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
+int_flash_f32!(ffai_int2_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
+int_flash_f32!(ffai_int2_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
+int_flash_f32!(ffai_int2_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
+int_flash_f32!(ffai_int2_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
+int_flash_f32!(ffai_int3_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
+int_flash_f32!(ffai_int3_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
+int_flash_f32!(ffai_int3_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
+int_flash_f32!(ffai_int3_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
+int_flash_f32!(ffai_int3_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
+int_flash_f32!(ffai_int4_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
+int_flash_f32!(ffai_int4_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
+int_flash_f32!(ffai_int4_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
+int_flash_f32!(ffai_int4_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
+int_flash_f32!(ffai_int4_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
+int_flash_f32!(ffai_int5_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
+int_flash_f32!(ffai_int5_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
+int_flash_f32!(ffai_int5_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
+int_flash_f32!(ffai_int5_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
+int_flash_f32!(ffai_int5_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
+int_flash_f32!(ffai_int6_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
+int_flash_f32!(ffai_int6_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
+int_flash_f32!(ffai_int6_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
+int_flash_f32!(ffai_int6_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
+int_flash_f32!(ffai_int6_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
 
 /// E8M0-scaled symmetric int flash SDPA (MXINT2/3/4/5/6): bit-stream K/V codes
 /// (block 32) × pow-2 (E8M0) block scale `2^(bits-127)`. Same straddle-aware
@@ -1136,31 +1136,31 @@ macro_rules! int_flash_e8m0 {
         }
     };
 }
-int_flash_e8m0!(mt_mxint2_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
-int_flash_e8m0!(mt_mxint2_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
-int_flash_e8m0!(mt_mxint2_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
-int_flash_e8m0!(mt_mxint2_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
-int_flash_e8m0!(mt_mxint2_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
-int_flash_e8m0!(mt_mxint3_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
-int_flash_e8m0!(mt_mxint3_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
-int_flash_e8m0!(mt_mxint3_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
-int_flash_e8m0!(mt_mxint3_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
-int_flash_e8m0!(mt_mxint3_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
-int_flash_e8m0!(mt_mxint4_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
-int_flash_e8m0!(mt_mxint4_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
-int_flash_e8m0!(mt_mxint4_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
-int_flash_e8m0!(mt_mxint4_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
-int_flash_e8m0!(mt_mxint4_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
-int_flash_e8m0!(mt_mxint5_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
-int_flash_e8m0!(mt_mxint5_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
-int_flash_e8m0!(mt_mxint5_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
-int_flash_e8m0!(mt_mxint5_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
-int_flash_e8m0!(mt_mxint5_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
-int_flash_e8m0!(mt_mxint6_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
-int_flash_e8m0!(mt_mxint6_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
-int_flash_e8m0!(mt_mxint6_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
-int_flash_e8m0!(mt_mxint6_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
-int_flash_e8m0!(mt_mxint6_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
+int_flash_e8m0!(ffai_mxint2_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
+int_flash_e8m0!(ffai_mxint2_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
+int_flash_e8m0!(ffai_mxint2_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
+int_flash_e8m0!(ffai_mxint2_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
+int_flash_e8m0!(ffai_mxint2_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
+int_flash_e8m0!(ffai_mxint3_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
+int_flash_e8m0!(ffai_mxint3_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
+int_flash_e8m0!(ffai_mxint3_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
+int_flash_e8m0!(ffai_mxint3_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
+int_flash_e8m0!(ffai_mxint3_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
+int_flash_e8m0!(ffai_mxint4_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
+int_flash_e8m0!(ffai_mxint4_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
+int_flash_e8m0!(ffai_mxint4_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
+int_flash_e8m0!(ffai_mxint4_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
+int_flash_e8m0!(ffai_mxint4_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
+int_flash_e8m0!(ffai_mxint5_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
+int_flash_e8m0!(ffai_mxint5_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
+int_flash_e8m0!(ffai_mxint5_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
+int_flash_e8m0!(ffai_mxint5_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
+int_flash_e8m0!(ffai_mxint5_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
+int_flash_e8m0!(ffai_mxint6_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
+int_flash_e8m0!(ffai_mxint6_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
+int_flash_e8m0!(ffai_mxint6_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
+int_flash_e8m0!(ffai_mxint6_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
+int_flash_e8m0!(ffai_mxint6_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
 
 /// MXINT8 flash SDPA — 8-bit codes (byte layout, block 32), E8M0 pow-2 block
 /// scale. Same shape as `int8_flash` (one code/byte, sign-extend → `code·scale`)
@@ -1218,7 +1218,7 @@ macro_rules! mxint8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = exp2(
                                 load(k_scales[k_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -1234,7 +1234,7 @@ macro_rules! mxint8_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = exp2(
                                 load(v_scales[v_blk_row + d / block_size]).cast::<f32>() - 127.0f32,
                             );
@@ -1258,11 +1258,11 @@ macro_rules! mxint8_flash {
         }
     };
 }
-mxint8_flash!(mt_mxint8_flash_sdpa_d64, 2u32);
-mxint8_flash!(mt_mxint8_flash_sdpa_d96, 3u32);
-mxint8_flash!(mt_mxint8_flash_sdpa_d128, 4u32);
-mxint8_flash!(mt_mxint8_flash_sdpa_d256, 8u32);
-mxint8_flash!(mt_mxint8_flash_sdpa_d512, 16u32);
+mxint8_flash!(ffai_mxint8_flash_sdpa_d64, 2u32);
+mxint8_flash!(ffai_mxint8_flash_sdpa_d96, 3u32);
+mxint8_flash!(ffai_mxint8_flash_sdpa_d128, 4u32);
+mxint8_flash!(ffai_mxint8_flash_sdpa_d256, 8u32);
+mxint8_flash!(ffai_mxint8_flash_sdpa_d512, 16u32);
 
 // ── FP16-scale twins (nvfp8 / fp4 / fp8_e5m2 / int2..6 / int8) ──────────────
 // These are byte-for-byte clones of the FP32-scaled kernels above, with ONE
@@ -1328,7 +1328,7 @@ macro_rules! nvfp8_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e4m3(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]).cast::<f32>();
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -1342,7 +1342,7 @@ macro_rules! nvfp8_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e4m3(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]).cast::<f32>();
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -1364,11 +1364,11 @@ macro_rules! nvfp8_f16_flash {
         }
     };
 }
-nvfp8_f16_flash!(mt_nvfp8_f16_flash_sdpa_d64, 2u32);
-nvfp8_f16_flash!(mt_nvfp8_f16_flash_sdpa_d96, 3u32);
-nvfp8_f16_flash!(mt_nvfp8_f16_flash_sdpa_d128, 4u32);
-nvfp8_f16_flash!(mt_nvfp8_f16_flash_sdpa_d256, 8u32);
-nvfp8_f16_flash!(mt_nvfp8_f16_flash_sdpa_d512, 16u32);
+nvfp8_f16_flash!(ffai_nvfp8_f16_flash_sdpa_d64, 2u32);
+nvfp8_f16_flash!(ffai_nvfp8_f16_flash_sdpa_d96, 3u32);
+nvfp8_f16_flash!(ffai_nvfp8_f16_flash_sdpa_d128, 4u32);
+nvfp8_f16_flash!(ffai_nvfp8_f16_flash_sdpa_d256, 8u32);
+nvfp8_f16_flash!(ffai_nvfp8_f16_flash_sdpa_d512, 16u32);
 
 /// fp4 flash SDPA, FP16 scale — E2M1 K/V (group 32), per-group FP16 scale.
 /// Clone of `fp4_flash` with the scale tensor narrowed to f16.
@@ -1428,8 +1428,8 @@ macro_rules! fp4_f16_flash {
                                 >> ((d % 8u32) * 4u32))
                                 & 0xFu32;
                             let ksc = load(k_scales[k_blk_row + d / block_size]).cast::<f32>();
-                            dot_partial =
-                                dot_partial + stack_load("q_vals", i) * (mt_decode_e2m1(nib) * ksc);
+                            dot_partial = dot_partial
+                                + stack_load("q_vals", i) * (ffai_decode_e2m1(nib) * ksc);
                         }
                     }
                     let score = simd_sum(dot_partial);
@@ -1449,7 +1449,7 @@ macro_rules! fp4_f16_flash {
                             stack_store(
                                 "o",
                                 i,
-                                prev * exp_diff + exp_score * (mt_decode_e2m1(nib) * vsc),
+                                prev * exp_diff + exp_score * (ffai_decode_e2m1(nib) * vsc),
                             );
                         }
                     }
@@ -1469,11 +1469,11 @@ macro_rules! fp4_f16_flash {
         }
     };
 }
-fp4_f16_flash!(mt_fp4_f16_flash_sdpa_d64, 2u32);
-fp4_f16_flash!(mt_fp4_f16_flash_sdpa_d96, 3u32);
-fp4_f16_flash!(mt_fp4_f16_flash_sdpa_d128, 4u32);
-fp4_f16_flash!(mt_fp4_f16_flash_sdpa_d256, 8u32);
-fp4_f16_flash!(mt_fp4_f16_flash_sdpa_d512, 16u32);
+fp4_f16_flash!(ffai_fp4_f16_flash_sdpa_d64, 2u32);
+fp4_f16_flash!(ffai_fp4_f16_flash_sdpa_d96, 3u32);
+fp4_f16_flash!(ffai_fp4_f16_flash_sdpa_d128, 4u32);
+fp4_f16_flash!(ffai_fp4_f16_flash_sdpa_d256, 8u32);
+fp4_f16_flash!(ffai_fp4_f16_flash_sdpa_d512, 16u32);
 
 /// fp8 (E5M2) flash SDPA, FP16 scale — 8-bit K/V (group 32), per-group FP16
 /// scale. Clone of `fp8_e5m2_flash` with the scale tensor narrowed to f16.
@@ -1528,7 +1528,7 @@ macro_rules! fp8_e5m2_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_e5m2(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]).cast::<f32>();
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -1542,7 +1542,7 @@ macro_rules! fp8_e5m2_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_e5m2(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]).cast::<f32>();
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -1564,11 +1564,11 @@ macro_rules! fp8_e5m2_f16_flash {
         }
     };
 }
-fp8_e5m2_f16_flash!(mt_fp8_e5m2_f16_flash_sdpa_d64, 2u32);
-fp8_e5m2_f16_flash!(mt_fp8_e5m2_f16_flash_sdpa_d96, 3u32);
-fp8_e5m2_f16_flash!(mt_fp8_e5m2_f16_flash_sdpa_d128, 4u32);
-fp8_e5m2_f16_flash!(mt_fp8_e5m2_f16_flash_sdpa_d256, 8u32);
-fp8_e5m2_f16_flash!(mt_fp8_e5m2_f16_flash_sdpa_d512, 16u32);
+fp8_e5m2_f16_flash!(ffai_fp8_e5m2_f16_flash_sdpa_d64, 2u32);
+fp8_e5m2_f16_flash!(ffai_fp8_e5m2_f16_flash_sdpa_d96, 3u32);
+fp8_e5m2_f16_flash!(ffai_fp8_e5m2_f16_flash_sdpa_d128, 4u32);
+fp8_e5m2_f16_flash!(ffai_fp8_e5m2_f16_flash_sdpa_d256, 8u32);
+fp8_e5m2_f16_flash!(ffai_fp8_e5m2_f16_flash_sdpa_d512, 16u32);
 
 /// FP16-scaled symmetric int flash SDPA (int2/3/4/5/6): bit-stream K/V codes
 /// (group 64) × per-group FP16 scale. Clone of `int_flash_f32` with the scale
@@ -1698,31 +1698,31 @@ macro_rules! int_flash_f16 {
         }
     };
 }
-int_flash_f16!(mt_int2_f16_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
-int_flash_f16!(mt_int2_f16_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
-int_flash_f16!(mt_int2_f16_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
-int_flash_f16!(mt_int2_f16_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
-int_flash_f16!(mt_int2_f16_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
-int_flash_f16!(mt_int3_f16_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
-int_flash_f16!(mt_int3_f16_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
-int_flash_f16!(mt_int3_f16_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
-int_flash_f16!(mt_int3_f16_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
-int_flash_f16!(mt_int3_f16_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
-int_flash_f16!(mt_int4_f16_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
-int_flash_f16!(mt_int4_f16_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
-int_flash_f16!(mt_int4_f16_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
-int_flash_f16!(mt_int4_f16_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
-int_flash_f16!(mt_int4_f16_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
-int_flash_f16!(mt_int5_f16_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
-int_flash_f16!(mt_int5_f16_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
-int_flash_f16!(mt_int5_f16_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
-int_flash_f16!(mt_int5_f16_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
-int_flash_f16!(mt_int5_f16_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
-int_flash_f16!(mt_int6_f16_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
-int_flash_f16!(mt_int6_f16_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
-int_flash_f16!(mt_int6_f16_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
-int_flash_f16!(mt_int6_f16_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
-int_flash_f16!(mt_int6_f16_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
+int_flash_f16!(ffai_int2_f16_flash_sdpa_d64, 2u32, 2u32, 2u32, 4.0f32);
+int_flash_f16!(ffai_int2_f16_flash_sdpa_d96, 3u32, 2u32, 2u32, 4.0f32);
+int_flash_f16!(ffai_int2_f16_flash_sdpa_d128, 4u32, 2u32, 2u32, 4.0f32);
+int_flash_f16!(ffai_int2_f16_flash_sdpa_d256, 8u32, 2u32, 2u32, 4.0f32);
+int_flash_f16!(ffai_int2_f16_flash_sdpa_d512, 16u32, 2u32, 2u32, 4.0f32);
+int_flash_f16!(ffai_int3_f16_flash_sdpa_d64, 2u32, 3u32, 4u32, 8.0f32);
+int_flash_f16!(ffai_int3_f16_flash_sdpa_d96, 3u32, 3u32, 4u32, 8.0f32);
+int_flash_f16!(ffai_int3_f16_flash_sdpa_d128, 4u32, 3u32, 4u32, 8.0f32);
+int_flash_f16!(ffai_int3_f16_flash_sdpa_d256, 8u32, 3u32, 4u32, 8.0f32);
+int_flash_f16!(ffai_int3_f16_flash_sdpa_d512, 16u32, 3u32, 4u32, 8.0f32);
+int_flash_f16!(ffai_int4_f16_flash_sdpa_d64, 2u32, 4u32, 8u32, 16.0f32);
+int_flash_f16!(ffai_int4_f16_flash_sdpa_d96, 3u32, 4u32, 8u32, 16.0f32);
+int_flash_f16!(ffai_int4_f16_flash_sdpa_d128, 4u32, 4u32, 8u32, 16.0f32);
+int_flash_f16!(ffai_int4_f16_flash_sdpa_d256, 8u32, 4u32, 8u32, 16.0f32);
+int_flash_f16!(ffai_int4_f16_flash_sdpa_d512, 16u32, 4u32, 8u32, 16.0f32);
+int_flash_f16!(ffai_int5_f16_flash_sdpa_d64, 2u32, 5u32, 16u32, 32.0f32);
+int_flash_f16!(ffai_int5_f16_flash_sdpa_d96, 3u32, 5u32, 16u32, 32.0f32);
+int_flash_f16!(ffai_int5_f16_flash_sdpa_d128, 4u32, 5u32, 16u32, 32.0f32);
+int_flash_f16!(ffai_int5_f16_flash_sdpa_d256, 8u32, 5u32, 16u32, 32.0f32);
+int_flash_f16!(ffai_int5_f16_flash_sdpa_d512, 16u32, 5u32, 16u32, 32.0f32);
+int_flash_f16!(ffai_int6_f16_flash_sdpa_d64, 2u32, 6u32, 32u32, 64.0f32);
+int_flash_f16!(ffai_int6_f16_flash_sdpa_d96, 3u32, 6u32, 32u32, 64.0f32);
+int_flash_f16!(ffai_int6_f16_flash_sdpa_d128, 4u32, 6u32, 32u32, 64.0f32);
+int_flash_f16!(ffai_int6_f16_flash_sdpa_d256, 8u32, 6u32, 32u32, 64.0f32);
+int_flash_f16!(ffai_int6_f16_flash_sdpa_d512, 16u32, 6u32, 32u32, 64.0f32);
 
 /// int8 flash SDPA, FP16 scale — 8-bit codes (group 64), per-group FP16 scale.
 /// Clone of `int8_flash` with the scale tensor narrowed to f16; decode is the
@@ -1780,7 +1780,7 @@ macro_rules! int8_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let kelem = mt_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
+                            let kelem = ffai_decode_int8(load(k_packed[k_row + d]).cast::<u32>());
                             let ksc = load(k_scales[k_blk_row + d / block_size]).cast::<f32>();
                             dot_partial = dot_partial + stack_load("q_vals", i) * (kelem * ksc);
                         }
@@ -1794,7 +1794,7 @@ macro_rules! int8_f16_flash {
                     for i in range(0u32, $dpl, 1u32) {
                         let d = lane + i * 32u32;
                         if d < dim {
-                            let velem = mt_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
+                            let velem = ffai_decode_int8(load(v_packed[v_row + d]).cast::<u32>());
                             let vsc = load(v_scales[v_blk_row + d / block_size]).cast::<f32>();
                             let prev = stack_load("o", i);
                             stack_store("o", i, prev * exp_diff + exp_score * (velem * vsc));
@@ -1816,11 +1816,11 @@ macro_rules! int8_f16_flash {
         }
     };
 }
-int8_f16_flash!(mt_int8_f16_flash_sdpa_d64, 2u32);
-int8_f16_flash!(mt_int8_f16_flash_sdpa_d96, 3u32);
-int8_f16_flash!(mt_int8_f16_flash_sdpa_d128, 4u32);
-int8_f16_flash!(mt_int8_f16_flash_sdpa_d256, 8u32);
-int8_f16_flash!(mt_int8_f16_flash_sdpa_d512, 16u32);
+int8_f16_flash!(ffai_int8_f16_flash_sdpa_d64, 2u32);
+int8_f16_flash!(ffai_int8_f16_flash_sdpa_d96, 3u32);
+int8_f16_flash!(ffai_int8_f16_flash_sdpa_d128, 4u32);
+int8_f16_flash!(ffai_int8_f16_flash_sdpa_d256, 8u32);
+int8_f16_flash!(ffai_int8_f16_flash_sdpa_d512, 16u32);
 
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
@@ -1978,16 +1978,30 @@ pub mod kernel_tests {
     // Base (full attention, no sinks) for all 5 formats at d=128.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_mxfp4_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, false, 0, dt)
+        flash_setup(
+            ffai_mxfp4_flash_sdpa_d128::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            128,
+            false,
+            0,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_nvfp4_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_nvfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp4, 128, false, 0, dt)
+        flash_setup(
+            ffai_nvfp4_flash_sdpa_d128::kernel_ir_for(dt),
+            QFormat::Nvfp4,
+            128,
+            false,
+            0,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_mxfp8_e4m3_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxfp8_e4m3_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             128,
             false,
@@ -1998,7 +2012,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_mxfp8_e5m2_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxfp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             128,
             false,
@@ -2008,19 +2022,26 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_nvfp8_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_nvfp8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp8, 128, false, 0, dt)
+        flash_setup(
+            ffai_nvfp8_flash_sdpa_d128::kernel_ir_for(dt),
+            QFormat::Nvfp8,
+            128,
+            false,
+            0,
+            dt,
+        )
     }
 
     // Legacy float-scale fp4 / fp8 + symmetric int8. fp8_e4m3 reuses the
     // nvfp8 kernel (same 8-bit-E4M3 + f32-scale shape); the others decode here.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_fp4_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_fp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4, 128, false, 0, dt)
+        flash_setup(ffai_fp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_fp8_e4m3_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_nvfp8_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_nvfp8_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             128,
             false,
@@ -2031,7 +2052,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_fp8_e5m2_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_fp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_fp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             128,
             false,
@@ -2041,7 +2062,7 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_int8_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8, 128, false, 0, dt)
+        flash_setup(ffai_int8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8, 128, false, 0, dt)
     }
 
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale) +
@@ -2049,28 +2070,28 @@ pub mod kernel_tests {
     // the host `dequant` oracle regardless of how coarse the quantization is.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2, 128, false, 0, dt)
+        flash_setup(ffai_int2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3, 128, false, 0, dt)
+        flash_setup(ffai_int3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4, 128, false, 0, dt)
+        flash_setup(ffai_int4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5, 128, false, 0, dt)
+        flash_setup(ffai_int5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_flash_sdpa_d128(dt: DType) -> TestSetup {
-        flash_setup(mt_int6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6, 128, false, 0, dt)
+        flash_setup(ffai_int6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6, 128, false, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint2_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint2_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint2,
             128,
             false,
@@ -2081,7 +2102,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint3_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint3_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint3,
             128,
             false,
@@ -2092,7 +2113,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint4_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint4_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint4,
             128,
             false,
@@ -2103,7 +2124,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint5_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint5_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint5,
             128,
             false,
@@ -2114,7 +2135,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint6_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint6_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint6,
             128,
             false,
@@ -2125,7 +2146,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_mxint8_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_mxint8_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Mxint8,
             128,
             false,
@@ -2141,7 +2162,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             128,
             false,
@@ -2152,7 +2173,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_fp4_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_fp4_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp4F16,
             128,
             false,
@@ -2163,7 +2184,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             128,
             false,
@@ -2174,7 +2195,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_fp8_e5m2_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             128,
             false,
@@ -2185,7 +2206,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int2_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int2_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int2F16,
             128,
             false,
@@ -2196,7 +2217,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int3_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int3_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int3F16,
             128,
             false,
@@ -2207,7 +2228,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int4_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int4_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int4F16,
             128,
             false,
@@ -2218,7 +2239,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int5_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int5_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int5F16,
             128,
             false,
@@ -2229,7 +2250,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int6_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int6_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int6F16,
             128,
             false,
@@ -2240,7 +2261,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_flash_sdpa_d128(dt: DType) -> TestSetup {
         flash_setup(
-            mt_int8_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_int8_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Int8F16,
             128,
             false,
@@ -2252,11 +2273,18 @@ pub mod kernel_tests {
     // Sink + sliding-window paths exercised on the mxfp4 representative.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_mxfp4_flash_sdpa_d128_sinks(dt: DType) -> TestSetup {
-        flash_setup(mt_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, true, 0, dt)
+        flash_setup(ffai_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, true, 0, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-3, 3e-2, 1.5e-1])]
     fn test_mxfp4_flash_sdpa_d128_window(dt: DType) -> TestSetup {
-        flash_setup(mt_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, false, 4, dt)
+        flash_setup(
+            ffai_mxfp4_flash_sdpa_d128::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            128,
+            false,
+            4,
+            dt,
+        )
     }
 
     // ── Other production head dims (d64/d96/d256/d512), all 9 formats ──
@@ -2270,143 +2298,163 @@ pub mod kernel_tests {
         };
     }
     // d64
-    flash_dim_test!(test_mxfp4_flash_sdpa_d64, mt_mxfp4_flash_sdpa_d64, QFormat::Mxfp4, 64);
-    flash_dim_test!(test_nvfp4_flash_sdpa_d64, mt_nvfp4_flash_sdpa_d64, QFormat::Nvfp4, 64);
+    flash_dim_test!(test_mxfp4_flash_sdpa_d64, ffai_mxfp4_flash_sdpa_d64, QFormat::Mxfp4, 64);
+    flash_dim_test!(test_nvfp4_flash_sdpa_d64, ffai_nvfp4_flash_sdpa_d64, QFormat::Nvfp4, 64);
     flash_dim_test!(
         test_mxfp8_e4m3_flash_sdpa_d64,
-        mt_mxfp8_e4m3_flash_sdpa_d64,
+        ffai_mxfp8_e4m3_flash_sdpa_d64,
         QFormat::Mxfp8E4,
         64
     );
     flash_dim_test!(
         test_mxfp8_e5m2_flash_sdpa_d64,
-        mt_mxfp8_e5m2_flash_sdpa_d64,
+        ffai_mxfp8_e5m2_flash_sdpa_d64,
         QFormat::Mxfp8E5,
         64
     );
-    flash_dim_test!(test_nvfp8_flash_sdpa_d64, mt_nvfp8_flash_sdpa_d64, QFormat::Nvfp8, 64);
-    flash_dim_test!(test_fp4_flash_sdpa_d64, mt_fp4_flash_sdpa_d64, QFormat::Fp4, 64);
-    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d64, mt_nvfp8_flash_sdpa_d64, QFormat::Fp8E4m3, 64);
-    flash_dim_test!(test_fp8_e5m2_flash_sdpa_d64, mt_fp8_e5m2_flash_sdpa_d64, QFormat::Fp8E5m2, 64);
-    flash_dim_test!(test_int8_flash_sdpa_d64, mt_int8_flash_sdpa_d64, QFormat::Int8, 64);
-    flash_dim_test!(test_int2_flash_sdpa_d64, mt_int2_flash_sdpa_d64, QFormat::Int2, 64);
-    flash_dim_test!(test_int3_flash_sdpa_d64, mt_int3_flash_sdpa_d64, QFormat::Int3, 64);
-    flash_dim_test!(test_int4_flash_sdpa_d64, mt_int4_flash_sdpa_d64, QFormat::Int4, 64);
-    flash_dim_test!(test_int5_flash_sdpa_d64, mt_int5_flash_sdpa_d64, QFormat::Int5, 64);
-    flash_dim_test!(test_int6_flash_sdpa_d64, mt_int6_flash_sdpa_d64, QFormat::Int6, 64);
-    flash_dim_test!(test_mxint2_flash_sdpa_d64, mt_mxint2_flash_sdpa_d64, QFormat::Mxint2, 64);
-    flash_dim_test!(test_mxint3_flash_sdpa_d64, mt_mxint3_flash_sdpa_d64, QFormat::Mxint3, 64);
-    flash_dim_test!(test_mxint4_flash_sdpa_d64, mt_mxint4_flash_sdpa_d64, QFormat::Mxint4, 64);
-    flash_dim_test!(test_mxint5_flash_sdpa_d64, mt_mxint5_flash_sdpa_d64, QFormat::Mxint5, 64);
-    flash_dim_test!(test_mxint6_flash_sdpa_d64, mt_mxint6_flash_sdpa_d64, QFormat::Mxint6, 64);
-    flash_dim_test!(test_mxint8_flash_sdpa_d64, mt_mxint8_flash_sdpa_d64, QFormat::Mxint8, 64);
+    flash_dim_test!(test_nvfp8_flash_sdpa_d64, ffai_nvfp8_flash_sdpa_d64, QFormat::Nvfp8, 64);
+    flash_dim_test!(test_fp4_flash_sdpa_d64, ffai_fp4_flash_sdpa_d64, QFormat::Fp4, 64);
+    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d64, ffai_nvfp8_flash_sdpa_d64, QFormat::Fp8E4m3, 64);
+    flash_dim_test!(
+        test_fp8_e5m2_flash_sdpa_d64,
+        ffai_fp8_e5m2_flash_sdpa_d64,
+        QFormat::Fp8E5m2,
+        64
+    );
+    flash_dim_test!(test_int8_flash_sdpa_d64, ffai_int8_flash_sdpa_d64, QFormat::Int8, 64);
+    flash_dim_test!(test_int2_flash_sdpa_d64, ffai_int2_flash_sdpa_d64, QFormat::Int2, 64);
+    flash_dim_test!(test_int3_flash_sdpa_d64, ffai_int3_flash_sdpa_d64, QFormat::Int3, 64);
+    flash_dim_test!(test_int4_flash_sdpa_d64, ffai_int4_flash_sdpa_d64, QFormat::Int4, 64);
+    flash_dim_test!(test_int5_flash_sdpa_d64, ffai_int5_flash_sdpa_d64, QFormat::Int5, 64);
+    flash_dim_test!(test_int6_flash_sdpa_d64, ffai_int6_flash_sdpa_d64, QFormat::Int6, 64);
+    flash_dim_test!(test_mxint2_flash_sdpa_d64, ffai_mxint2_flash_sdpa_d64, QFormat::Mxint2, 64);
+    flash_dim_test!(test_mxint3_flash_sdpa_d64, ffai_mxint3_flash_sdpa_d64, QFormat::Mxint3, 64);
+    flash_dim_test!(test_mxint4_flash_sdpa_d64, ffai_mxint4_flash_sdpa_d64, QFormat::Mxint4, 64);
+    flash_dim_test!(test_mxint5_flash_sdpa_d64, ffai_mxint5_flash_sdpa_d64, QFormat::Mxint5, 64);
+    flash_dim_test!(test_mxint6_flash_sdpa_d64, ffai_mxint6_flash_sdpa_d64, QFormat::Mxint6, 64);
+    flash_dim_test!(test_mxint8_flash_sdpa_d64, ffai_mxint8_flash_sdpa_d64, QFormat::Mxint8, 64);
     // d96
-    flash_dim_test!(test_mxfp4_flash_sdpa_d96, mt_mxfp4_flash_sdpa_d96, QFormat::Mxfp4, 96);
-    flash_dim_test!(test_nvfp4_flash_sdpa_d96, mt_nvfp4_flash_sdpa_d96, QFormat::Nvfp4, 96);
+    flash_dim_test!(test_mxfp4_flash_sdpa_d96, ffai_mxfp4_flash_sdpa_d96, QFormat::Mxfp4, 96);
+    flash_dim_test!(test_nvfp4_flash_sdpa_d96, ffai_nvfp4_flash_sdpa_d96, QFormat::Nvfp4, 96);
     flash_dim_test!(
         test_mxfp8_e4m3_flash_sdpa_d96,
-        mt_mxfp8_e4m3_flash_sdpa_d96,
+        ffai_mxfp8_e4m3_flash_sdpa_d96,
         QFormat::Mxfp8E4,
         96
     );
     flash_dim_test!(
         test_mxfp8_e5m2_flash_sdpa_d96,
-        mt_mxfp8_e5m2_flash_sdpa_d96,
+        ffai_mxfp8_e5m2_flash_sdpa_d96,
         QFormat::Mxfp8E5,
         96
     );
-    flash_dim_test!(test_nvfp8_flash_sdpa_d96, mt_nvfp8_flash_sdpa_d96, QFormat::Nvfp8, 96);
-    flash_dim_test!(test_fp4_flash_sdpa_d96, mt_fp4_flash_sdpa_d96, QFormat::Fp4, 96);
-    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d96, mt_nvfp8_flash_sdpa_d96, QFormat::Fp8E4m3, 96);
-    flash_dim_test!(test_fp8_e5m2_flash_sdpa_d96, mt_fp8_e5m2_flash_sdpa_d96, QFormat::Fp8E5m2, 96);
+    flash_dim_test!(test_nvfp8_flash_sdpa_d96, ffai_nvfp8_flash_sdpa_d96, QFormat::Nvfp8, 96);
+    flash_dim_test!(test_fp4_flash_sdpa_d96, ffai_fp4_flash_sdpa_d96, QFormat::Fp4, 96);
+    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d96, ffai_nvfp8_flash_sdpa_d96, QFormat::Fp8E4m3, 96);
+    flash_dim_test!(
+        test_fp8_e5m2_flash_sdpa_d96,
+        ffai_fp8_e5m2_flash_sdpa_d96,
+        QFormat::Fp8E5m2,
+        96
+    );
     // int8 d96: ragged trailing block (64 + 32) — see the kernel/packer notes.
-    flash_dim_test!(test_int8_flash_sdpa_d96, mt_int8_flash_sdpa_d96, QFormat::Int8, 96);
+    flash_dim_test!(test_int8_flash_sdpa_d96, ffai_int8_flash_sdpa_d96, QFormat::Int8, 96);
     // int2-6 d96: int group 64 → ragged trailing block (64 + 32), same as int8;
     // mxint group 32 divides 96 evenly. The bit-stream stays word-aligned (96·BITS
     // is a whole number of u32 words for every width), so decode is unaffected.
-    flash_dim_test!(test_int2_flash_sdpa_d96, mt_int2_flash_sdpa_d96, QFormat::Int2, 96);
-    flash_dim_test!(test_int3_flash_sdpa_d96, mt_int3_flash_sdpa_d96, QFormat::Int3, 96);
-    flash_dim_test!(test_int4_flash_sdpa_d96, mt_int4_flash_sdpa_d96, QFormat::Int4, 96);
-    flash_dim_test!(test_int5_flash_sdpa_d96, mt_int5_flash_sdpa_d96, QFormat::Int5, 96);
-    flash_dim_test!(test_int6_flash_sdpa_d96, mt_int6_flash_sdpa_d96, QFormat::Int6, 96);
-    flash_dim_test!(test_mxint2_flash_sdpa_d96, mt_mxint2_flash_sdpa_d96, QFormat::Mxint2, 96);
-    flash_dim_test!(test_mxint3_flash_sdpa_d96, mt_mxint3_flash_sdpa_d96, QFormat::Mxint3, 96);
-    flash_dim_test!(test_mxint4_flash_sdpa_d96, mt_mxint4_flash_sdpa_d96, QFormat::Mxint4, 96);
-    flash_dim_test!(test_mxint5_flash_sdpa_d96, mt_mxint5_flash_sdpa_d96, QFormat::Mxint5, 96);
-    flash_dim_test!(test_mxint6_flash_sdpa_d96, mt_mxint6_flash_sdpa_d96, QFormat::Mxint6, 96);
-    flash_dim_test!(test_mxint8_flash_sdpa_d96, mt_mxint8_flash_sdpa_d96, QFormat::Mxint8, 96);
+    flash_dim_test!(test_int2_flash_sdpa_d96, ffai_int2_flash_sdpa_d96, QFormat::Int2, 96);
+    flash_dim_test!(test_int3_flash_sdpa_d96, ffai_int3_flash_sdpa_d96, QFormat::Int3, 96);
+    flash_dim_test!(test_int4_flash_sdpa_d96, ffai_int4_flash_sdpa_d96, QFormat::Int4, 96);
+    flash_dim_test!(test_int5_flash_sdpa_d96, ffai_int5_flash_sdpa_d96, QFormat::Int5, 96);
+    flash_dim_test!(test_int6_flash_sdpa_d96, ffai_int6_flash_sdpa_d96, QFormat::Int6, 96);
+    flash_dim_test!(test_mxint2_flash_sdpa_d96, ffai_mxint2_flash_sdpa_d96, QFormat::Mxint2, 96);
+    flash_dim_test!(test_mxint3_flash_sdpa_d96, ffai_mxint3_flash_sdpa_d96, QFormat::Mxint3, 96);
+    flash_dim_test!(test_mxint4_flash_sdpa_d96, ffai_mxint4_flash_sdpa_d96, QFormat::Mxint4, 96);
+    flash_dim_test!(test_mxint5_flash_sdpa_d96, ffai_mxint5_flash_sdpa_d96, QFormat::Mxint5, 96);
+    flash_dim_test!(test_mxint6_flash_sdpa_d96, ffai_mxint6_flash_sdpa_d96, QFormat::Mxint6, 96);
+    flash_dim_test!(test_mxint8_flash_sdpa_d96, ffai_mxint8_flash_sdpa_d96, QFormat::Mxint8, 96);
     // d256
-    flash_dim_test!(test_mxfp4_flash_sdpa_d256, mt_mxfp4_flash_sdpa_d256, QFormat::Mxfp4, 256);
-    flash_dim_test!(test_nvfp4_flash_sdpa_d256, mt_nvfp4_flash_sdpa_d256, QFormat::Nvfp4, 256);
+    flash_dim_test!(test_mxfp4_flash_sdpa_d256, ffai_mxfp4_flash_sdpa_d256, QFormat::Mxfp4, 256);
+    flash_dim_test!(test_nvfp4_flash_sdpa_d256, ffai_nvfp4_flash_sdpa_d256, QFormat::Nvfp4, 256);
     flash_dim_test!(
         test_mxfp8_e4m3_flash_sdpa_d256,
-        mt_mxfp8_e4m3_flash_sdpa_d256,
+        ffai_mxfp8_e4m3_flash_sdpa_d256,
         QFormat::Mxfp8E4,
         256
     );
     flash_dim_test!(
         test_mxfp8_e5m2_flash_sdpa_d256,
-        mt_mxfp8_e5m2_flash_sdpa_d256,
+        ffai_mxfp8_e5m2_flash_sdpa_d256,
         QFormat::Mxfp8E5,
         256
     );
-    flash_dim_test!(test_nvfp8_flash_sdpa_d256, mt_nvfp8_flash_sdpa_d256, QFormat::Nvfp8, 256);
-    flash_dim_test!(test_fp4_flash_sdpa_d256, mt_fp4_flash_sdpa_d256, QFormat::Fp4, 256);
-    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d256, mt_nvfp8_flash_sdpa_d256, QFormat::Fp8E4m3, 256);
+    flash_dim_test!(test_nvfp8_flash_sdpa_d256, ffai_nvfp8_flash_sdpa_d256, QFormat::Nvfp8, 256);
+    flash_dim_test!(test_fp4_flash_sdpa_d256, ffai_fp4_flash_sdpa_d256, QFormat::Fp4, 256);
+    flash_dim_test!(
+        test_fp8_e4m3_flash_sdpa_d256,
+        ffai_nvfp8_flash_sdpa_d256,
+        QFormat::Fp8E4m3,
+        256
+    );
     flash_dim_test!(
         test_fp8_e5m2_flash_sdpa_d256,
-        mt_fp8_e5m2_flash_sdpa_d256,
+        ffai_fp8_e5m2_flash_sdpa_d256,
         QFormat::Fp8E5m2,
         256
     );
-    flash_dim_test!(test_int8_flash_sdpa_d256, mt_int8_flash_sdpa_d256, QFormat::Int8, 256);
-    flash_dim_test!(test_int2_flash_sdpa_d256, mt_int2_flash_sdpa_d256, QFormat::Int2, 256);
-    flash_dim_test!(test_int3_flash_sdpa_d256, mt_int3_flash_sdpa_d256, QFormat::Int3, 256);
-    flash_dim_test!(test_int4_flash_sdpa_d256, mt_int4_flash_sdpa_d256, QFormat::Int4, 256);
-    flash_dim_test!(test_int5_flash_sdpa_d256, mt_int5_flash_sdpa_d256, QFormat::Int5, 256);
-    flash_dim_test!(test_int6_flash_sdpa_d256, mt_int6_flash_sdpa_d256, QFormat::Int6, 256);
-    flash_dim_test!(test_mxint2_flash_sdpa_d256, mt_mxint2_flash_sdpa_d256, QFormat::Mxint2, 256);
-    flash_dim_test!(test_mxint3_flash_sdpa_d256, mt_mxint3_flash_sdpa_d256, QFormat::Mxint3, 256);
-    flash_dim_test!(test_mxint4_flash_sdpa_d256, mt_mxint4_flash_sdpa_d256, QFormat::Mxint4, 256);
-    flash_dim_test!(test_mxint5_flash_sdpa_d256, mt_mxint5_flash_sdpa_d256, QFormat::Mxint5, 256);
-    flash_dim_test!(test_mxint6_flash_sdpa_d256, mt_mxint6_flash_sdpa_d256, QFormat::Mxint6, 256);
-    flash_dim_test!(test_mxint8_flash_sdpa_d256, mt_mxint8_flash_sdpa_d256, QFormat::Mxint8, 256);
+    flash_dim_test!(test_int8_flash_sdpa_d256, ffai_int8_flash_sdpa_d256, QFormat::Int8, 256);
+    flash_dim_test!(test_int2_flash_sdpa_d256, ffai_int2_flash_sdpa_d256, QFormat::Int2, 256);
+    flash_dim_test!(test_int3_flash_sdpa_d256, ffai_int3_flash_sdpa_d256, QFormat::Int3, 256);
+    flash_dim_test!(test_int4_flash_sdpa_d256, ffai_int4_flash_sdpa_d256, QFormat::Int4, 256);
+    flash_dim_test!(test_int5_flash_sdpa_d256, ffai_int5_flash_sdpa_d256, QFormat::Int5, 256);
+    flash_dim_test!(test_int6_flash_sdpa_d256, ffai_int6_flash_sdpa_d256, QFormat::Int6, 256);
+    flash_dim_test!(test_mxint2_flash_sdpa_d256, ffai_mxint2_flash_sdpa_d256, QFormat::Mxint2, 256);
+    flash_dim_test!(test_mxint3_flash_sdpa_d256, ffai_mxint3_flash_sdpa_d256, QFormat::Mxint3, 256);
+    flash_dim_test!(test_mxint4_flash_sdpa_d256, ffai_mxint4_flash_sdpa_d256, QFormat::Mxint4, 256);
+    flash_dim_test!(test_mxint5_flash_sdpa_d256, ffai_mxint5_flash_sdpa_d256, QFormat::Mxint5, 256);
+    flash_dim_test!(test_mxint6_flash_sdpa_d256, ffai_mxint6_flash_sdpa_d256, QFormat::Mxint6, 256);
+    flash_dim_test!(test_mxint8_flash_sdpa_d256, ffai_mxint8_flash_sdpa_d256, QFormat::Mxint8, 256);
     // d512
-    flash_dim_test!(test_mxfp4_flash_sdpa_d512, mt_mxfp4_flash_sdpa_d512, QFormat::Mxfp4, 512);
-    flash_dim_test!(test_nvfp4_flash_sdpa_d512, mt_nvfp4_flash_sdpa_d512, QFormat::Nvfp4, 512);
+    flash_dim_test!(test_mxfp4_flash_sdpa_d512, ffai_mxfp4_flash_sdpa_d512, QFormat::Mxfp4, 512);
+    flash_dim_test!(test_nvfp4_flash_sdpa_d512, ffai_nvfp4_flash_sdpa_d512, QFormat::Nvfp4, 512);
     flash_dim_test!(
         test_mxfp8_e4m3_flash_sdpa_d512,
-        mt_mxfp8_e4m3_flash_sdpa_d512,
+        ffai_mxfp8_e4m3_flash_sdpa_d512,
         QFormat::Mxfp8E4,
         512
     );
     flash_dim_test!(
         test_mxfp8_e5m2_flash_sdpa_d512,
-        mt_mxfp8_e5m2_flash_sdpa_d512,
+        ffai_mxfp8_e5m2_flash_sdpa_d512,
         QFormat::Mxfp8E5,
         512
     );
-    flash_dim_test!(test_nvfp8_flash_sdpa_d512, mt_nvfp8_flash_sdpa_d512, QFormat::Nvfp8, 512);
-    flash_dim_test!(test_fp4_flash_sdpa_d512, mt_fp4_flash_sdpa_d512, QFormat::Fp4, 512);
-    flash_dim_test!(test_fp8_e4m3_flash_sdpa_d512, mt_nvfp8_flash_sdpa_d512, QFormat::Fp8E4m3, 512);
+    flash_dim_test!(test_nvfp8_flash_sdpa_d512, ffai_nvfp8_flash_sdpa_d512, QFormat::Nvfp8, 512);
+    flash_dim_test!(test_fp4_flash_sdpa_d512, ffai_fp4_flash_sdpa_d512, QFormat::Fp4, 512);
+    flash_dim_test!(
+        test_fp8_e4m3_flash_sdpa_d512,
+        ffai_nvfp8_flash_sdpa_d512,
+        QFormat::Fp8E4m3,
+        512
+    );
     flash_dim_test!(
         test_fp8_e5m2_flash_sdpa_d512,
-        mt_fp8_e5m2_flash_sdpa_d512,
+        ffai_fp8_e5m2_flash_sdpa_d512,
         QFormat::Fp8E5m2,
         512
     );
-    flash_dim_test!(test_int8_flash_sdpa_d512, mt_int8_flash_sdpa_d512, QFormat::Int8, 512);
-    flash_dim_test!(test_int2_flash_sdpa_d512, mt_int2_flash_sdpa_d512, QFormat::Int2, 512);
-    flash_dim_test!(test_int3_flash_sdpa_d512, mt_int3_flash_sdpa_d512, QFormat::Int3, 512);
-    flash_dim_test!(test_int4_flash_sdpa_d512, mt_int4_flash_sdpa_d512, QFormat::Int4, 512);
-    flash_dim_test!(test_int5_flash_sdpa_d512, mt_int5_flash_sdpa_d512, QFormat::Int5, 512);
-    flash_dim_test!(test_int6_flash_sdpa_d512, mt_int6_flash_sdpa_d512, QFormat::Int6, 512);
-    flash_dim_test!(test_mxint2_flash_sdpa_d512, mt_mxint2_flash_sdpa_d512, QFormat::Mxint2, 512);
-    flash_dim_test!(test_mxint3_flash_sdpa_d512, mt_mxint3_flash_sdpa_d512, QFormat::Mxint3, 512);
-    flash_dim_test!(test_mxint4_flash_sdpa_d512, mt_mxint4_flash_sdpa_d512, QFormat::Mxint4, 512);
-    flash_dim_test!(test_mxint5_flash_sdpa_d512, mt_mxint5_flash_sdpa_d512, QFormat::Mxint5, 512);
-    flash_dim_test!(test_mxint6_flash_sdpa_d512, mt_mxint6_flash_sdpa_d512, QFormat::Mxint6, 512);
-    flash_dim_test!(test_mxint8_flash_sdpa_d512, mt_mxint8_flash_sdpa_d512, QFormat::Mxint8, 512);
+    flash_dim_test!(test_int8_flash_sdpa_d512, ffai_int8_flash_sdpa_d512, QFormat::Int8, 512);
+    flash_dim_test!(test_int2_flash_sdpa_d512, ffai_int2_flash_sdpa_d512, QFormat::Int2, 512);
+    flash_dim_test!(test_int3_flash_sdpa_d512, ffai_int3_flash_sdpa_d512, QFormat::Int3, 512);
+    flash_dim_test!(test_int4_flash_sdpa_d512, ffai_int4_flash_sdpa_d512, QFormat::Int4, 512);
+    flash_dim_test!(test_int5_flash_sdpa_d512, ffai_int5_flash_sdpa_d512, QFormat::Int5, 512);
+    flash_dim_test!(test_int6_flash_sdpa_d512, ffai_int6_flash_sdpa_d512, QFormat::Int6, 512);
+    flash_dim_test!(test_mxint2_flash_sdpa_d512, ffai_mxint2_flash_sdpa_d512, QFormat::Mxint2, 512);
+    flash_dim_test!(test_mxint3_flash_sdpa_d512, ffai_mxint3_flash_sdpa_d512, QFormat::Mxint3, 512);
+    flash_dim_test!(test_mxint4_flash_sdpa_d512, ffai_mxint4_flash_sdpa_d512, QFormat::Mxint4, 512);
+    flash_dim_test!(test_mxint5_flash_sdpa_d512, ffai_mxint5_flash_sdpa_d512, QFormat::Mxint5, 512);
+    flash_dim_test!(test_mxint6_flash_sdpa_d512, ffai_mxint6_flash_sdpa_d512, QFormat::Mxint6, 512);
+    flash_dim_test!(test_mxint8_flash_sdpa_d512, ffai_mxint8_flash_sdpa_d512, QFormat::Mxint8, 512);
 
     // ── FP16-scale twins across the other production head dims (d64/d96/d256/
     // d512) ── Same dims as the FP32-scaled formats, looser tol to match the
@@ -2422,244 +2470,244 @@ pub mod kernel_tests {
     // d64
     flash_dim_test_f16!(
         test_nvfp8_f16_flash_sdpa_d64,
-        mt_nvfp8_f16_flash_sdpa_d64,
+        ffai_nvfp8_f16_flash_sdpa_d64,
         QFormat::Nvfp8F16,
         64
     );
     flash_dim_test_f16!(
         test_fp4_f16_flash_sdpa_d64,
-        mt_fp4_f16_flash_sdpa_d64,
+        ffai_fp4_f16_flash_sdpa_d64,
         QFormat::Fp4F16,
         64
     );
     flash_dim_test_f16!(
         test_fp8_e4m3_f16_flash_sdpa_d64,
-        mt_nvfp8_f16_flash_sdpa_d64,
+        ffai_nvfp8_f16_flash_sdpa_d64,
         QFormat::Fp8E4m3F16,
         64
     );
     flash_dim_test_f16!(
         test_fp8_e5m2_f16_flash_sdpa_d64,
-        mt_fp8_e5m2_f16_flash_sdpa_d64,
+        ffai_fp8_e5m2_f16_flash_sdpa_d64,
         QFormat::Fp8E5m2F16,
         64
     );
     flash_dim_test_f16!(
         test_int2_f16_flash_sdpa_d64,
-        mt_int2_f16_flash_sdpa_d64,
+        ffai_int2_f16_flash_sdpa_d64,
         QFormat::Int2F16,
         64
     );
     flash_dim_test_f16!(
         test_int3_f16_flash_sdpa_d64,
-        mt_int3_f16_flash_sdpa_d64,
+        ffai_int3_f16_flash_sdpa_d64,
         QFormat::Int3F16,
         64
     );
     flash_dim_test_f16!(
         test_int4_f16_flash_sdpa_d64,
-        mt_int4_f16_flash_sdpa_d64,
+        ffai_int4_f16_flash_sdpa_d64,
         QFormat::Int4F16,
         64
     );
     flash_dim_test_f16!(
         test_int5_f16_flash_sdpa_d64,
-        mt_int5_f16_flash_sdpa_d64,
+        ffai_int5_f16_flash_sdpa_d64,
         QFormat::Int5F16,
         64
     );
     flash_dim_test_f16!(
         test_int6_f16_flash_sdpa_d64,
-        mt_int6_f16_flash_sdpa_d64,
+        ffai_int6_f16_flash_sdpa_d64,
         QFormat::Int6F16,
         64
     );
     flash_dim_test_f16!(
         test_int8_f16_flash_sdpa_d64,
-        mt_int8_f16_flash_sdpa_d64,
+        ffai_int8_f16_flash_sdpa_d64,
         QFormat::Int8F16,
         64
     );
     // d96 (int group 64 → ragged 64+32 tail; fp4 group 32 divides 96 evenly)
     flash_dim_test_f16!(
         test_nvfp8_f16_flash_sdpa_d96,
-        mt_nvfp8_f16_flash_sdpa_d96,
+        ffai_nvfp8_f16_flash_sdpa_d96,
         QFormat::Nvfp8F16,
         96
     );
     flash_dim_test_f16!(
         test_fp4_f16_flash_sdpa_d96,
-        mt_fp4_f16_flash_sdpa_d96,
+        ffai_fp4_f16_flash_sdpa_d96,
         QFormat::Fp4F16,
         96
     );
     flash_dim_test_f16!(
         test_fp8_e4m3_f16_flash_sdpa_d96,
-        mt_nvfp8_f16_flash_sdpa_d96,
+        ffai_nvfp8_f16_flash_sdpa_d96,
         QFormat::Fp8E4m3F16,
         96
     );
     flash_dim_test_f16!(
         test_fp8_e5m2_f16_flash_sdpa_d96,
-        mt_fp8_e5m2_f16_flash_sdpa_d96,
+        ffai_fp8_e5m2_f16_flash_sdpa_d96,
         QFormat::Fp8E5m2F16,
         96
     );
     flash_dim_test_f16!(
         test_int2_f16_flash_sdpa_d96,
-        mt_int2_f16_flash_sdpa_d96,
+        ffai_int2_f16_flash_sdpa_d96,
         QFormat::Int2F16,
         96
     );
     flash_dim_test_f16!(
         test_int3_f16_flash_sdpa_d96,
-        mt_int3_f16_flash_sdpa_d96,
+        ffai_int3_f16_flash_sdpa_d96,
         QFormat::Int3F16,
         96
     );
     flash_dim_test_f16!(
         test_int4_f16_flash_sdpa_d96,
-        mt_int4_f16_flash_sdpa_d96,
+        ffai_int4_f16_flash_sdpa_d96,
         QFormat::Int4F16,
         96
     );
     flash_dim_test_f16!(
         test_int5_f16_flash_sdpa_d96,
-        mt_int5_f16_flash_sdpa_d96,
+        ffai_int5_f16_flash_sdpa_d96,
         QFormat::Int5F16,
         96
     );
     flash_dim_test_f16!(
         test_int6_f16_flash_sdpa_d96,
-        mt_int6_f16_flash_sdpa_d96,
+        ffai_int6_f16_flash_sdpa_d96,
         QFormat::Int6F16,
         96
     );
     flash_dim_test_f16!(
         test_int8_f16_flash_sdpa_d96,
-        mt_int8_f16_flash_sdpa_d96,
+        ffai_int8_f16_flash_sdpa_d96,
         QFormat::Int8F16,
         96
     );
     // d256
     flash_dim_test_f16!(
         test_nvfp8_f16_flash_sdpa_d256,
-        mt_nvfp8_f16_flash_sdpa_d256,
+        ffai_nvfp8_f16_flash_sdpa_d256,
         QFormat::Nvfp8F16,
         256
     );
     flash_dim_test_f16!(
         test_fp4_f16_flash_sdpa_d256,
-        mt_fp4_f16_flash_sdpa_d256,
+        ffai_fp4_f16_flash_sdpa_d256,
         QFormat::Fp4F16,
         256
     );
     flash_dim_test_f16!(
         test_fp8_e4m3_f16_flash_sdpa_d256,
-        mt_nvfp8_f16_flash_sdpa_d256,
+        ffai_nvfp8_f16_flash_sdpa_d256,
         QFormat::Fp8E4m3F16,
         256
     );
     flash_dim_test_f16!(
         test_fp8_e5m2_f16_flash_sdpa_d256,
-        mt_fp8_e5m2_f16_flash_sdpa_d256,
+        ffai_fp8_e5m2_f16_flash_sdpa_d256,
         QFormat::Fp8E5m2F16,
         256
     );
     flash_dim_test_f16!(
         test_int2_f16_flash_sdpa_d256,
-        mt_int2_f16_flash_sdpa_d256,
+        ffai_int2_f16_flash_sdpa_d256,
         QFormat::Int2F16,
         256
     );
     flash_dim_test_f16!(
         test_int3_f16_flash_sdpa_d256,
-        mt_int3_f16_flash_sdpa_d256,
+        ffai_int3_f16_flash_sdpa_d256,
         QFormat::Int3F16,
         256
     );
     flash_dim_test_f16!(
         test_int4_f16_flash_sdpa_d256,
-        mt_int4_f16_flash_sdpa_d256,
+        ffai_int4_f16_flash_sdpa_d256,
         QFormat::Int4F16,
         256
     );
     flash_dim_test_f16!(
         test_int5_f16_flash_sdpa_d256,
-        mt_int5_f16_flash_sdpa_d256,
+        ffai_int5_f16_flash_sdpa_d256,
         QFormat::Int5F16,
         256
     );
     flash_dim_test_f16!(
         test_int6_f16_flash_sdpa_d256,
-        mt_int6_f16_flash_sdpa_d256,
+        ffai_int6_f16_flash_sdpa_d256,
         QFormat::Int6F16,
         256
     );
     flash_dim_test_f16!(
         test_int8_f16_flash_sdpa_d256,
-        mt_int8_f16_flash_sdpa_d256,
+        ffai_int8_f16_flash_sdpa_d256,
         QFormat::Int8F16,
         256
     );
     // d512
     flash_dim_test_f16!(
         test_nvfp8_f16_flash_sdpa_d512,
-        mt_nvfp8_f16_flash_sdpa_d512,
+        ffai_nvfp8_f16_flash_sdpa_d512,
         QFormat::Nvfp8F16,
         512
     );
     flash_dim_test_f16!(
         test_fp4_f16_flash_sdpa_d512,
-        mt_fp4_f16_flash_sdpa_d512,
+        ffai_fp4_f16_flash_sdpa_d512,
         QFormat::Fp4F16,
         512
     );
     flash_dim_test_f16!(
         test_fp8_e4m3_f16_flash_sdpa_d512,
-        mt_nvfp8_f16_flash_sdpa_d512,
+        ffai_nvfp8_f16_flash_sdpa_d512,
         QFormat::Fp8E4m3F16,
         512
     );
     flash_dim_test_f16!(
         test_fp8_e5m2_f16_flash_sdpa_d512,
-        mt_fp8_e5m2_f16_flash_sdpa_d512,
+        ffai_fp8_e5m2_f16_flash_sdpa_d512,
         QFormat::Fp8E5m2F16,
         512
     );
     flash_dim_test_f16!(
         test_int2_f16_flash_sdpa_d512,
-        mt_int2_f16_flash_sdpa_d512,
+        ffai_int2_f16_flash_sdpa_d512,
         QFormat::Int2F16,
         512
     );
     flash_dim_test_f16!(
         test_int3_f16_flash_sdpa_d512,
-        mt_int3_f16_flash_sdpa_d512,
+        ffai_int3_f16_flash_sdpa_d512,
         QFormat::Int3F16,
         512
     );
     flash_dim_test_f16!(
         test_int4_f16_flash_sdpa_d512,
-        mt_int4_f16_flash_sdpa_d512,
+        ffai_int4_f16_flash_sdpa_d512,
         QFormat::Int4F16,
         512
     );
     flash_dim_test_f16!(
         test_int5_f16_flash_sdpa_d512,
-        mt_int5_f16_flash_sdpa_d512,
+        ffai_int5_f16_flash_sdpa_d512,
         QFormat::Int5F16,
         512
     );
     flash_dim_test_f16!(
         test_int6_f16_flash_sdpa_d512,
-        mt_int6_f16_flash_sdpa_d512,
+        ffai_int6_f16_flash_sdpa_d512,
         QFormat::Int6F16,
         512
     );
     flash_dim_test_f16!(
         test_int8_f16_flash_sdpa_d512,
-        mt_int8_f16_flash_sdpa_d512,
+        ffai_int8_f16_flash_sdpa_d512,
         QFormat::Int8F16,
         512
     );
@@ -2727,103 +2775,103 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, dt)
+        flash_bench(ffai_mxfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_nvfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp4, 128, dt)
+        flash_bench(ffai_nvfp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxfp8_e4m3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp8E4, 128, dt)
+        flash_bench(ffai_mxfp8_e4m3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp8E4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxfp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp8E5, 128, dt)
+        flash_bench(ffai_mxfp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxfp8E5, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_nvfp8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp8, 128, dt)
+        flash_bench(ffai_nvfp8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp8, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_fp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4, 128, dt)
+        flash_bench(ffai_fp4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_nvfp8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E4m3, 128, dt)
+        flash_bench(ffai_nvfp8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E4m3, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_fp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E5m2, 128, dt)
+        flash_bench(ffai_fp8_e5m2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E5m2, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8, 128, dt)
+        flash_bench(ffai_int8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8, 128, dt)
     }
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale) + MXINT8.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2, 128, dt)
+        flash_bench(ffai_int2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3, 128, dt)
+        flash_bench(ffai_int3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4, 128, dt)
+        flash_bench(ffai_int4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5, 128, dt)
+        flash_bench(ffai_int5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6, 128, dt)
+        flash_bench(ffai_int6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint2, 128, dt)
+        flash_bench(ffai_mxint2_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint2, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint3, 128, dt)
+        flash_bench(ffai_mxint3_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint3, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint4, 128, dt)
+        flash_bench(ffai_mxint4_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint4, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint5, 128, dt)
+        flash_bench(ffai_mxint5_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint5, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint6, 128, dt)
+        flash_bench(ffai_mxint6_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint6, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_mxint8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint8, 128, dt)
+        flash_bench(ffai_mxint8_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Mxint8, 128, dt)
     }
     // FP16-scale twins (nvfp8_f16 / fp4_f16 / fp8_e5m2_f16 / int2..6_f16 /
     // int8_f16). `fp8_e4m3_f16` reuses the `nvfp8_f16` kernel.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp8F16, 128, dt)
+        flash_bench(ffai_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Nvfp8F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_fp4_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4F16, 128, dt)
+        flash_bench(ffai_fp4_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp4F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 128, dt)
+        flash_bench(ffai_nvfp8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Fp8E4m3F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16_flash(dt: DType) -> BenchSetup {
         flash_bench(
-            mt_fp8_e5m2_f16_flash_sdpa_d128::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_flash_sdpa_d128::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             128,
             dt,
@@ -2831,27 +2879,27 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int2_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2F16, 128, dt)
+        flash_bench(ffai_int2_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int2F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int3_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3F16, 128, dt)
+        flash_bench(ffai_int3_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int3F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int4_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4F16, 128, dt)
+        flash_bench(ffai_int4_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int4F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int5_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5F16, 128, dt)
+        flash_bench(ffai_int5_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int5F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int6_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6F16, 128, dt)
+        flash_bench(ffai_int6_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int6F16, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16_flash(dt: DType) -> BenchSetup {
-        flash_bench(mt_int8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8F16, 128, dt)
+        flash_bench(ffai_int8_f16_flash_sdpa_d128::kernel_ir_for(dt), QFormat::Int8F16, 128, dt)
     }
 
     // Large-head-dim perf matrix (d256 = long-context; d512 = Gemma global),
@@ -2865,120 +2913,190 @@ pub mod kernel_benches {
         };
     }
     // d256
-    flash_dim_bench!(bench_mxfp4_flash_d256, mt_mxfp4_flash_sdpa_d256, QFormat::Mxfp4, 256);
-    flash_dim_bench!(bench_nvfp4_flash_d256, mt_nvfp4_flash_sdpa_d256, QFormat::Nvfp4, 256);
+    flash_dim_bench!(bench_mxfp4_flash_d256, ffai_mxfp4_flash_sdpa_d256, QFormat::Mxfp4, 256);
+    flash_dim_bench!(bench_nvfp4_flash_d256, ffai_nvfp4_flash_sdpa_d256, QFormat::Nvfp4, 256);
     flash_dim_bench!(
         bench_mxfp8_e4m3_flash_d256,
-        mt_mxfp8_e4m3_flash_sdpa_d256,
+        ffai_mxfp8_e4m3_flash_sdpa_d256,
         QFormat::Mxfp8E4,
         256
     );
     flash_dim_bench!(
         bench_mxfp8_e5m2_flash_d256,
-        mt_mxfp8_e5m2_flash_sdpa_d256,
+        ffai_mxfp8_e5m2_flash_sdpa_d256,
         QFormat::Mxfp8E5,
         256
     );
-    flash_dim_bench!(bench_nvfp8_flash_d256, mt_nvfp8_flash_sdpa_d256, QFormat::Nvfp8, 256);
-    flash_dim_bench!(bench_fp4_flash_d256, mt_fp4_flash_sdpa_d256, QFormat::Fp4, 256);
-    flash_dim_bench!(bench_fp8_e4m3_flash_d256, mt_nvfp8_flash_sdpa_d256, QFormat::Fp8E4m3, 256);
-    flash_dim_bench!(bench_fp8_e5m2_flash_d256, mt_fp8_e5m2_flash_sdpa_d256, QFormat::Fp8E5m2, 256);
-    flash_dim_bench!(bench_int8_flash_d256, mt_int8_flash_sdpa_d256, QFormat::Int8, 256);
-    flash_dim_bench!(bench_int2_flash_d256, mt_int2_flash_sdpa_d256, QFormat::Int2, 256);
-    flash_dim_bench!(bench_int3_flash_d256, mt_int3_flash_sdpa_d256, QFormat::Int3, 256);
-    flash_dim_bench!(bench_int4_flash_d256, mt_int4_flash_sdpa_d256, QFormat::Int4, 256);
-    flash_dim_bench!(bench_int5_flash_d256, mt_int5_flash_sdpa_d256, QFormat::Int5, 256);
-    flash_dim_bench!(bench_int6_flash_d256, mt_int6_flash_sdpa_d256, QFormat::Int6, 256);
-    flash_dim_bench!(bench_mxint2_flash_d256, mt_mxint2_flash_sdpa_d256, QFormat::Mxint2, 256);
-    flash_dim_bench!(bench_mxint3_flash_d256, mt_mxint3_flash_sdpa_d256, QFormat::Mxint3, 256);
-    flash_dim_bench!(bench_mxint4_flash_d256, mt_mxint4_flash_sdpa_d256, QFormat::Mxint4, 256);
-    flash_dim_bench!(bench_mxint5_flash_d256, mt_mxint5_flash_sdpa_d256, QFormat::Mxint5, 256);
-    flash_dim_bench!(bench_mxint6_flash_d256, mt_mxint6_flash_sdpa_d256, QFormat::Mxint6, 256);
-    flash_dim_bench!(bench_mxint8_flash_d256, mt_mxint8_flash_sdpa_d256, QFormat::Mxint8, 256);
+    flash_dim_bench!(bench_nvfp8_flash_d256, ffai_nvfp8_flash_sdpa_d256, QFormat::Nvfp8, 256);
+    flash_dim_bench!(bench_fp4_flash_d256, ffai_fp4_flash_sdpa_d256, QFormat::Fp4, 256);
+    flash_dim_bench!(bench_fp8_e4m3_flash_d256, ffai_nvfp8_flash_sdpa_d256, QFormat::Fp8E4m3, 256);
+    flash_dim_bench!(
+        bench_fp8_e5m2_flash_d256,
+        ffai_fp8_e5m2_flash_sdpa_d256,
+        QFormat::Fp8E5m2,
+        256
+    );
+    flash_dim_bench!(bench_int8_flash_d256, ffai_int8_flash_sdpa_d256, QFormat::Int8, 256);
+    flash_dim_bench!(bench_int2_flash_d256, ffai_int2_flash_sdpa_d256, QFormat::Int2, 256);
+    flash_dim_bench!(bench_int3_flash_d256, ffai_int3_flash_sdpa_d256, QFormat::Int3, 256);
+    flash_dim_bench!(bench_int4_flash_d256, ffai_int4_flash_sdpa_d256, QFormat::Int4, 256);
+    flash_dim_bench!(bench_int5_flash_d256, ffai_int5_flash_sdpa_d256, QFormat::Int5, 256);
+    flash_dim_bench!(bench_int6_flash_d256, ffai_int6_flash_sdpa_d256, QFormat::Int6, 256);
+    flash_dim_bench!(bench_mxint2_flash_d256, ffai_mxint2_flash_sdpa_d256, QFormat::Mxint2, 256);
+    flash_dim_bench!(bench_mxint3_flash_d256, ffai_mxint3_flash_sdpa_d256, QFormat::Mxint3, 256);
+    flash_dim_bench!(bench_mxint4_flash_d256, ffai_mxint4_flash_sdpa_d256, QFormat::Mxint4, 256);
+    flash_dim_bench!(bench_mxint5_flash_d256, ffai_mxint5_flash_sdpa_d256, QFormat::Mxint5, 256);
+    flash_dim_bench!(bench_mxint6_flash_d256, ffai_mxint6_flash_sdpa_d256, QFormat::Mxint6, 256);
+    flash_dim_bench!(bench_mxint8_flash_d256, ffai_mxint8_flash_sdpa_d256, QFormat::Mxint8, 256);
     // d512
-    flash_dim_bench!(bench_mxfp4_flash_d512, mt_mxfp4_flash_sdpa_d512, QFormat::Mxfp4, 512);
-    flash_dim_bench!(bench_nvfp4_flash_d512, mt_nvfp4_flash_sdpa_d512, QFormat::Nvfp4, 512);
+    flash_dim_bench!(bench_mxfp4_flash_d512, ffai_mxfp4_flash_sdpa_d512, QFormat::Mxfp4, 512);
+    flash_dim_bench!(bench_nvfp4_flash_d512, ffai_nvfp4_flash_sdpa_d512, QFormat::Nvfp4, 512);
     flash_dim_bench!(
         bench_mxfp8_e4m3_flash_d512,
-        mt_mxfp8_e4m3_flash_sdpa_d512,
+        ffai_mxfp8_e4m3_flash_sdpa_d512,
         QFormat::Mxfp8E4,
         512
     );
     flash_dim_bench!(
         bench_mxfp8_e5m2_flash_d512,
-        mt_mxfp8_e5m2_flash_sdpa_d512,
+        ffai_mxfp8_e5m2_flash_sdpa_d512,
         QFormat::Mxfp8E5,
         512
     );
-    flash_dim_bench!(bench_nvfp8_flash_d512, mt_nvfp8_flash_sdpa_d512, QFormat::Nvfp8, 512);
-    flash_dim_bench!(bench_fp4_flash_d512, mt_fp4_flash_sdpa_d512, QFormat::Fp4, 512);
-    flash_dim_bench!(bench_fp8_e4m3_flash_d512, mt_nvfp8_flash_sdpa_d512, QFormat::Fp8E4m3, 512);
-    flash_dim_bench!(bench_fp8_e5m2_flash_d512, mt_fp8_e5m2_flash_sdpa_d512, QFormat::Fp8E5m2, 512);
-    flash_dim_bench!(bench_int8_flash_d512, mt_int8_flash_sdpa_d512, QFormat::Int8, 512);
-    flash_dim_bench!(bench_int2_flash_d512, mt_int2_flash_sdpa_d512, QFormat::Int2, 512);
-    flash_dim_bench!(bench_int3_flash_d512, mt_int3_flash_sdpa_d512, QFormat::Int3, 512);
-    flash_dim_bench!(bench_int4_flash_d512, mt_int4_flash_sdpa_d512, QFormat::Int4, 512);
-    flash_dim_bench!(bench_int5_flash_d512, mt_int5_flash_sdpa_d512, QFormat::Int5, 512);
-    flash_dim_bench!(bench_int6_flash_d512, mt_int6_flash_sdpa_d512, QFormat::Int6, 512);
-    flash_dim_bench!(bench_mxint2_flash_d512, mt_mxint2_flash_sdpa_d512, QFormat::Mxint2, 512);
-    flash_dim_bench!(bench_mxint3_flash_d512, mt_mxint3_flash_sdpa_d512, QFormat::Mxint3, 512);
-    flash_dim_bench!(bench_mxint4_flash_d512, mt_mxint4_flash_sdpa_d512, QFormat::Mxint4, 512);
-    flash_dim_bench!(bench_mxint5_flash_d512, mt_mxint5_flash_sdpa_d512, QFormat::Mxint5, 512);
-    flash_dim_bench!(bench_mxint6_flash_d512, mt_mxint6_flash_sdpa_d512, QFormat::Mxint6, 512);
-    flash_dim_bench!(bench_mxint8_flash_d512, mt_mxint8_flash_sdpa_d512, QFormat::Mxint8, 512);
+    flash_dim_bench!(bench_nvfp8_flash_d512, ffai_nvfp8_flash_sdpa_d512, QFormat::Nvfp8, 512);
+    flash_dim_bench!(bench_fp4_flash_d512, ffai_fp4_flash_sdpa_d512, QFormat::Fp4, 512);
+    flash_dim_bench!(bench_fp8_e4m3_flash_d512, ffai_nvfp8_flash_sdpa_d512, QFormat::Fp8E4m3, 512);
+    flash_dim_bench!(
+        bench_fp8_e5m2_flash_d512,
+        ffai_fp8_e5m2_flash_sdpa_d512,
+        QFormat::Fp8E5m2,
+        512
+    );
+    flash_dim_bench!(bench_int8_flash_d512, ffai_int8_flash_sdpa_d512, QFormat::Int8, 512);
+    flash_dim_bench!(bench_int2_flash_d512, ffai_int2_flash_sdpa_d512, QFormat::Int2, 512);
+    flash_dim_bench!(bench_int3_flash_d512, ffai_int3_flash_sdpa_d512, QFormat::Int3, 512);
+    flash_dim_bench!(bench_int4_flash_d512, ffai_int4_flash_sdpa_d512, QFormat::Int4, 512);
+    flash_dim_bench!(bench_int5_flash_d512, ffai_int5_flash_sdpa_d512, QFormat::Int5, 512);
+    flash_dim_bench!(bench_int6_flash_d512, ffai_int6_flash_sdpa_d512, QFormat::Int6, 512);
+    flash_dim_bench!(bench_mxint2_flash_d512, ffai_mxint2_flash_sdpa_d512, QFormat::Mxint2, 512);
+    flash_dim_bench!(bench_mxint3_flash_d512, ffai_mxint3_flash_sdpa_d512, QFormat::Mxint3, 512);
+    flash_dim_bench!(bench_mxint4_flash_d512, ffai_mxint4_flash_sdpa_d512, QFormat::Mxint4, 512);
+    flash_dim_bench!(bench_mxint5_flash_d512, ffai_mxint5_flash_sdpa_d512, QFormat::Mxint5, 512);
+    flash_dim_bench!(bench_mxint6_flash_d512, ffai_mxint6_flash_sdpa_d512, QFormat::Mxint6, 512);
+    flash_dim_bench!(bench_mxint8_flash_d512, ffai_mxint8_flash_sdpa_d512, QFormat::Mxint8, 512);
 
     // ── FP16-scale twins, large-head-dim perf matrix (d256 / d512) ──
     // `fp8_e4m3_f16` reuses the `nvfp8_f16` kernel.
     // d256
     flash_dim_bench!(
         bench_nvfp8_f16_flash_d256,
-        mt_nvfp8_f16_flash_sdpa_d256,
+        ffai_nvfp8_f16_flash_sdpa_d256,
         QFormat::Nvfp8F16,
         256
     );
-    flash_dim_bench!(bench_fp4_f16_flash_d256, mt_fp4_f16_flash_sdpa_d256, QFormat::Fp4F16, 256);
+    flash_dim_bench!(bench_fp4_f16_flash_d256, ffai_fp4_f16_flash_sdpa_d256, QFormat::Fp4F16, 256);
     flash_dim_bench!(
         bench_fp8_e4m3_f16_flash_d256,
-        mt_nvfp8_f16_flash_sdpa_d256,
+        ffai_nvfp8_f16_flash_sdpa_d256,
         QFormat::Fp8E4m3F16,
         256
     );
     flash_dim_bench!(
         bench_fp8_e5m2_f16_flash_d256,
-        mt_fp8_e5m2_f16_flash_sdpa_d256,
+        ffai_fp8_e5m2_f16_flash_sdpa_d256,
         QFormat::Fp8E5m2F16,
         256
     );
-    flash_dim_bench!(bench_int2_f16_flash_d256, mt_int2_f16_flash_sdpa_d256, QFormat::Int2F16, 256);
-    flash_dim_bench!(bench_int3_f16_flash_d256, mt_int3_f16_flash_sdpa_d256, QFormat::Int3F16, 256);
-    flash_dim_bench!(bench_int4_f16_flash_d256, mt_int4_f16_flash_sdpa_d256, QFormat::Int4F16, 256);
-    flash_dim_bench!(bench_int5_f16_flash_d256, mt_int5_f16_flash_sdpa_d256, QFormat::Int5F16, 256);
-    flash_dim_bench!(bench_int6_f16_flash_d256, mt_int6_f16_flash_sdpa_d256, QFormat::Int6F16, 256);
-    flash_dim_bench!(bench_int8_f16_flash_d256, mt_int8_f16_flash_sdpa_d256, QFormat::Int8F16, 256);
+    flash_dim_bench!(
+        bench_int2_f16_flash_d256,
+        ffai_int2_f16_flash_sdpa_d256,
+        QFormat::Int2F16,
+        256
+    );
+    flash_dim_bench!(
+        bench_int3_f16_flash_d256,
+        ffai_int3_f16_flash_sdpa_d256,
+        QFormat::Int3F16,
+        256
+    );
+    flash_dim_bench!(
+        bench_int4_f16_flash_d256,
+        ffai_int4_f16_flash_sdpa_d256,
+        QFormat::Int4F16,
+        256
+    );
+    flash_dim_bench!(
+        bench_int5_f16_flash_d256,
+        ffai_int5_f16_flash_sdpa_d256,
+        QFormat::Int5F16,
+        256
+    );
+    flash_dim_bench!(
+        bench_int6_f16_flash_d256,
+        ffai_int6_f16_flash_sdpa_d256,
+        QFormat::Int6F16,
+        256
+    );
+    flash_dim_bench!(
+        bench_int8_f16_flash_d256,
+        ffai_int8_f16_flash_sdpa_d256,
+        QFormat::Int8F16,
+        256
+    );
     // d512
     flash_dim_bench!(
         bench_nvfp8_f16_flash_d512,
-        mt_nvfp8_f16_flash_sdpa_d512,
+        ffai_nvfp8_f16_flash_sdpa_d512,
         QFormat::Nvfp8F16,
         512
     );
-    flash_dim_bench!(bench_fp4_f16_flash_d512, mt_fp4_f16_flash_sdpa_d512, QFormat::Fp4F16, 512);
+    flash_dim_bench!(bench_fp4_f16_flash_d512, ffai_fp4_f16_flash_sdpa_d512, QFormat::Fp4F16, 512);
     flash_dim_bench!(
         bench_fp8_e4m3_f16_flash_d512,
-        mt_nvfp8_f16_flash_sdpa_d512,
+        ffai_nvfp8_f16_flash_sdpa_d512,
         QFormat::Fp8E4m3F16,
         512
     );
     flash_dim_bench!(
         bench_fp8_e5m2_f16_flash_d512,
-        mt_fp8_e5m2_f16_flash_sdpa_d512,
+        ffai_fp8_e5m2_f16_flash_sdpa_d512,
         QFormat::Fp8E5m2F16,
         512
     );
-    flash_dim_bench!(bench_int2_f16_flash_d512, mt_int2_f16_flash_sdpa_d512, QFormat::Int2F16, 512);
-    flash_dim_bench!(bench_int3_f16_flash_d512, mt_int3_f16_flash_sdpa_d512, QFormat::Int3F16, 512);
-    flash_dim_bench!(bench_int4_f16_flash_d512, mt_int4_f16_flash_sdpa_d512, QFormat::Int4F16, 512);
-    flash_dim_bench!(bench_int5_f16_flash_d512, mt_int5_f16_flash_sdpa_d512, QFormat::Int5F16, 512);
-    flash_dim_bench!(bench_int6_f16_flash_d512, mt_int6_f16_flash_sdpa_d512, QFormat::Int6F16, 512);
-    flash_dim_bench!(bench_int8_f16_flash_d512, mt_int8_f16_flash_sdpa_d512, QFormat::Int8F16, 512);
+    flash_dim_bench!(
+        bench_int2_f16_flash_d512,
+        ffai_int2_f16_flash_sdpa_d512,
+        QFormat::Int2F16,
+        512
+    );
+    flash_dim_bench!(
+        bench_int3_f16_flash_d512,
+        ffai_int3_f16_flash_sdpa_d512,
+        QFormat::Int3F16,
+        512
+    );
+    flash_dim_bench!(
+        bench_int4_f16_flash_d512,
+        ffai_int4_f16_flash_sdpa_d512,
+        QFormat::Int4F16,
+        512
+    );
+    flash_dim_bench!(
+        bench_int5_f16_flash_d512,
+        ffai_int5_f16_flash_sdpa_d512,
+        QFormat::Int5F16,
+        512
+    );
+    flash_dim_bench!(
+        bench_int6_f16_flash_d512,
+        ffai_int6_f16_flash_sdpa_d512,
+        QFormat::Int6F16,
+        512
+    );
+    flash_dim_bench!(
+        bench_int8_f16_flash_d512,
+        ffai_int8_f16_flash_sdpa_d512,
+        QFormat::Int8F16,
+        512
+    );
 }

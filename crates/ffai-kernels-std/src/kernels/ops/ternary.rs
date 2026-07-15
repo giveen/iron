@@ -8,13 +8,13 @@
 //!   Grid: [ceil(N/TPG), 1, 1] × [TPG, 1, 1]
 //!   Algorithm: dst[i] = cond[i] != 0 ? a[i] : b[i]  (one thread per element)
 //!
-//! FFAI Kernels: mt_select — same algorithm via #[kernel] DSL.
+//! FFAI Kernels: ffai_select — same algorithm via #[kernel] DSL.
 //!   KernelMode::Elementwise
 
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_select<T>(cond: Tensor<u8>, on_true: Tensor<T>, on_false: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_select<T>(cond: Tensor<u8>, on_true: Tensor<T>, on_false: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let c = load(cond[idx]);
     let t = load(on_true[idx]);
@@ -22,12 +22,12 @@ pub fn mt_select<T>(cond: Tensor<u8>, on_true: Tensor<T>, on_false: Tensor<T>, o
     store(out[idx], select(c, t, f));
 }
 
-/// New-syntax correctness for `mt_select` (elementwise, exact — picks an input
+/// New-syntax correctness for `ffai_select` (elementwise, exact — picks an input
 /// verbatim, so the result is bit-exact in every dtype).
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_select;
+    use super::ffai_select;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, dt: DType) -> TestSetup {
@@ -38,7 +38,7 @@ pub mod kernel_tests {
         let f_dt = unpack_f32(&pack_f32(&f, dt), dt);
         let expected: Vec<f32> =
             (0..n).map(|i| if cond[i] != 0 { t_dt[i] } else { f_dt[i] }).collect();
-        TestSetup::new(mt_select::kernel_ir_for(dt))
+        TestSetup::new(ffai_select::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("cond", cond, DType::U8))
             .input(TestBuffer::from_vec("on_true", pack_f32(&t, dt), dt))
             .input(TestBuffer::from_vec("on_false", pack_f32(&f, dt), dt))
@@ -48,20 +48,20 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_select(dt: DType) -> TestSetup { setup(512, dt) }
+    fn test_ffai_select(dt: DType) -> TestSetup { setup(512, dt) }
 }
 
-/// New-syntax benchmark for `mt_select` (vs MLX `metal/ternary.metal`).
+/// New-syntax benchmark for `ffai_select` (vs MLX `metal/ternary.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_select;
+    use super::ffai_select;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // MLX `metal/ternary.metal` `v_Select<tn>` (`ternary_v`, 1 element/thread):
     //   a=cond (device const bool*) [[buffer(0)]], b=on_true [[buffer(1)]],
     //   c=on_false [[buffer(2)]], d=out [[buffer(3)]], size (uint) [[buffer(4)]].
-    // The reference binds cond/on_true/on_false by name (shared with the MT
+    // The reference binds cond/on_true/on_false by name (shared with the FFAI
     // inputs, identical data), its fresh `out`, then the U32 element count.
     //
     // Select picks an input verbatim, so it's bit-exact in every dtype; legacy
@@ -74,7 +74,7 @@ pub mod kernel_benches {
     fn bench_select(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_select::kernel_ir_for(dt))
+        BenchSetup::new(ffai_select::kernel_ir_for(dt))
             .buffer(input_buffer("cond", n, DType::U8, InputDomain::Positive))
             .buffer(input_buffer("on_true", n, dt, InputDomain::Signed))
             .buffer(input_buffer("on_false", n, dt, InputDomain::Signed))
@@ -87,8 +87,8 @@ pub mod kernel_benches {
                     format!("v_Select{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/ternary.metal")),
                 )
-                // cond/on_true/on_false shared by name with the MT inputs above
-                // (placeholders; the runner overrides them with the MT bytes).
+                // cond/on_true/on_false shared by name with the FFAI inputs above
+                // (placeholders; the runner overrides them with the FFAI bytes).
                 .buffer(BenchBuffer::zeros("cond", n, DType::U8))
                 .buffer(BenchBuffer::zeros("on_true", n, dt))
                 .buffer(BenchBuffer::zeros("on_false", n, dt))

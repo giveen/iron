@@ -49,8 +49,8 @@ use ffai_kernels::kernel;
 
 /// AURA quantized attention-score kernel — variable bit-widths (2, 3, 4, 6, 8).
 ///
-/// Produces kernels: `mt_aura_score_int2`, `mt_aura_score_int3`, `mt_aura_score_int4`,
-/// `mt_aura_score_int6`, `mt_aura_score_int8`.
+/// Produces kernels: `ffai_aura_score_int2`, `ffai_aura_score_int3`, `ffai_aura_score_int4`,
+/// `ffai_aura_score_int6`, `ffai_aura_score_int8`.
 ///
 /// Lane-strided dot-product of the query vector against the BITS-wide packed
 /// key vector: decodes codes via the straddle-aware two-word bit-stream formula,
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
 ///
 /// Grid: Grid3D, `[n_q * n_kv_heads / repeat, n_tokens, 1]`, tpg = 32.
 #[kernel(variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
-pub fn mt_aura_score<T>(
+pub fn ffai_aura_score<T>(
     q_rot: Tensor<T>,
     packed: Tensor<u32>,
     norms: Tensor<T>,
@@ -124,7 +124,7 @@ pub fn mt_aura_score<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_aura_score_int4;
+    use super::ffai_aura_score_int4;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn round(v: f32, dt: DType) -> f32 { unpack_f32(&pack_f32(&[v], dt), dt)[0] }
@@ -180,7 +180,7 @@ pub mod kernel_tests {
             }
         }
 
-        TestSetup::new(mt_aura_score_int4::kernel_ir_for(dt))
+        TestSetup::new(ffai_aura_score_int4::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q_rot", pack_f32(&q_rot_r, dt), dt))
             .input(TestBuffer::from_vec("packed", pack_u32(&packed), DType::U32))
@@ -232,6 +232,14 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 3, 4, 6, 8], suffix = "int{BITS}"))]
     fn bench_aura_score(dt: DType) -> BenchSetup {
-        setup(BenchSetup::new(mt_aura_score_intBITS::kernel_ir_for(dt)), 128, BITS, 32, 8, 4096, dt)
+        setup(
+            BenchSetup::new(ffai_aura_score_intBITS::kernel_ir_for(dt)),
+            128,
+            BITS,
+            32,
+            8,
+            4096,
+            dt,
+        )
     }
 }

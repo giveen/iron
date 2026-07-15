@@ -343,7 +343,7 @@ mod tests {
             Op::BinOp { op: BinOpKind::Mul, lhs: ValueId::new(2), rhs: ValueId::new(3) },
             ValueId::new(4),
         );
-        // Anchor the Mul result against per-pass DCE (#209/1) — without
+        // Anchor the Mul result against per-pass DCE — without
         // this, `v4` (Mul) has no consumer and DCE strips both Mul and
         // its upstream Add, masking the "barrier-blocks-sinking"
         // invariant we're trying to assert.

@@ -5,128 +5,128 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_exp<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_exp<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], exp(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_log<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_log<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], log(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_sqrt<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sqrt<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], sqrt(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_rsqrt<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_rsqrt<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], rsqrt(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_abs<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_abs<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], abs(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_silu<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_silu<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], silu(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_gelu<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_gelu<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], gelu(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_relu<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_relu<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], relu(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_cos<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_cos<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], cos(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_sin<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sin<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], sin(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_ceil<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_ceil<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], ceil(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_floor<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_floor<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], floor(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_erf<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_erf<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], erf(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_exp2<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_exp2<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], exp2(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_log2<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_log2<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], log2(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_sign<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sign<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], sign(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_round<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_round<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], round(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_neg<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_neg<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], -load(a[idx]));
 }
 
 #[kernel]
-pub fn mt_recip<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_recip<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], 1.0f32.cast::<T>() / load(a[idx]));
 }
 
 #[kernel]
-pub fn mt_square<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_square<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let x = load(a[idx]);
     store(out[idx], x * x);
 }
 
 #[kernel]
-pub fn mt_sigmoid<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sigmoid<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     // Compute in f32 to match MLX precision (convert back to T at store).
     let x = load(a[idx]).cast::<f32>();
@@ -135,7 +135,7 @@ pub fn mt_sigmoid<T>(a: Tensor<T>, out: Tensor<T>) {
 }
 
 #[kernel]
-pub fn mt_log1p<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_log1p<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let x = load(a[idx]);
     store(out[idx], log(1.0f32.cast::<T>() + x));
@@ -146,85 +146,85 @@ pub fn mt_log1p<T>(a: Tensor<T>, out: Tensor<T>) {
 // unary.metal and produces a kernel named `v_<Op>{tn}{tn}`.
 
 #[kernel]
-pub fn mt_sinh<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sinh<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], sinh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_cosh<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_cosh<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], cosh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_tan<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_tan<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], tan(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_tanh_op<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_tanh_op<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], tanh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_asin<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_asin<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], asin(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_atan<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_atan<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], atan(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_asinh<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_asinh<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], asinh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_acos<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_acos<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], acos(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_trunc<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_trunc<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], trunc(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_acosh<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_acosh<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], acosh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_atanh<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_atanh<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], atanh(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_expm1<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_expm1<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], expm1(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_log10<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_log10<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], log10(load(a[idx])));
 }
 
 #[kernel]
-pub fn mt_erfinv<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_erfinv<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], erfinv(load(a[idx])));
 }
@@ -240,7 +240,7 @@ pub fn mt_erfinv<T>(a: Tensor<T>, out: Tensor<T>) {
 // Device-glue casts + scalar scale (keep activation pipelines on-GPU).
 /// Scale a vector in place by a scalar (router weights × routed_scaling_factor).
 #[kernel]
-pub fn mt_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: u32) {
+pub fn ffai_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: u32) {
     let i = program_id::<0>();
     if i < n {
         store(buf[i], load(buf[i]) * scale);
@@ -251,7 +251,7 @@ pub fn mt_vscale(mut buf: Tensor<f32>, #[constexpr] scale: f32, #[constexpr] n: 
 /// precision: at 32K context the sdpa read is bandwidth-bound, so halving the
 /// cache bytes roughly halves the per-layer attention cost. One thread / elem.
 #[kernel]
-pub fn mt_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u32) {
+pub fn ffai_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u32) {
     let i = program_id::<0>();
     if i < n {
         store(dst[i], load(src[i]).cast::<f16>());
@@ -261,7 +261,7 @@ pub fn mt_cast_f32_f16(src: Tensor<f32>, mut dst: Tensor<f16>, #[constexpr] n: u
 /// Elementwise dtype cast f16 → f32 (reverse): the sdpa f16 output is widened
 /// back to f32 for the downstream o_proj Q4 GEMV, which consumes f32 activations.
 #[kernel]
-pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u32) {
+pub fn ffai_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u32) {
     let i = program_id::<0>();
     if i < n {
         store(dst[i], load(src[i]).cast::<f32>());
@@ -271,9 +271,9 @@ pub fn mt_cast_f16_f32(src: Tensor<f16>, mut dst: Tensor<f32>, #[constexpr] n: u
 /// Elementwise dtype cast f32 → bf16. Same compaction as the f16 variant, for
 /// models whose residual stream / cache dtype is bf16 (wider exponent range
 /// than f16, so large-magnitude residuals survive the narrowing). The reverse
-/// bf16 → f32 widening is covered by the generic `mt_cast_to_f32`.
+/// bf16 → f32 widening is covered by the generic `ffai_cast_to_f32`.
 #[kernel]
-pub fn mt_cast_f32_bf16(src: Tensor<f32>, mut dst: Tensor<bf16>, #[constexpr] n: u32) {
+pub fn ffai_cast_f32_bf16(src: Tensor<f32>, mut dst: Tensor<bf16>, #[constexpr] n: u32) {
     let i = program_id::<0>();
     if i < n {
         store(dst[i], load(src[i]).cast::<bf16>());
@@ -324,7 +324,7 @@ pub mod kernel_tests {
                 base[i] + g * value[i]
             })
             .collect();
-        TestSetup::new(mt_sigmoid_row_fma::kernel_ir_for(dt))
+        TestSetup::new(ffai_sigmoid_row_fma::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("gate", pack_f32(&gate_f, dt), dt))
             .input(TestBuffer::from_vec("value", pack_f32(&value_f, dt), dt))
             .input(TestBuffer::from_vec("base", pack_f32(&base_f, dt), dt))
@@ -341,14 +341,14 @@ pub mod kernel_tests {
             fn $name(dt: DType) -> TestSetup { un($kernel::kernel_ir_for(dt), &$input(), $op, dt) }
         };
     }
-    exact_test!(test_unary_abs, mt_abs, signed, f32::abs);
-    exact_test!(test_unary_relu, mt_relu, signed, |x| x.max(0.0));
-    exact_test!(test_unary_neg, mt_neg, signed, |x| -x);
-    exact_test!(test_unary_ceil, mt_ceil, round_safe, f32::ceil);
-    exact_test!(test_unary_floor, mt_floor, round_safe, f32::floor);
-    exact_test!(test_unary_round, mt_round, round_safe, f32::round);
-    exact_test!(test_unary_trunc, mt_trunc, round_safe, f32::trunc);
-    exact_test!(test_unary_sign, mt_sign, signed, |x| if x > 0.0 {
+    exact_test!(test_unary_abs, ffai_abs, signed, f32::abs);
+    exact_test!(test_unary_relu, ffai_relu, signed, |x| x.max(0.0));
+    exact_test!(test_unary_neg, ffai_neg, signed, |x| -x);
+    exact_test!(test_unary_ceil, ffai_ceil, round_safe, f32::ceil);
+    exact_test!(test_unary_floor, ffai_floor, round_safe, f32::floor);
+    exact_test!(test_unary_round, ffai_round, round_safe, f32::round);
+    exact_test!(test_unary_trunc, ffai_trunc, round_safe, f32::trunc);
+    exact_test!(test_unary_sign, ffai_sign, signed, |x| if x > 0.0 {
         1.0
     } else if x < 0.0 {
         -1.0
@@ -363,32 +363,32 @@ pub mod kernel_tests {
             fn $name(dt: DType) -> TestSetup { un($kernel::kernel_ir_for(dt), &$input(), $op, dt) }
         };
     }
-    trans_test!(test_unary_exp, mt_exp, signed, f32::exp);
-    trans_test!(test_unary_exp2, mt_exp2, signed, f32::exp2);
-    trans_test!(test_unary_expm1, mt_expm1, signed, f32::exp_m1);
-    trans_test!(test_unary_log, mt_log, positive, f32::ln);
-    trans_test!(test_unary_log2, mt_log2, positive, f32::log2);
-    trans_test!(test_unary_log10, mt_log10, positive, f32::log10);
-    trans_test!(test_unary_log1p, mt_log1p, positive, f32::ln_1p);
-    trans_test!(test_unary_sqrt, mt_sqrt, positive, f32::sqrt);
-    trans_test!(test_unary_rsqrt, mt_rsqrt, positive, |x| 1.0 / x.sqrt());
-    trans_test!(test_unary_recip, mt_recip, positive, |x| 1.0 / x);
-    trans_test!(test_unary_square, mt_square, signed, |x| x * x);
-    trans_test!(test_unary_sin, mt_sin, signed, f32::sin);
-    trans_test!(test_unary_cos, mt_cos, signed, f32::cos);
-    trans_test!(test_unary_tan, mt_tan, small, f32::tan);
-    trans_test!(test_unary_asin, mt_asin, unit, f32::asin);
-    trans_test!(test_unary_acos, mt_acos, unit, f32::acos);
-    trans_test!(test_unary_atan, mt_atan, signed, f32::atan);
-    trans_test!(test_unary_sinh, mt_sinh, signed, f32::sinh);
-    trans_test!(test_unary_cosh, mt_cosh, signed, f32::cosh);
-    trans_test!(test_unary_tanh, mt_tanh_op, signed, f32::tanh);
-    trans_test!(test_unary_asinh, mt_asinh, signed, f32::asinh);
-    trans_test!(test_unary_acosh, mt_acosh, ge_one, f32::acosh);
-    trans_test!(test_unary_atanh, mt_atanh, unit, f32::atanh);
-    trans_test!(test_unary_silu, mt_silu, signed, |x| x / (1.0 + (-x).exp()));
-    trans_test!(test_unary_sigmoid, mt_sigmoid, signed, |x| 1.0 / (1.0 + (-x).exp()));
-    trans_test!(test_unary_softplus, mt_softplus, signed, |x| x.max(0.0)
+    trans_test!(test_unary_exp, ffai_exp, signed, f32::exp);
+    trans_test!(test_unary_exp2, ffai_exp2, signed, f32::exp2);
+    trans_test!(test_unary_expm1, ffai_expm1, signed, f32::exp_m1);
+    trans_test!(test_unary_log, ffai_log, positive, f32::ln);
+    trans_test!(test_unary_log2, ffai_log2, positive, f32::log2);
+    trans_test!(test_unary_log10, ffai_log10, positive, f32::log10);
+    trans_test!(test_unary_log1p, ffai_log1p, positive, f32::ln_1p);
+    trans_test!(test_unary_sqrt, ffai_sqrt, positive, f32::sqrt);
+    trans_test!(test_unary_rsqrt, ffai_rsqrt, positive, |x| 1.0 / x.sqrt());
+    trans_test!(test_unary_recip, ffai_recip, positive, |x| 1.0 / x);
+    trans_test!(test_unary_square, ffai_square, signed, |x| x * x);
+    trans_test!(test_unary_sin, ffai_sin, signed, f32::sin);
+    trans_test!(test_unary_cos, ffai_cos, signed, f32::cos);
+    trans_test!(test_unary_tan, ffai_tan, small, f32::tan);
+    trans_test!(test_unary_asin, ffai_asin, unit, f32::asin);
+    trans_test!(test_unary_acos, ffai_acos, unit, f32::acos);
+    trans_test!(test_unary_atan, ffai_atan, signed, f32::atan);
+    trans_test!(test_unary_sinh, ffai_sinh, signed, f32::sinh);
+    trans_test!(test_unary_cosh, ffai_cosh, signed, f32::cosh);
+    trans_test!(test_unary_tanh, ffai_tanh_op, signed, f32::tanh);
+    trans_test!(test_unary_asinh, ffai_asinh, signed, f32::asinh);
+    trans_test!(test_unary_acosh, ffai_acosh, ge_one, f32::acosh);
+    trans_test!(test_unary_atanh, ffai_atanh, unit, f32::atanh);
+    trans_test!(test_unary_silu, ffai_silu, signed, |x| x / (1.0 + (-x).exp()));
+    trans_test!(test_unary_sigmoid, ffai_sigmoid, signed, |x| 1.0 / (1.0 + (-x).exp()));
+    trans_test!(test_unary_softplus, ffai_softplus, signed, |x| x.max(0.0)
         + (1.0 + (-x.abs()).exp()).ln());
 }
 
@@ -417,7 +417,7 @@ pub mod kernel_benches {
     ///
     /// `tol_floor` lifts the equivalence tolerance above the per-dtype default
     /// for ops where FFAI Kernels and MLX legitimately diverge by more than 1 ULP —
-    /// e.g. `expm1`, where MT computes `exp(x) − 1` (catastrophic cancellation
+    /// e.g. `expm1`, where FFAI computes `exp(x) − 1` (catastrophic cancellation
     /// near 0) while MLX uses an accurate `expm1`.
     fn ub_ref(
         kernel: Kernel,
@@ -438,8 +438,8 @@ pub mod kernel_benches {
                     format!("v_{mlx_op}{tn}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/unary.metal")),
                 )
-                // "a" is shared by name with the MT input above (same data); the
-                // runner overrides this placeholder with the MT bytes.
+                // "a" is shared by name with the FFAI input above (same data); the
+                // runner overrides this placeholder with the FFAI bytes.
                 .buffer(BenchBuffer::zeros("a", n, dt))
                 .buffer(BenchBuffer::zeros("out", n, dt).output())
                 .buffer(BenchBuffer::from_vec("n", (n as u32).to_le_bytes().to_vec(), DType::U32))
@@ -468,47 +468,47 @@ pub mod kernel_benches {
             }
         };
     }
-    // MT-specific / no MLX unary counterpart (exp2, recip, relu, trunc, silu,
+    // FFAI-specific / no MLX unary counterpart (exp2, recip, relu, trunc, silu,
     // gelu, softplus) bench FFAI-only; the rest carry an MLX A/B reference.
-    ubench_ref!(bench_exp, mt_exp, "Exp", InputDomain::Signed);
-    ubench!(bench_exp2, mt_exp2);
-    // expm1: MT `exp(x)-1` cancels catastrophically near 0 vs MLX's accurate
+    ubench_ref!(bench_exp, ffai_exp, "Exp", InputDomain::Signed);
+    ubench!(bench_exp2, ffai_exp2);
+    // expm1: FFAI `exp(x)-1` cancels catastrophically near 0 vs MLX's accurate
     // expm1; legacy used tol=5e-3.
-    ubench_ref!(bench_expm1, mt_expm1, "Expm1", InputDomain::Signed, 5e-3);
-    ubench_ref!(bench_log, mt_log, "Log", InputDomain::Positive);
-    ubench_ref!(bench_log2, mt_log2, "Log2", InputDomain::Positive);
-    ubench_ref!(bench_log10, mt_log10, "Log10", InputDomain::Positive);
-    ubench_ref!(bench_log1p, mt_log1p, "Log1p", InputDomain::Positive);
-    ubench_ref!(bench_sqrt, mt_sqrt, "Sqrt", InputDomain::Positive);
-    ubench_ref!(bench_rsqrt, mt_rsqrt, "Rsqrt", InputDomain::Positive);
-    ubench!(bench_recip, mt_recip);
-    ubench_ref!(bench_square, mt_square, "Square", InputDomain::Signed);
-    ubench_ref!(bench_abs, mt_abs, "Abs", InputDomain::Signed);
-    ubench_ref!(bench_neg, mt_neg, "Negative", InputDomain::Signed);
-    ubench_ref!(bench_sign, mt_sign, "Sign", InputDomain::Signed);
-    ubench!(bench_relu, mt_relu);
-    ubench_ref!(bench_ceil, mt_ceil, "Ceil", InputDomain::Signed);
-    ubench_ref!(bench_floor, mt_floor, "Floor", InputDomain::Signed);
-    ubench_ref!(bench_round, mt_round, "Round", InputDomain::Signed);
-    ubench!(bench_trunc, mt_trunc);
-    ubench_ref!(bench_sin, mt_sin, "Sin", InputDomain::Signed);
-    ubench_ref!(bench_cos, mt_cos, "Cos", InputDomain::Signed);
-    ubench_ref!(bench_tan, mt_tan, "Tan", InputDomain::Signed);
-    ubench_ref!(bench_asin, mt_asin, "ArcSin", InputDomain::Unit);
-    ubench_ref!(bench_acos, mt_acos, "ArcCos", InputDomain::Unit);
-    ubench_ref!(bench_atan, mt_atan, "ArcTan", InputDomain::Signed);
-    ubench_ref!(bench_sinh, mt_sinh, "Sinh", InputDomain::Signed);
-    ubench_ref!(bench_cosh, mt_cosh, "Cosh", InputDomain::Signed);
-    ubench_ref!(bench_tanh, mt_tanh_op, "Tanh", InputDomain::Signed);
-    ubench_ref!(bench_asinh, mt_asinh, "ArcSinh", InputDomain::Signed);
-    ubench_ref!(bench_acosh, mt_acosh, "ArcCosh", InputDomain::Positive);
-    ubench_ref!(bench_atanh, mt_atanh, "ArcTanh", InputDomain::Unit);
-    ubench!(bench_silu, mt_silu);
-    ubench!(bench_gelu, mt_gelu);
-    ubench_ref!(bench_sigmoid, mt_sigmoid, "Sigmoid", InputDomain::Signed);
-    ubench!(bench_softplus, mt_softplus);
-    ubench_ref!(bench_erf, mt_erf, "Erf", InputDomain::Signed);
-    ubench_ref!(bench_erfinv, mt_erfinv, "ErfInv", InputDomain::Unit);
+    ubench_ref!(bench_expm1, ffai_expm1, "Expm1", InputDomain::Signed, 5e-3);
+    ubench_ref!(bench_log, ffai_log, "Log", InputDomain::Positive);
+    ubench_ref!(bench_log2, ffai_log2, "Log2", InputDomain::Positive);
+    ubench_ref!(bench_log10, ffai_log10, "Log10", InputDomain::Positive);
+    ubench_ref!(bench_log1p, ffai_log1p, "Log1p", InputDomain::Positive);
+    ubench_ref!(bench_sqrt, ffai_sqrt, "Sqrt", InputDomain::Positive);
+    ubench_ref!(bench_rsqrt, ffai_rsqrt, "Rsqrt", InputDomain::Positive);
+    ubench!(bench_recip, ffai_recip);
+    ubench_ref!(bench_square, ffai_square, "Square", InputDomain::Signed);
+    ubench_ref!(bench_abs, ffai_abs, "Abs", InputDomain::Signed);
+    ubench_ref!(bench_neg, ffai_neg, "Negative", InputDomain::Signed);
+    ubench_ref!(bench_sign, ffai_sign, "Sign", InputDomain::Signed);
+    ubench!(bench_relu, ffai_relu);
+    ubench_ref!(bench_ceil, ffai_ceil, "Ceil", InputDomain::Signed);
+    ubench_ref!(bench_floor, ffai_floor, "Floor", InputDomain::Signed);
+    ubench_ref!(bench_round, ffai_round, "Round", InputDomain::Signed);
+    ubench!(bench_trunc, ffai_trunc);
+    ubench_ref!(bench_sin, ffai_sin, "Sin", InputDomain::Signed);
+    ubench_ref!(bench_cos, ffai_cos, "Cos", InputDomain::Signed);
+    ubench_ref!(bench_tan, ffai_tan, "Tan", InputDomain::Signed);
+    ubench_ref!(bench_asin, ffai_asin, "ArcSin", InputDomain::Unit);
+    ubench_ref!(bench_acos, ffai_acos, "ArcCos", InputDomain::Unit);
+    ubench_ref!(bench_atan, ffai_atan, "ArcTan", InputDomain::Signed);
+    ubench_ref!(bench_sinh, ffai_sinh, "Sinh", InputDomain::Signed);
+    ubench_ref!(bench_cosh, ffai_cosh, "Cosh", InputDomain::Signed);
+    ubench_ref!(bench_tanh, ffai_tanh_op, "Tanh", InputDomain::Signed);
+    ubench_ref!(bench_asinh, ffai_asinh, "ArcSinh", InputDomain::Signed);
+    ubench_ref!(bench_acosh, ffai_acosh, "ArcCosh", InputDomain::Positive);
+    ubench_ref!(bench_atanh, ffai_atanh, "ArcTanh", InputDomain::Unit);
+    ubench!(bench_silu, ffai_silu);
+    ubench!(bench_gelu, ffai_gelu);
+    ubench_ref!(bench_sigmoid, ffai_sigmoid, "Sigmoid", InputDomain::Signed);
+    ubench!(bench_softplus, ffai_softplus);
+    ubench_ref!(bench_erf, ffai_erf, "Erf", InputDomain::Signed);
+    ubench_ref!(bench_erfinv, ffai_erfinv, "ErfInv", InputDomain::Unit);
 
     // ── Fused / cast variants ─────────────────────────────────────────────
     // These have signatures the `ub` helper can't cover (f32 output, scalar
@@ -526,17 +526,19 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_cast_to_f32(dt: DType) -> BenchSetup { cast_b(mt_cast_to_f32::kernel_ir_for(dt), dt) }
+    fn bench_cast_to_f32(dt: DType) -> BenchSetup {
+        cast_b(ffai_cast_to_f32::kernel_ir_for(dt), dt)
+    }
     #[bench(dtypes = [f16, bf16])]
     fn bench_silu_cast_to_f32(dt: DType) -> BenchSetup {
-        cast_b(mt_silu_cast_to_f32::kernel_ir_for(dt), dt)
+        cast_b(ffai_silu_cast_to_f32::kernel_ir_for(dt), dt)
     }
 
     // sigmoid_mul: out[i] = a[i] * sigmoid(b[i]). Two full-length inputs.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sigmoid_mul(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_sigmoid_mul::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sigmoid_mul::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("a", n, dt))
             .buffer(BenchBuffer::random("b", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
@@ -549,7 +551,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_scalar_fma(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_scalar_fma::kernel_ir_for(dt))
+        BenchSetup::new(ffai_scalar_fma::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("scalar", 1, dt))
             .buffer(BenchBuffer::random("value", n, dt))
             .buffer(BenchBuffer::random("base", n, dt))
@@ -565,7 +567,7 @@ pub mod kernel_benches {
     fn bench_sigmoid_row_fma(dt: DType) -> BenchSetup {
         let (t, hidden) = (2048usize, 2048usize);
         let n = t * hidden;
-        BenchSetup::new(mt_sigmoid_row_fma::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sigmoid_row_fma::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", t, dt))
             .buffer(BenchBuffer::random("value", n, dt))
             .buffer(BenchBuffer::random("base", n, dt))
@@ -579,7 +581,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sigmoid_scalar_fma(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_sigmoid_scalar_fma::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sigmoid_scalar_fma::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", 1, dt))
             .buffer(BenchBuffer::random("value", n, dt))
             .buffer(BenchBuffer::random("base", n, dt))
@@ -592,7 +594,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sigmoid_scalar_fma_residual(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_sigmoid_scalar_fma_residual::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sigmoid_scalar_fma_residual::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("gate", 1, dt))
             .buffer(BenchBuffer::random("value", n, dt))
             .buffer(BenchBuffer::random("base", n, dt))
@@ -607,7 +609,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_scalar_fma_chain8(dt: DType) -> BenchSetup {
         let n = 16 * 1024 * 1024usize;
-        let mut s = BenchSetup::new(mt_scalar_fma_chain8::kernel_ir_for(dt));
+        let mut s = BenchSetup::new(ffai_scalar_fma_chain8::kernel_ir_for(dt));
         for k in 0..8 {
             s = s
                 .buffer(BenchBuffer::random(&format!("scalar{k}"), 1, dt))
@@ -623,7 +625,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_add_rms_norm(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 4096usize);
-        BenchSetup::new(mt_add_rms_norm::kernel_ir_for(dt))
+        BenchSetup::new(ffai_add_rms_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("a", rows * n, dt))
             .buffer(BenchBuffer::random("b", rows * n, dt))
@@ -644,7 +646,7 @@ pub mod kernel_benches {
 // graph layer); FFAI Ops.softplus calls this fused per-element variant
 // directly because it lives on Mamba 2's hot path (`dt = softplus(dt_raw)`).
 #[kernel]
-pub fn mt_softplus<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_softplus<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let x = load(a[idx]).cast::<f32>();
     let zero = 0.0f32;
@@ -662,7 +664,7 @@ pub fn mt_softplus<T>(a: Tensor<T>, out: Tensor<T>) {
 /// stays fp32 to avoid the 7-bit-mantissa drift over long decodes, but
 /// the model activations into the kernel are bf16).
 #[kernel]
-pub fn mt_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
+pub fn ffai_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
     let idx = program_id(0);
     store(out[idx], load(input[idx]).cast::<f32>());
 }
@@ -679,7 +681,7 @@ pub fn mt_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
 /// Saves T·30 ≈ 15k dispatches per Qwen3.6-A3B prefill at T=512 (one
 /// silu + one cast per GDN-layer per-token iter → one fused dispatch).
 #[kernel]
-pub fn mt_silu_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
+pub fn ffai_silu_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
     let idx = program_id(0);
     let x = load(input[idx]).cast::<f32>();
     let sig = 1.0f32 / (1.0f32 + exp(0.0f32 - x));
@@ -703,7 +705,7 @@ pub fn mt_silu_cast_to_f32<T>(input: Tensor<T>, out: Tensor<f32>) {
 /// internal accumulation widens to fp32 via the load-side `.cast` to
 /// preserve sigmoid precision near saturation.
 #[kernel]
-pub fn mt_sigmoid_scalar_fma<T>(
+pub fn ffai_sigmoid_scalar_fma<T>(
     gate: Tensor<T>,
     value: Tensor<T>,
     base: Tensor<T>,
@@ -721,18 +723,18 @@ pub fn mt_sigmoid_scalar_fma<T>(
 ///   `out[i] = residual[i] + base[i] + sigmoid(gate[0]) * value[i]`
 /// in one dispatch. Used by Qwen3.6-A3B's post-MoE-FFN site to
 /// collapse the existing two-dispatch chain:
-///   1. `mt_sigmoid_scalar_fma(gate, sharedOut, routed)` → ffnOut
-///   2. `mt_add(postMix, ffnOut)`                       → result
+///   1. `ffai_sigmoid_scalar_fma(gate, sharedOut, routed)` → ffnOut
+///   2. `ffai_add(postMix, ffnOut)`                       → result
 /// into a single dispatch that reads `routed`, `sharedOut`, and
 /// `postMix` once each and writes `result` once. Saves one full
 /// `[hidden]` DRAM roundtrip on the intermediate `ffnOut` plus one
 /// dispatch per MoE layer per token (×40 layers for Qwen3.6-A3B).
 ///
-/// Same precision contract as `mt_sigmoid_scalar_fma`: model dtype
+/// Same precision contract as `ffai_sigmoid_scalar_fma`: model dtype
 /// `T` on the read+write boundary, fp32 accumulation internally so
 /// the sigmoid stays accurate at saturation.
 #[kernel]
-pub fn mt_sigmoid_scalar_fma_residual<T>(
+pub fn ffai_sigmoid_scalar_fma_residual<T>(
     gate: Tensor<T>,
     value: Tensor<T>,
     base: Tensor<T>,
@@ -749,7 +751,7 @@ pub fn mt_sigmoid_scalar_fma_residual<T>(
 }
 
 /// Row-broadcast sigmoid FMA — the T-batched form of
-/// `mt_sigmoid_scalar_fma`. Computes
+/// `ffai_sigmoid_scalar_fma`. Computes
 ///   `out[r*hidden + h] = base[r*hidden + h] + sigmoid(gate[r]) * value[r*hidden + h]`
 /// over a `[T, hidden]` layout, broadcasting each row's 1-element gate
 /// logit across that row. One thread per output element; `gate[row]`
@@ -757,15 +759,15 @@ pub fn mt_sigmoid_scalar_fma_residual<T>(
 ///
 /// Replaces FFAI's per-row shared-expert fan-out at batched prefill:
 /// the previous shape was T separate command buffers each carrying one
-/// `mt_sigmoid_scalar_fma` dispatch (row-sliced gate) — ~82k command
+/// `ffai_sigmoid_scalar_fma` dispatch (row-sliced gate) — ~82k command
 /// buffers per 2k-token prefill on Qwen3.6-A3B (40 MoE layers). This
 /// kernel collapses each layer's fan-out into ONE dispatch on the
 /// already-open command buffer.
 ///
-/// Same precision contract as `mt_sigmoid_scalar_fma`: model dtype `T`
+/// Same precision contract as `ffai_sigmoid_scalar_fma`: model dtype `T`
 /// at the read/write boundary, fp32 sigmoid + FMA internally.
 #[kernel]
-pub fn mt_sigmoid_row_fma<T>(
+pub fn ffai_sigmoid_row_fma<T>(
     gate: Tensor<T>,
     value: Tensor<T>,
     base: Tensor<T>,
@@ -799,7 +801,7 @@ pub fn mt_sigmoid_row_fma<T>(
 /// long sums of many small-weight expert outputs precise, then narrows
 /// back to T on store.
 #[kernel]
-pub fn mt_scalar_fma<T>(scalar: Tensor<T>, value: Tensor<T>, base: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_scalar_fma<T>(scalar: Tensor<T>, value: Tensor<T>, base: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let s = load(scalar[0]).cast::<f32>();
     let v = load(value[idx]).cast::<f32>();
@@ -810,7 +812,7 @@ pub fn mt_scalar_fma<T>(scalar: Tensor<T>, value: Tensor<T>, base: Tensor<T>, ou
 /// 8-way fused scalar-FMA chain. Computes
 ///   `out[i] = sum_{k=0..8} scalar_k[0] * value_k[i]`
 /// in a single dispatch. Replaces the topK=8 expert accumulator chain
-/// in FFAI's MoE decode (8 sequential `mt_scalar_fma` dispatches +
+/// in FFAI's MoE decode (8 sequential `ffai_scalar_fma` dispatches +
 /// 1 acc.zero) with one fused kernel that reads each value tensor
 /// once and writes the output once — saving 7 acc reads + 1 zero
 /// dispatch per MoE layer × 40 layers = 320 dispatches + ~660 KB of
@@ -821,7 +823,7 @@ pub fn mt_scalar_fma<T>(scalar: Tensor<T>, value: Tensor<T>, base: Tensor<T>, ou
 /// narrows back to T on store. Bit-equivalent to the 8-call chain
 /// modulo final-rounding mode.
 #[kernel]
-pub fn mt_scalar_fma_chain8<T>(
+pub fn ffai_scalar_fma_chain8<T>(
     scalar0: Tensor<T>,
     value0: Tensor<T>,
     scalar1: Tensor<T>,
@@ -872,7 +874,7 @@ pub fn mt_scalar_fma_chain8<T>(
 /// Sigmoid is computed at f32 precision via load-side cast to avoid
 /// bf16 saturation drift near the asymptotes.
 #[kernel]
-pub fn mt_sigmoid_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_sigmoid_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     let av = load(a[idx]).cast::<f32>();
     let bv = load(b[idx]).cast::<f32>();
@@ -883,9 +885,9 @@ pub fn mt_sigmoid_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
 /// ⚠️ BROKEN — produces NaN/wrong output in FFAI integration test
 /// (forwardManyEquivalence fails T=8 + T=128). Kept here as a stub
 /// for future debug. Likely issue: multi-output codegen + the inlined
-/// `mt_rms_inv_scalar` reduction call don't compose correctly in this
+/// `ffai_rms_inv_scalar` reduction call don't compose correctly in this
 /// kernel shape. Possible fix paths:
-///   1. Manually inline the reduction without `mt_rms_inv_scalar`
+///   1. Manually inline the reduction without `ffai_rms_inv_scalar`
 ///   2. Use TWO compiled variants — one for residual write only, one
 ///      for residual+norm — and dispatch both in a shared encoder
 ///   3. Investigate the codegen MSL output for residual_out + normed_out
@@ -903,12 +905,12 @@ pub fn mt_sigmoid_mul<T>(a: Tensor<T>, b: Tensor<T>, out: Tensor<T>) {
 /// residual stream (input to the SECOND residual add of the same
 /// layer); `normed_out` is the pre-FFN/pre-next-mixer input.
 ///
-/// Same TG=n/4 contract as `mt_rms_norm`. Saves 1 dispatch per
+/// Same TG=n/4 contract as `ffai_rms_norm`. Saves 1 dispatch per
 /// residual-add+norm pair × 80 such pairs in Qwen3.6-A3B decode
 /// (2 per layer × 40 layers) = ~1.4 ms / token at 17 µs encoder
 /// overhead each.
 #[kernel]
-pub fn mt_add_rms_norm<T>(
+pub fn ffai_add_rms_norm<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     w: Tensor<T>,
@@ -940,10 +942,10 @@ pub fn mt_add_rms_norm<T>(
     let raw_ssq = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
     let partial_ssq = select(in_bounds, raw_ssq, 0.0f32);
     // ITER 50 (Bagel 2): inline the reduction with `reduce_sum` directly
-    // (no cross-kernel call to `mt_rms_inv_scalar`). The previous stub
+    // (no cross-kernel call to `ffai_rms_inv_scalar`). The previous stub
     // used the cross-kernel call but the multi-output codegen path
     // didn't compose with the inlined reduction. Inlining matches the
-    // working `mt_rms_norm` pattern exactly.
+    // working `ffai_rms_norm` pattern exactly.
     let tg_ssq = reduce_sum(partial_ssq);
     let eps = load(eps_buf[0u32]);
     let rms = rsqrt(tg_ssq / n + eps);
@@ -967,12 +969,12 @@ pub fn mt_add_rms_norm<T>(
 
 /// Fused add + RMSNorm with an f16 NORMED output (residual stays f32).
 /// Folds the standalone `cast_f32_f16(normed)` into the producer epilogue:
-/// mirrors `mt_add_rms_norm` exactly, only `normed_out` narrows to f16. The
+/// mirrors `ffai_add_rms_norm` exactly, only `normed_out` narrows to f16. The
 /// residual stream stays f32 (no narrowing drift over long decodes). Saves one
 /// cast dispatch per residual-add+norm pair on bf16/f16-activation paths.
 /// Bit-identical to `add_rms_norm(f32) -> cast_f32_f16`.
 #[kernel]
-pub fn mt_add_rms_norm_f16norm<T>(
+pub fn ffai_add_rms_norm_f16norm<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     w: Tensor<T>,

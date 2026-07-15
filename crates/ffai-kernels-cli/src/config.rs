@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn collect_warnings_empty_for_known_keys() {
         // Build a valid ffai.toml string in a temp dir and verify no warnings.
-        let dir = std::env::temp_dir().join("tile_config_test_known");
+        let dir = std::env::temp_dir().join("ffai_config_test_known");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("ffai.toml");
         std::fs::write(&path, "verbose = 1\nruns = 5\n").unwrap();
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn collect_warnings_flags_unknown_key() {
-        let dir = std::env::temp_dir().join("tile_config_test_unknown");
+        let dir = std::env::temp_dir().join("ffai_config_test_unknown");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("ffai.toml");
         std::fs::write(&path, "unknown_key_xyz = true\n").unwrap();

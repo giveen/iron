@@ -23,7 +23,7 @@ use ffai_kernels::kernel;
 /// where `col = ic·patch_h·patch_w + py·patch_w + px`. Per-column weight decode
 /// + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer types by
 /// `(WT, ST)` — see `block_scaled_matmul` for the axis legend. Decodes through
-/// `kernels/primitives.rs`. Produces `mt_<FMT>_patch_embed`.
+/// `kernels/primitives.rs`. Produces `ffai_<FMT>_patch_embed`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -58,7 +58,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_patch_embed",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     image: Tensor<T>,
     weight: Tensor<WT>,
     scales: Tensor<ST>,
@@ -101,7 +101,7 @@ pub fn mt<T>(
                 let elem = if WDEC == 0u32 {
                     let nib =
                         (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-                    mt_decode_e2m1(nib)
+                    ffai_decode_e2m1(nib)
                 } else if WDEC == 1u32 {
                     let bit_off = col * BITS;
                     let word_idx = bit_off / 32u32;
@@ -112,17 +112,17 @@ pub fn mt<T>(
                     let w0 = load(weight[w_row_word + word_idx]);
                     let w1 =
                         load(weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                    let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
                     select(q >= half, qf - full, qf)
                 } else {
                     let raw = load(weight[w_row_byte + col]).cast::<u32>();
                     if WDEC == 2u32 {
-                        mt_decode_e4m3(raw)
+                        ffai_decode_e4m3(raw)
                     } else if WDEC == 3u32 {
-                        mt_decode_e5m2(raw)
+                        ffai_decode_e5m2(raw)
                     } else {
-                        mt_decode_int8(raw)
+                        ffai_decode_int8(raw)
                     }
                 };
                 // Scale decode — per block of the patch_dim row.
@@ -130,7 +130,7 @@ pub fn mt<T>(
                 let scale = if SKIND == 0u32 {
                     exp2(sraw.cast::<f32>() - 127.0f32)
                 } else if SKIND == 1u32 {
-                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                    ffai_decode_e4m3(sraw.cast::<u32>()) * global
                 } else {
                     sraw.cast::<f32>()
                 };
@@ -233,7 +233,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp4_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxfp4_patch_embed::kernel_ir_for(dt),
+            ffai_mxfp4_patch_embed::kernel_ir_for(dt),
             QFormat::Mxfp4,
             4,
             16,
@@ -247,7 +247,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp4_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_nvfp4_patch_embed::kernel_ir_for(dt),
+            ffai_nvfp4_patch_embed::kernel_ir_for(dt),
             QFormat::Nvfp4,
             4,
             16,
@@ -260,12 +260,12 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_fp4_patch_embed::kernel_ir_for(dt), QFormat::Fp4, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(ffai_fp4_patch_embed::kernel_ir_for(dt), QFormat::Fp4, 4, 16, 16, 8, 8, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxfp8_e4m3_patch_embed::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_patch_embed::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             4,
             16,
@@ -279,7 +279,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxfp8_e5m2_patch_embed::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_patch_embed::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             4,
             16,
@@ -293,7 +293,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_fp8_e5m2_patch_embed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_patch_embed::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             4,
             16,
@@ -307,7 +307,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_nvfp8_patch_embed::kernel_ir_for(dt),
+            ffai_nvfp8_patch_embed::kernel_ir_for(dt),
             QFormat::Nvfp8,
             4,
             16,
@@ -322,7 +322,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_nvfp8_patch_embed::kernel_ir_for(dt),
+            ffai_nvfp8_patch_embed::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             4,
             16,
@@ -335,7 +335,17 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int8_patch_embed::kernel_ir_for(dt), QFormat::Int8, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int8_patch_embed::kernel_ir_for(dt),
+            QFormat::Int8,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
 
     // Symmetric sub-byte ints (FP32 group scale, group 64) + MXINT (E8M0 block
@@ -345,28 +355,78 @@ pub mod kernel_tests {
     // reference to float precision.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int2_patch_embed::kernel_ir_for(dt), QFormat::Int2, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int2_patch_embed::kernel_ir_for(dt),
+            QFormat::Int2,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int3_patch_embed::kernel_ir_for(dt), QFormat::Int3, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int3_patch_embed::kernel_ir_for(dt),
+            QFormat::Int3,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int4_patch_embed::kernel_ir_for(dt), QFormat::Int4, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int4_patch_embed::kernel_ir_for(dt),
+            QFormat::Int4,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int5_patch_embed::kernel_ir_for(dt), QFormat::Int5, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int5_patch_embed::kernel_ir_for(dt),
+            QFormat::Int5,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_patch_embed(dt: DType) -> TestSetup {
-        patch_setup(mt_int6_patch_embed::kernel_ir_for(dt), QFormat::Int6, 4, 16, 16, 8, 8, 64, dt)
+        patch_setup(
+            ffai_int6_patch_embed::kernel_ir_for(dt),
+            QFormat::Int6,
+            4,
+            16,
+            16,
+            8,
+            8,
+            64,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint2_patch_embed::kernel_ir_for(dt),
+            ffai_mxint2_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint2,
             4,
             16,
@@ -380,7 +440,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint3_patch_embed::kernel_ir_for(dt),
+            ffai_mxint3_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint3,
             4,
             16,
@@ -394,7 +454,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint4_patch_embed::kernel_ir_for(dt),
+            ffai_mxint4_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint4,
             4,
             16,
@@ -408,7 +468,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint5_patch_embed::kernel_ir_for(dt),
+            ffai_mxint5_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint5,
             4,
             16,
@@ -422,7 +482,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint6_patch_embed::kernel_ir_for(dt),
+            ffai_mxint6_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint6,
             4,
             16,
@@ -436,7 +496,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_mxint8_patch_embed::kernel_ir_for(dt),
+            ffai_mxint8_patch_embed::kernel_ir_for(dt),
             QFormat::Mxint8,
             4,
             16,
@@ -455,7 +515,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_nvfp8_f16_patch_embed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             4,
             16,
@@ -470,7 +530,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_nvfp8_f16_patch_embed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             4,
             16,
@@ -484,7 +544,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_fp4_f16_patch_embed::kernel_ir_for(dt),
+            ffai_fp4_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Fp4F16,
             4,
             16,
@@ -498,7 +558,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_fp8_e5m2_f16_patch_embed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4,
             16,
@@ -512,7 +572,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int2_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int2_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int2F16,
             4,
             16,
@@ -526,7 +586,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int3_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int3_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int3F16,
             4,
             16,
@@ -540,7 +600,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int4_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int4_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int4F16,
             4,
             16,
@@ -554,7 +614,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int5_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int5_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int5F16,
             4,
             16,
@@ -568,7 +628,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int6_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int6_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int6F16,
             4,
             16,
@@ -582,7 +642,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_patch_embed(dt: DType) -> TestSetup {
         patch_setup(
-            mt_int8_f16_patch_embed::kernel_ir_for(dt),
+            ffai_int8_f16_patch_embed::kernel_ir_for(dt),
             QFormat::Int8F16,
             4,
             16,
@@ -671,46 +731,54 @@ pub mod kernel_benches {
             }
         };
     }
-    patch_bench_fmt!(bench_mxfp4, mt_mxfp4_patch_embed::kernel_ir_for, QFormat::Mxfp4);
-    patch_bench_fmt!(bench_nvfp4, mt_nvfp4_patch_embed::kernel_ir_for, QFormat::Nvfp4);
-    patch_bench_fmt!(bench_fp4, mt_fp4_patch_embed::kernel_ir_for, QFormat::Fp4);
-    patch_bench_fmt!(bench_mxfp8_e4m3, mt_mxfp8_e4m3_patch_embed::kernel_ir_for, QFormat::Mxfp8E4);
-    patch_bench_fmt!(bench_mxfp8_e5m2, mt_mxfp8_e5m2_patch_embed::kernel_ir_for, QFormat::Mxfp8E5);
-    patch_bench_fmt!(bench_fp8_e5m2, mt_fp8_e5m2_patch_embed::kernel_ir_for, QFormat::Fp8E5m2);
-    patch_bench_fmt!(bench_nvfp8, mt_nvfp8_patch_embed::kernel_ir_for, QFormat::Nvfp8);
-    patch_bench_fmt!(bench_int8, mt_int8_patch_embed::kernel_ir_for, QFormat::Int8);
+    patch_bench_fmt!(bench_mxfp4, ffai_mxfp4_patch_embed::kernel_ir_for, QFormat::Mxfp4);
+    patch_bench_fmt!(bench_nvfp4, ffai_nvfp4_patch_embed::kernel_ir_for, QFormat::Nvfp4);
+    patch_bench_fmt!(bench_fp4, ffai_fp4_patch_embed::kernel_ir_for, QFormat::Fp4);
+    patch_bench_fmt!(
+        bench_mxfp8_e4m3,
+        ffai_mxfp8_e4m3_patch_embed::kernel_ir_for,
+        QFormat::Mxfp8E4
+    );
+    patch_bench_fmt!(
+        bench_mxfp8_e5m2,
+        ffai_mxfp8_e5m2_patch_embed::kernel_ir_for,
+        QFormat::Mxfp8E5
+    );
+    patch_bench_fmt!(bench_fp8_e5m2, ffai_fp8_e5m2_patch_embed::kernel_ir_for, QFormat::Fp8E5m2);
+    patch_bench_fmt!(bench_nvfp8, ffai_nvfp8_patch_embed::kernel_ir_for, QFormat::Nvfp8);
+    patch_bench_fmt!(bench_int8, ffai_int8_patch_embed::kernel_ir_for, QFormat::Int8);
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale) +
     // MXINT8 (8-bit, E8M0). Same Grid3D geometry as the rest of the family.
-    patch_bench_fmt!(bench_int2, mt_int2_patch_embed::kernel_ir_for, QFormat::Int2);
-    patch_bench_fmt!(bench_int3, mt_int3_patch_embed::kernel_ir_for, QFormat::Int3);
-    patch_bench_fmt!(bench_int4, mt_int4_patch_embed::kernel_ir_for, QFormat::Int4);
-    patch_bench_fmt!(bench_int5, mt_int5_patch_embed::kernel_ir_for, QFormat::Int5);
-    patch_bench_fmt!(bench_int6, mt_int6_patch_embed::kernel_ir_for, QFormat::Int6);
-    patch_bench_fmt!(bench_mxint2, mt_mxint2_patch_embed::kernel_ir_for, QFormat::Mxint2);
-    patch_bench_fmt!(bench_mxint3, mt_mxint3_patch_embed::kernel_ir_for, QFormat::Mxint3);
-    patch_bench_fmt!(bench_mxint4, mt_mxint4_patch_embed::kernel_ir_for, QFormat::Mxint4);
-    patch_bench_fmt!(bench_mxint5, mt_mxint5_patch_embed::kernel_ir_for, QFormat::Mxint5);
-    patch_bench_fmt!(bench_mxint6, mt_mxint6_patch_embed::kernel_ir_for, QFormat::Mxint6);
-    patch_bench_fmt!(bench_mxint8, mt_mxint8_patch_embed::kernel_ir_for, QFormat::Mxint8);
+    patch_bench_fmt!(bench_int2, ffai_int2_patch_embed::kernel_ir_for, QFormat::Int2);
+    patch_bench_fmt!(bench_int3, ffai_int3_patch_embed::kernel_ir_for, QFormat::Int3);
+    patch_bench_fmt!(bench_int4, ffai_int4_patch_embed::kernel_ir_for, QFormat::Int4);
+    patch_bench_fmt!(bench_int5, ffai_int5_patch_embed::kernel_ir_for, QFormat::Int5);
+    patch_bench_fmt!(bench_int6, ffai_int6_patch_embed::kernel_ir_for, QFormat::Int6);
+    patch_bench_fmt!(bench_mxint2, ffai_mxint2_patch_embed::kernel_ir_for, QFormat::Mxint2);
+    patch_bench_fmt!(bench_mxint3, ffai_mxint3_patch_embed::kernel_ir_for, QFormat::Mxint3);
+    patch_bench_fmt!(bench_mxint4, ffai_mxint4_patch_embed::kernel_ir_for, QFormat::Mxint4);
+    patch_bench_fmt!(bench_mxint5, ffai_mxint5_patch_embed::kernel_ir_for, QFormat::Mxint5);
+    patch_bench_fmt!(bench_mxint6, ffai_mxint6_patch_embed::kernel_ir_for, QFormat::Mxint6);
+    patch_bench_fmt!(bench_mxint8, ffai_mxint8_patch_embed::kernel_ir_for, QFormat::Mxint8);
     // FP16-scale twins (nvfp8 / fp4 / fp8_e5m2 / int2..6 / int8 scales as f16).
     // Same Grid3D geometry as the rest of the family. `fp8_e4m3_f16` reuses the
     // `nvfp8_f16` kernel (8-bit E4M3 + f16 scale, block 32).
-    patch_bench_fmt!(bench_nvfp8_f16, mt_nvfp8_f16_patch_embed::kernel_ir_for, QFormat::Nvfp8F16);
+    patch_bench_fmt!(bench_nvfp8_f16, ffai_nvfp8_f16_patch_embed::kernel_ir_for, QFormat::Nvfp8F16);
     patch_bench_fmt!(
         bench_fp8_e4m3_f16,
-        mt_nvfp8_f16_patch_embed::kernel_ir_for,
+        ffai_nvfp8_f16_patch_embed::kernel_ir_for,
         QFormat::Fp8E4m3F16
     );
-    patch_bench_fmt!(bench_fp4_f16, mt_fp4_f16_patch_embed::kernel_ir_for, QFormat::Fp4F16);
+    patch_bench_fmt!(bench_fp4_f16, ffai_fp4_f16_patch_embed::kernel_ir_for, QFormat::Fp4F16);
     patch_bench_fmt!(
         bench_fp8_e5m2_f16,
-        mt_fp8_e5m2_f16_patch_embed::kernel_ir_for,
+        ffai_fp8_e5m2_f16_patch_embed::kernel_ir_for,
         QFormat::Fp8E5m2F16
     );
-    patch_bench_fmt!(bench_int2_f16, mt_int2_f16_patch_embed::kernel_ir_for, QFormat::Int2F16);
-    patch_bench_fmt!(bench_int3_f16, mt_int3_f16_patch_embed::kernel_ir_for, QFormat::Int3F16);
-    patch_bench_fmt!(bench_int4_f16, mt_int4_f16_patch_embed::kernel_ir_for, QFormat::Int4F16);
-    patch_bench_fmt!(bench_int5_f16, mt_int5_f16_patch_embed::kernel_ir_for, QFormat::Int5F16);
-    patch_bench_fmt!(bench_int6_f16, mt_int6_f16_patch_embed::kernel_ir_for, QFormat::Int6F16);
-    patch_bench_fmt!(bench_int8_f16, mt_int8_f16_patch_embed::kernel_ir_for, QFormat::Int8F16);
+    patch_bench_fmt!(bench_int2_f16, ffai_int2_f16_patch_embed::kernel_ir_for, QFormat::Int2F16);
+    patch_bench_fmt!(bench_int3_f16, ffai_int3_f16_patch_embed::kernel_ir_for, QFormat::Int3F16);
+    patch_bench_fmt!(bench_int4_f16, ffai_int4_f16_patch_embed::kernel_ir_for, QFormat::Int4F16);
+    patch_bench_fmt!(bench_int5_f16, ffai_int5_f16_patch_embed::kernel_ir_for, QFormat::Int5F16);
+    patch_bench_fmt!(bench_int6_f16, ffai_int6_f16_patch_embed::kernel_ir_for, QFormat::Int6F16);
+    patch_bench_fmt!(bench_int8_f16, ffai_int8_f16_patch_embed::kernel_ir_for, QFormat::Int8F16);
 }

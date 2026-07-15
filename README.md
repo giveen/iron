@@ -56,7 +56,7 @@ For contributors building from source, see [Getting Started](docs/getting-starte
         metal_file = "unary.metal",
     )
 )]
-pub fn mt_exp<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_exp<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], exp(load(a[idx])));
 }
@@ -66,7 +66,7 @@ pub fn mt_exp<T>(a: Tensor<T>, out: Tensor<T>) {
 <td>
 
 ```cpp
-kernel void mt_exp(
+kernel void ffai_exp(
     const device float *a [[buffer(0)]],
     device float *out [[buffer(1)]],
     uint tid [[thread_position_in_grid]]
@@ -92,14 +92,14 @@ ffaik bench --filter mlx/gemv
 ```
 ffaik bench · Apple M1 Max
   mlx/gemv
-  Shape                                │   MT(µs) │  Ref(GB/s) │  MT(GB/s) │   MT% │  GFLOP/s │  ok
+  Shape                                │   FFAI(µs) │  Ref(GB/s) │  FFAI(GB/s) │   FFAI % │  GFLOP/s │  ok
   ────────────────────────────────────────────────────────────────────────────────────────────────────
   N=16M f32                           │    192.8 │      350.1 │     348.2 │   99% │    174.1 │   ✓
   N=16M f16                           │     62.1 │      583.6 │     540.1 │   93% │    540.1 │   ✓
   N=16M bf16                          │    136.8 │      615.2 │     245.2 │   40% │    245.2 │   ✓
 ```
 
-The default table adds wall-clock latency (`MT(µs)`) and compute throughput
+The default table adds wall-clock latency (`FFAI(µs)`) and compute throughput
 (`GFLOP/s`, blank for memory-bound kernels); `-v` adds the roofline (`%BW` /
 `%FLOP` / arithmetic intensity), occupancy/registers, and a bottleneck verdict.
 
@@ -124,7 +124,7 @@ One `#[kernel]` DSL, four GPU backends. Your kernel lowers to a shared IR; the c
 
 The non-Metal backends are opt-in Cargo features so the macOS Metal path stays zero-config and dependency-light. Each requires its toolchain/driver at link/run time (CUDA toolkit, ROCm, or the Vulkan SDK). HIP and Vulkan have the full kernel set implemented (codegen-complete); end-to-end model validation is in progress — they are not yet verified against a full model run. See `specs/AMD_BACKEND_SPEC.md` and `specs/VULKAN_BACKEND_SPEC.md`.
 
-The CUDA runtime (`crates/ffai-kernels-runtime/src/device/cuda/`) adds NVRTC runtime kernel compile, a dedicated capturable non-blocking stream, CUDA-graph capture hooks (`begin_capture` / `end_capture` / `graph_launch`), a buffer pool, pinned async host-to-device copies, and an optional `--fmad` codegen gate (`MT_FMAD=1`). See `specs/CUDA_BACKEND_SPEC.md`.
+The CUDA runtime (`crates/ffai-kernels-runtime/src/device/cuda/`) adds NVRTC runtime kernel compile, a dedicated capturable non-blocking stream, CUDA-graph capture hooks (`begin_capture` / `end_capture` / `graph_launch`), a buffer pool, pinned async host-to-device copies, and an optional `--fmad` codegen gate (`FFAI_FMAD=1`). See `specs/CUDA_BACKEND_SPEC.md`.
 
 > Today `ffaik bench` / `ffaik test` dispatch through the in-process `GpuRunner` on the Metal path; moving the runner into a dedicated subprocess (for isolation and parallelism) and wiring the CLI harness across all backends (Phase 6) is planned.
 
@@ -167,20 +167,10 @@ Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for the iss
 
 ## Acknowledgements
 
-FFAI Kernels's benchmark suite and kernel library stand on the shoulders of the MLX ecosystem. A portion of the `ffai-kernels-std` kernels are ports, re-implementations or improvements of kernels from the following projects:
-
-- [**ml-explore/mlx**](https://github.com/ml-explore/mlx) — primary source for reference kernels.
-- [**ekryski/mlx**](https://github.com/ekryski/mlx) (`alpha`) — FFAI extensions: gated-delta, SSM replay, AURA codec.
-- [**ml-explore/mlx-lm**](https://github.com/ml-explore/mlx-lm) — reference for GatedDeltaNet step semantics.
-
-We are grateful to the MLX team at Apple and the broader MLX community for their work in pushing local AI on Apple Silicon forward.
-
-After starting on this project we became aware of [cuda-oxide](https://github.com/NVlabs/cuda-oxide) from NVIDIA's labs. While similar in concept, we started with Metal output and quickly surpassed the breadth and depth of kernels implemented in cuda-oxide. In addition, we feel that our implementation is simpler and has less moving parts. Regardless, we wanted to acknowledge prior art we became aware of and would also like to thank NVIDIA for all they have done to push the AI frontier forward.
-
-See [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md) for the full list of individual contributors and third-party software.
+As with all open source, FFAI Kernel's stands on the work of others. Please see [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md) for the full list of individual contributors, prior art and third-party software.
 
 ## License
 
 <sup>
-Licensed under the <a href="LICENSE">Apache License, Version 2.0</a>.
+Licensed under the <a href="LICENSE">Apache License, Version 2.0</a>. Please see the accompanying <a href="NOTICE">NOTICE</a>.
 </sup>

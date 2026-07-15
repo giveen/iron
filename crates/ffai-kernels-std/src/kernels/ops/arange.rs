@@ -7,29 +7,29 @@
 //!   Grid: [ceil(N/1024), 1, 1] × [1024, 1, 1]  (TPG=1024)
 //!   Algorithm: out[index] = start + index * step  (one thread per element)
 //!
-//! FFAI Kernels: mt_arange — same one-thread-per-element algorithm via #[kernel] DSL.
+//! FFAI Kernels: ffai_arange — same one-thread-per-element algorithm via #[kernel] DSL.
 //!   KernelMode::Elementwise
 
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) {
     let idx = program_id(0);
     let s = load(start[0]);
     let st = load(step[0]);
     store(out[idx], s + idx.cast::<T>() * st);
 }
 
-/// Correctness tests for `mt_arange` in the new `#[test_kernel]` syntax.
+/// Correctness tests for `ffai_arange` in the new `#[test_kernel]` syntax.
 ///
 /// These run via `ffaik test` (and the `kernel_tests_harness` cargo bridge).
 /// They were A/B-compared against the legacy
-/// `tests/arange_gpu_correctness.rs` (removed in #240) on the same kernel IR
+/// `tests/arange_gpu_correctness.rs` (since removed) on the same kernel IR
 /// during migration.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_arange;
+    use super::ffai_arange;
     use crate::utils::{pack_f32, scalar_bytes};
 
     /// Build a `TestSetup`: a zeroed `out`, scalar `start`/`step`, the constexpr
@@ -37,7 +37,7 @@ pub mod kernel_tests {
     /// runner packs the oracle to `dt` and diffs against the GPU output.
     fn setup(start: f32, step: f32, n: usize, dt: DType) -> TestSetup {
         let expected: Vec<f32> = (0..n).map(|i| start + i as f32 * step).collect();
-        TestSetup::new(mt_arange::kernel_ir_for(dt))
+        TestSetup::new(ffai_arange::kernel_ir_for(dt))
             .input(TestBuffer::zeros("out", n, dt))
             .input(TestBuffer::from_vec("start", scalar_bytes(start, dt), dt))
             .input(TestBuffer::from_vec("step", scalar_bytes(step, dt), dt))
@@ -49,28 +49,28 @@ pub mod kernel_tests {
     // Power-of-two step (0.5) at small magnitudes — bit-exact in every dtype
     // (max value 31.5 is representable in f16 and bf16).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
+    fn test_ffai_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
 
     // Negative integer step — small exact integers in every dtype, so the
     // bit-exact f32 tolerance holds across the board.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_arange_descending(dt: DType) -> TestSetup { setup(16.0, -1.0, 16, dt) }
+    fn test_ffai_arange_descending(dt: DType) -> TestSetup { setup(16.0, -1.0, 16, dt) }
 
     // Non-power-of-two step (0.1) exercises per-dtype rounding. f32 computes
     // the oracle and the kernel identically, so it stays bit-exact (1e-6); the
     // f16/bf16 tolerances widen to ~one ULP at magnitude ~6 for their shorter
     // mantissas (measured ≈3.9e-3 / 3.1e-2).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-2, 1e-1])]
-    fn test_mt_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
+    fn test_ffai_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
 }
 
-/// Benchmark for `mt_arange` in the new `#[bench]` syntax. Registered
+/// Benchmark for `ffai_arange` in the new `#[bench]` syntax. Registered
 /// alongside the legacy `#[kernel]` above, so it appears in
 /// `ffaik bench` next to the legacy `arange` row for A/B comparison.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_arange;
+    use super::ffai_arange;
     use crate::utils::{dtype_tol, mlx_tname, scalar_bytes};
 
     // 64M elements matches the MLX default elementwise bench size.
@@ -92,7 +92,7 @@ pub mod kernel_benches {
     fn bench_arange(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_arange::kernel_ir_for(dt))
+        BenchSetup::new(ffai_arange::kernel_ir_for(dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
             .buffer(BenchBuffer::from_vec("start", scalar_bytes(0.0, dt), dt))
             .buffer(BenchBuffer::from_vec("step", scalar_bytes(1.0, dt), dt))

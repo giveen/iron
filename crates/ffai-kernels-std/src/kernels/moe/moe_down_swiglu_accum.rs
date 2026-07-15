@@ -6,10 +6,10 @@
 //! decode path runs per layer (under `FFAI_MOE_GPU_ROUTER`, default-on
 //! as of ITER 80) into ONE kernel launch:
 //!
-//!   1. `mt_swiglu` (many=8): `inner[k][d] = silu(gate[k][d]) * up[k][d]`
-//!   2. `mt_dequant_gemv_int4_expert_indexed` (many=8): per slot k,
+//!   1. `ffai_swiglu` (many=8): `inner[k][d] = silu(gate[k][d]) * up[k][d]`
+//!   2. `ffai_dequant_gemv_int4_expert_indexed` (many=8): per slot k,
 //!      `down_out[k] = W_down[expert[k]] · inner[k]`  (out_dim = hidden)
-//!   3. `mt_scalar_fma_chain8`:
+//!   3. `ffai_scalar_fma_chain8`:
 //!      `acc[i] = Σ_{k=0..8} scalar[k] * down_out[k][i]`
 //!
 //! The three stages have a strict data dependency chain so they MUST
@@ -64,7 +64,7 @@
 //! ```
 //!
 //! `expert_indices` and `slot_weights` are the contiguous outputs of
-//! `mt_moe_router_topk` (k=8, packed). The 16 gate/up tensors mirror
+//! `ffai_moe_router_topk` (k=8, packed). The 16 gate/up tensors mirror
 //! FFAI's per-slot scratch caches: one `Tensor.empty([moeIntermediate])`
 //! per slot, instance-cached per `MoELayer` per the ITER 32-36
 //! scratch-caching rule (see CLAUDE.md / MEMORY.md).
@@ -74,10 +74,10 @@
 //! At greedy decode this kernel is mathematically equivalent (modulo
 //! floating-point reorder of the per-thread reduction) to:
 //!
-//!   for k in 0..8: tmp_k = mt_swiglu(gate_k, up_k)
-//!   for k in 0..8: down_k = mt_dequant_gemv_int4_expert_indexed(
+//!   for k in 0..8: tmp_k = ffai_swiglu(gate_k, up_k)
+//!   for k in 0..8: down_k = ffai_dequant_gemv_int4_expert_indexed(
 //!                              W, S, B, tmp_k, expert_indices[k:k+1])
-//!   out = mt_scalar_fma_chain8(slot_weights[0:1], down_0, ...,
+//!   out = ffai_scalar_fma_chain8(slot_weights[0:1], down_0, ...,
 //!                              slot_weights[7:8], down_7)
 //!
 //! Tolerance budget: 1e-3 (f32), 5e-2 (bf16 / f16). The reduce_sum at
@@ -155,7 +155,7 @@ macro_rules! define_moe_down_swiglu_accum_chain8 {
     ) => {
         #[kernel]
         #[allow(clippy::too_many_arguments)]
-        pub fn mt_moe_down_swiglu_accum_int4_chain8<T>(
+        pub fn ffai_moe_down_swiglu_accum_int4_chain8<T>(
             gate_0: Tensor<T>,
             up_0: Tensor<T>,
             gate_1: Tensor<T>,
@@ -189,7 +189,7 @@ macro_rules! define_moe_down_swiglu_accum_chain8 {
             // accumulation precision.
             threadgroup_alloc("tg_inner", 768, "f32");
 
-            // Int4 dequant constants, match `mt_dequant_gemv_int4_expert_indexed`.
+            // Int4 dequant constants, match `ffai_dequant_gemv_int4_expert_indexed`.
             let vals_per_pack = 8u32;
             let mask = 0xFu32;
             let row = program_id::<0>();
@@ -309,7 +309,7 @@ define_moe_down_swiglu_accum_chain8!(
 );
 
 /// New-syntax correctness test for the fused MoE decode kernel
-/// (`mt_moe_down_swiglu_accum_int4_chain8`). The 8-way fusion has a clean
+/// (`ffai_moe_down_swiglu_accum_int4_chain8`). The 8-way fusion has a clean
 /// closed-form oracle: for each output row `i`,
 ///
 ///   out[i] = Σ_{k=0..8} slot_weights[k]
@@ -325,7 +325,7 @@ define_moe_down_swiglu_accum_chain8!(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_moe_down_swiglu_accum_int4_chain8;
+    use super::ffai_moe_down_swiglu_accum_int4_chain8;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Top-k slot count this kernel fuses (8-way chain).
@@ -460,7 +460,7 @@ pub mod kernel_tests {
             group_size,
         );
 
-        let mut su = TestSetup::new(mt_moe_down_swiglu_accum_int4_chain8::kernel_ir_for(dt))
+        let mut su = TestSetup::new(ffai_moe_down_swiglu_accum_int4_chain8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction);
         for k in 0..N_SLOTS {
             su = su
@@ -488,7 +488,7 @@ pub mod kernel_tests {
 }
 
 /// New-syntax benchmark for the fused MoE decode kernel
-/// (`mt_moe_down_swiglu_accum_int4_chain8`). Bench-only: the 8-way
+/// (`ffai_moe_down_swiglu_accum_int4_chain8`). Bench-only: the 8-way
 /// SwiGLU + indexed int4 down-projection + scalar-FMA-chain fusion has no
 /// clean single-stage oracle — its end-to-end correctness is validated in
 /// FFAI integration tests and by the in-source `#[test_kernel]`s against the
@@ -502,7 +502,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_down_swiglu_accum_int4_chain8;
+    use super::ffai_moe_down_swiglu_accum_int4_chain8;
 
     /// Lanes per threadgroup — the caller-picked `lsize` (typically 128).
     const LSIZE: u32 = 128;
@@ -527,7 +527,7 @@ pub mod kernel_benches {
             + 2 * n_experts * out_dim * n_groups * sz
             + out_dim * sz;
 
-        let mut bs = BenchSetup::new(mt_moe_down_swiglu_accum_int4_chain8::kernel_ir_for(dt))
+        let mut bs = BenchSetup::new(ffai_moe_down_swiglu_accum_int4_chain8::kernel_ir_for(dt))
             .mode(KernelMode::Reduction);
         // 8 gate/up activation pairs.
         for k in 0..N_SLOTS {

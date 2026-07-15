@@ -78,7 +78,7 @@ pub(crate) fn pso_cache_key(kernel: &Kernel, fn_consts: &BTreeMap<String, u32>) 
     fnv1a_extend(&mut h, kernel.name.as_bytes());
     fnv1a_extend(&mut h, b":");
     // Fold EVERY param's dtype label, not just the first. Quantized
-    // kernels (mt_qmm, dequant_gemv_int*, …) take a packed `Tensor<u32>`
+    // kernels (ffai_qmm, dequant_gemv_int*, …) take a packed `Tensor<u32>`
     // weight as their first parameter, so `params[0].dtype` is identical
     // (u32) across the f32 / f16 / bf16 monomorphizations — keying on
     // only the first param collided all three onto one PSO, and whichever
@@ -354,14 +354,14 @@ mod tests {
         let consts = BTreeMap::new();
         // Two "kernels" with the same name + identical first param (u32
         // packed weight) but f32 vs f16 value dtypes — the exact shape of
-        // mt_qmm / dequant_gemv monomorphizations. They must NOT collide.
-        let mut k_f32 = Kernel::new("mt_qmm");
+        // ffai_qmm / dequant_gemv monomorphizations. They must NOT collide.
+        let mut k_f32 = Kernel::new("ffai_qmm");
         k_f32.params = vec![
             tensor_param("w", DType::U32, &[4], false, ParamKind::Tensor),
             tensor_param("scales", DType::F32, &[4], false, ParamKind::Tensor),
             tensor_param("out", DType::F32, &[4], true, ParamKind::Tensor),
         ];
-        let mut k_f16 = Kernel::new("mt_qmm");
+        let mut k_f16 = Kernel::new("ffai_qmm");
         k_f16.params = vec![
             tensor_param("w", DType::U32, &[4], false, ParamKind::Tensor),
             tensor_param("scales", DType::F16, &[4], false, ParamKind::Tensor),
@@ -370,7 +370,7 @@ mod tests {
         assert_ne!(pso_cache_key(&k_f32, &consts), pso_cache_key(&k_f16, &consts));
 
         // And f16 vs bf16 (same byte width, different label) must differ too.
-        let mut k_bf16 = Kernel::new("mt_qmm");
+        let mut k_bf16 = Kernel::new("ffai_qmm");
         k_bf16.params = vec![
             tensor_param("w", DType::U32, &[4], false, ParamKind::Tensor),
             tensor_param("scales", DType::BF16, &[4], false, ParamKind::Tensor),

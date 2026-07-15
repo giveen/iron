@@ -64,14 +64,14 @@ use ffai_kernels::kernel;
 /// outputs; `inv` is `0` for the forward transform, `1` for the
 /// inverse (conjugated twiddles + `1/N` scale).
 ///
-/// Produces kernels: `mt_fft_n32`, `_n64`, `_n128`, `_n256`, `_n512`, `_n1024`.
+/// Produces kernels: `ffai_fft_n32`, `_n64`, `_n128`, `_n256`, `_n512`, `_n1024`.
 /// `LOG_N = log2(N)` (integer constant, pre-computed per variant).
 #[kernel(variants(
     N     = [32u32, 64u32, 128u32, 256u32, 512u32, 1024u32],
     LOG_N = [5u32,  6u32,  7u32,   8u32,   9u32,   10u32],
     suffix = "n{N}"
 ))]
-pub fn mt_fft<T>(
+pub fn ffai_fft<T>(
     in_re: Tensor<T>,
     in_im: Tensor<T>,
     mut out_re: Tensor<T>,
@@ -153,7 +153,7 @@ pub fn mt_fft<T>(
 //      power-of-two M ≥ 2N.
 //
 //   2. Convolution via radix-2 FFT: the caller dispatches the existing
-//      `mt_fft_n*` kernel on the padded M-length sequence (and on the
+//      `ffai_fft_n*` kernel on the padded M-length sequence (and on the
 //      pre-computed chirp sequence `a[n]` for the convolution filter). The
 //      element-wise product in frequency domain followed by an IFFT computes
 //      the circular convolution.
@@ -162,7 +162,7 @@ pub fn mt_fft<T>(
 //      `k` by `exp(∓iπk²/N)` and scale by `1/N` for the inverse transform.
 //
 // This module provides step 1 and step 3 as GPU kernels. Step 2 (the FFT
-// convolution) uses the existing `mt_fft_n1024` (M=1024 covers both
+// convolution) uses the existing `ffai_fft_n1024` (M=1024 covers both
 // N=400: 2×400=800 ≤ 1024, and N=480: 2×480=960 ≤ 1024).
 //
 // Additionally, `bluestein_chirp_filter` pre-computes the frequency-domain
@@ -187,10 +187,10 @@ pub fn mt_fft<T>(
 //
 //   bluestein_preprocess<T>(x_re, x_im, chirp_re, chirp_im, N, M, inv=0|1)
 //     → padded `[rows, M]` pre-multiplied sequences
-//   mt_fft_n1024<T>(filter_re, filter_im, F_re, F_im, inv=0)   // once per N
-//   mt_fft_n1024<T>(padded_re, padded_im, Y_re, Y_im, inv=0)   // per batch
+//   ffai_fft_n1024<T>(filter_re, filter_im, F_re, F_im, inv=0)   // once per N
+//   ffai_fft_n1024<T>(padded_re, padded_im, Y_re, Y_im, inv=0)   // per batch
 //   elementwise_cmul(Y_re, Y_im, F_re, F_im)                   // in-place
-//   mt_fft_n1024<T>(Y_re, Y_im, conv_re, conv_im, inv=1)        // IFFT
+//   ffai_fft_n1024<T>(Y_re, Y_im, conv_re, conv_im, inv=1)        // IFFT
 //   bluestein_postprocess<T>(conv_re, conv_im, out_re, out_im, N, M, inv)
 //     → final DFT output `[rows, N]`
 
@@ -212,7 +212,7 @@ pub fn mt_fft<T>(
 /// adjacent buffer slots and corrupts the output).
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_fft_bluestein_preprocess<T>(
+pub fn ffai_fft_bluestein_preprocess<T>(
     in_re: Tensor<T>,
     in_im: Tensor<T>,
     mut out_re: Tensor<T>,
@@ -234,7 +234,7 @@ pub fn mt_fft_bluestein_preprocess<T>(
         // Standard Bluestein for the forward DFT uses exp(-iπn²/N) on
         // the input side and exp(-iπk²/N) on the output side (paired
         // with a positive-sign convolution kernel built by
-        // `mt_fft_bluestein_chirp_filter`). Inverse flips both signs.
+        // `ffai_fft_bluestein_chirp_filter`). Inverse flips both signs.
         //   forward (inv=0): angle_sign = -1   (chirp = exp(-iπn²/N))
         //   inverse (inv=1): angle_sign = +1   (chirp = exp(+iπn²/N))
         let angle_sign = select(inv == 0u32, -1.0f32, 1.0f32);
@@ -280,7 +280,7 @@ pub fn mt_fft_bluestein_preprocess<T>(
 /// The caller FFTs this filter once and stores it for reuse across all
 /// rows/frames.
 #[kernel]
-pub fn mt_fft_bluestein_chirp_filter(
+pub fn ffai_fft_bluestein_chirp_filter(
     mut filter_re: Tensor<f32>,
     mut filter_im: Tensor<f32>,
     #[constexpr] n_len: u32,
@@ -318,7 +318,7 @@ pub fn mt_fft_bluestein_chirp_filter(
 /// the filter is always f32 (pre-computed once as f32).
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_fft_bluestein_cmul<T>(
+pub fn ffai_fft_bluestein_cmul<T>(
     y_re: Tensor<T>,
     y_im: Tensor<T>,
     filter_re: Tensor<f32>,
@@ -360,7 +360,7 @@ pub fn mt_fft_bluestein_cmul<T>(
 /// Grid3D: one thread per element of `[rows, N]`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_fft_bluestein_postprocess<T>(
+pub fn ffai_fft_bluestein_postprocess<T>(
     conv_re: Tensor<T>,
     conv_im: Tensor<T>,
     mut out_re: Tensor<T>,
@@ -401,7 +401,7 @@ pub fn mt_fft_bluestein_postprocess<T>(
 /// against a naive O(N²) DFT (forward); the Bluestein pipeline stages are
 /// each pure elementwise chirp arithmetic, pinned against direct CPU replays
 /// of their documented formulas (the legacy `tests/fft_*_gpu_correctness.rs`
-/// (removed in #240) validated the full assembled pipeline against a DFT —
+/// (since removed) validated the full assembled pipeline against a DFT —
 /// these pin the
 /// individual stages). Inputs are kept small + dtype-rounded so the f32
 /// threadgroup math the kernels use matches the oracle within an absolute tol.
@@ -475,22 +475,22 @@ pub mod kernel_tests {
             }
         };
     }
-    fft_test!(test_fft_n32, mt_fft_n32, 32);
-    fft_test!(test_fft_n64, mt_fft_n64, 64);
-    fft_test!(test_fft_n128, mt_fft_n128, 128);
-    fft_test!(test_fft_n256, mt_fft_n256, 256);
-    fft_test!(test_fft_n512, mt_fft_n512, 512);
-    fft_test!(test_fft_n1024, mt_fft_n1024, 1024);
+    fft_test!(test_fft_n32, ffai_fft_n32, 32);
+    fft_test!(test_fft_n64, ffai_fft_n64, 64);
+    fft_test!(test_fft_n128, ffai_fft_n128, 128);
+    fft_test!(test_fft_n256, ffai_fft_n256, 256);
+    fft_test!(test_fft_n512, ffai_fft_n512, 512);
+    fft_test!(test_fft_n1024, ffai_fft_n1024, 1024);
 
     // Inverse transform (inv=1): conjugated twiddles + 1/N scale — the path
     // the forward tests const-fold away. Complex spectrum input.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
     fn test_fft_inv_n64(dt: DType) -> TestSetup {
-        fft_setup(mt_fft_n64::kernel_ir_for(dt), 64, true, dt)
+        fft_setup(ffai_fft_n64::kernel_ir_for(dt), 64, true, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
     fn test_fft_inv_n256(dt: DType) -> TestSetup {
-        fft_setup(mt_fft_n256::kernel_ir_for(dt), 256, true, dt)
+        fft_setup(ffai_fft_n256::kernel_ir_for(dt), 256, true, dt)
     }
 
     // ── Bluestein stages ───────────────────────────────────────────────────
@@ -518,7 +518,7 @@ pub mod kernel_tests {
                 fi[m] = angle.sin();
             }
         }
-        TestSetup::new(mt_fft_bluestein_chirp_filter::kernel_ir_for())
+        TestSetup::new(ffai_fft_bluestein_chirp_filter::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::zeros("filter_re", m_len, DType::F32))
             .input(TestBuffer::zeros("filter_im", m_len, DType::F32))
@@ -554,7 +554,7 @@ pub mod kernel_tests {
                 oi[row * m_len + col] = xrv * wi + xiv * wr;
             }
         }
-        TestSetup::new(mt_fft_bluestein_preprocess::kernel_ir_for(dt))
+        TestSetup::new(ffai_fft_bluestein_preprocess::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("in_re", pack_f32(&xr_f, dt), dt))
             .input(TestBuffer::from_vec("in_im", pack_f32(&xi_f, dt), dt))
@@ -589,7 +589,7 @@ pub mod kernel_tests {
             or[idx] = yr[idx] * fr[col] - yi[idx] * fi[col];
             oi[idx] = yr[idx] * fi[col] + yi[idx] * fr[col];
         }
-        TestSetup::new(mt_fft_bluestein_cmul::kernel_ir_for(dt))
+        TestSetup::new(ffai_fft_bluestein_cmul::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("y_re", pack_f32(&yr_f, dt), dt))
             .input(TestBuffer::from_vec("y_im", pack_f32(&yi_f, dt), dt))
@@ -628,7 +628,7 @@ pub mod kernel_tests {
                 oi[row * n_len + k] = (crv * wi + civ * wr) * scale;
             }
         }
-        TestSetup::new(mt_fft_bluestein_postprocess::kernel_ir_for(dt))
+        TestSetup::new(ffai_fft_bluestein_postprocess::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("conv_re", pack_f32(&cr_f, dt), dt))
             .input(TestBuffer::from_vec("conv_im", pack_f32(&ci_f, dt), dt))
@@ -673,12 +673,12 @@ pub mod kernel_benches {
             fn $name(dt: DType) -> BenchSetup { fb($kernel::kernel_ir_for(dt), $n, dt) }
         };
     }
-    fft_bench!(bench_fft_n32, mt_fft_n32, 32);
-    fft_bench!(bench_fft_n64, mt_fft_n64, 64);
-    fft_bench!(bench_fft_n128, mt_fft_n128, 128);
-    fft_bench!(bench_fft_n256, mt_fft_n256, 256);
-    fft_bench!(bench_fft_n512, mt_fft_n512, 512);
-    fft_bench!(bench_fft_n1024, mt_fft_n1024, 1024);
+    fft_bench!(bench_fft_n32, ffai_fft_n32, 32);
+    fft_bench!(bench_fft_n64, ffai_fft_n64, 64);
+    fft_bench!(bench_fft_n128, ffai_fft_n128, 128);
+    fft_bench!(bench_fft_n256, ffai_fft_n256, 256);
+    fft_bench!(bench_fft_n512, ffai_fft_n512, 512);
+    fft_bench!(bench_fft_n1024, ffai_fft_n1024, 1024);
 
     // Bluestein stages at a realistic non-power-of-two length (N=480 → M=1024).
     const N_LEN: usize = 480;
@@ -687,7 +687,7 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32])]
     fn bench_bluestein_chirp_filter(_dt: DType) -> BenchSetup {
-        BenchSetup::new(mt_fft_bluestein_chirp_filter::kernel_ir_for())
+        BenchSetup::new(ffai_fft_bluestein_chirp_filter::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::zeros("filter_re", M_LEN, DType::F32).output())
             .buffer(BenchBuffer::zeros("filter_im", M_LEN, DType::F32).output())
@@ -702,7 +702,7 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bluestein_preprocess(dt: DType) -> BenchSetup {
-        BenchSetup::new(mt_fft_bluestein_preprocess::kernel_ir_for(dt))
+        BenchSetup::new(ffai_fft_bluestein_preprocess::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("in_re", ROWS * N_LEN, dt))
             .buffer(BenchBuffer::random("in_im", ROWS * N_LEN, dt))
@@ -718,7 +718,7 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bluestein_cmul(dt: DType) -> BenchSetup {
-        BenchSetup::new(mt_fft_bluestein_cmul::kernel_ir_for(dt))
+        BenchSetup::new(ffai_fft_bluestein_cmul::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("y_re", ROWS * M_LEN, dt))
             .buffer(BenchBuffer::random("y_im", ROWS * M_LEN, dt))
@@ -734,7 +734,7 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bluestein_postprocess(dt: DType) -> BenchSetup {
-        BenchSetup::new(mt_fft_bluestein_postprocess::kernel_ir_for(dt))
+        BenchSetup::new(ffai_fft_bluestein_postprocess::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("conv_re", ROWS * M_LEN, dt))
             .buffer(BenchBuffer::random("conv_im", ROWS * M_LEN, dt))

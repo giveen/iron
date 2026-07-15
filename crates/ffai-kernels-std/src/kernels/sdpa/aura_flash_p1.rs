@@ -29,7 +29,7 @@
 //! - `m_partials    [q_heads, num_blocks]`                     f32
 //! - `l_partials    [q_heads, num_blocks]`                     f32
 //!
-//! `mt_aura_flash_pass2` later reduces the partials cross-block.
+//! `ffai_aura_flash_pass2` later reduces the partials cross-block.
 //!
 //! ## Dispatch
 //!
@@ -54,10 +54,10 @@ use ffai_kernels::kernel;
 
 /// AURA flash pass-1 (non-causal): per-block online-softmax, KB=4.
 ///
-/// Produces kernels: `mt_aura_flash_p1_kb4_vb2_d64`, `_kb4_vb2_d128`,
+/// Produces kernels: `ffai_aura_flash_p1_kb4_vb2_d64`, `_kb4_vb2_d128`,
 /// `_kb4_vb4_d64`, `_kb4_vb4_d128`.
 #[kernel(variants(VB = [2, 2, 4, 4], DIM = [64, 128, 64, 128], VL = [4, 4, 16, 16], DPL = [2, 4, 2, 4], suffix = "kb4_vb{VB}_d{DIM}"))]
-pub fn mt_aura_flash_p1<T>(
+pub fn ffai_aura_flash_p1<T>(
     q_rot: Tensor<T>,
     key_packed: Tensor<u32>,
     key_norms: Tensor<T>,
@@ -225,14 +225,14 @@ pub fn mt_aura_flash_p1<T>(
 
 /// AURA flash pass-1 (causal): per-block online-softmax, KB=4, VB=2.
 ///
-/// Same compressed-domain online-softmax as `mt_aura_flash_p1`, with
+/// Same compressed-domain online-softmax as `ffai_aura_flash_p1`, with
 /// the per-token loop clamped at `q_position + 1` — every key strictly
 /// after the query token is masked out. Production recipe aura4v2.
 ///
-/// Produces kernels: `mt_aura_flash_p1_causal_kb4_vb2_d64`,
+/// Produces kernels: `ffai_aura_flash_p1_causal_kb4_vb2_d64`,
 /// `_causal_kb4_vb2_d128`.
 #[kernel(variants(DIM = [64, 128], DPL = [2, 4], suffix = "kb4_vb2_d{DIM}"))]
-pub fn mt_aura_flash_p1_causal<T>(
+pub fn ffai_aura_flash_p1_causal<T>(
     q_rot: Tensor<T>,
     key_packed: Tensor<u32>,
     key_norms: Tensor<T>,
@@ -373,17 +373,17 @@ pub fn mt_aura_flash_p1_causal<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_aura_flash_p1_causal_kb4_vb2_d128, mt_aura_flash_p1_kb4_vb2_d128};
+    use super::{ffai_aura_flash_p1_causal_kb4_vb2_d128, ffai_aura_flash_p1_kb4_vb2_d128};
     use crate::utils::{pack_f32, unpack_f32};
 
     // ── GPU pass-1 partials, validated directly ─────────────────────────
     //
-    // The companion `mt_aura_flash_pass2` test CPU-emulates pass 1 to stage
+    // The companion `ffai_aura_flash_pass2` test CPU-emulates pass 1 to stage
     // the partials it feeds the GPU reducer — so the GPU pass-1 path itself
-    // was never exercised. This test dispatches the real `mt_aura_flash_p1`
+    // was never exercised. This test dispatches the real `ffai_aura_flash_p1`
     // kernel and validates its three partial outputs against a CPU oracle:
     // the same per-(q_head, block) online-softmax block reduction over the
-    // AURA-codebook-decoded K,V that `mt_aura_flash_pass2`'s `emulate_p1`
+    // AURA-codebook-decoded K,V that `ffai_aura_flash_pass2`'s `emulate_p1`
     // reference computes. All three partials are deterministic per
     // (q_head, block), so all three are checked.
 
@@ -427,12 +427,12 @@ pub mod kernel_tests {
         packed
     }
 
-    /// CPU oracle for `mt_aura_flash_p1` (non-causal): per (q_head, block)
+    /// CPU oracle for `ffai_aura_flash_p1` (non-causal): per (q_head, block)
     /// online-softmax over the block's token range, K/V decoded from
     /// `codebook[index] * norm`. Emits the partials exactly as the kernel
     /// stores them — `o` un-normalised accumulator `[q_head, block, dim]`,
     /// `m` block max `[q_head, block]`, `l` block sum_exp `[q_head, block]`.
-    /// Mirrors `mt_aura_flash_pass2::kernel_tests::emulate_p1`.
+    /// Mirrors `ffai_aura_flash_pass2::kernel_tests::emulate_p1`.
     #[allow(clippy::too_many_arguments)]
     fn emulate_p1(
         q_rot: &[f32],
@@ -532,7 +532,7 @@ pub mod kernel_tests {
         let m_part = unpack_f32(&pack_f32(&m_part, dt), dt);
         let l_part = unpack_f32(&pack_f32(&l_part, dt), dt);
 
-        TestSetup::new(mt_aura_flash_p1_kb4_vb2_d128::kernel_ir_for(dt))
+        TestSetup::new(ffai_aura_flash_p1_kb4_vb2_d128::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("q_rot", pack_f32(&q_rot, dt), dt))
             .input(TestBuffer::from_vec("key_packed", pack_u32(&key_packed), DType::U32))
@@ -565,7 +565,7 @@ pub mod kernel_tests {
 
     // ── Causal pass-1 partials ──────────────────────────────────────────
     //
-    // The causal sibling `mt_aura_flash_p1_causal_kb4_vb2_d128` shares the whole
+    // The causal sibling `ffai_aura_flash_p1_causal_kb4_vb2_d128` shares the whole
     // online-softmax body but clamps its per-token loop at `q_position + 1` —
     // keys strictly after the query position contribute nothing. With a
     // mid-stream `q_position`, the block containing the cutoff sums only its
@@ -623,7 +623,7 @@ pub mod kernel_tests {
         let m_part = unpack_f32(&pack_f32(&m_part, dt), dt);
         let l_part = unpack_f32(&pack_f32(&l_part, dt), dt);
 
-        TestSetup::new(mt_aura_flash_p1_causal_kb4_vb2_d128::kernel_ir_for(dt))
+        TestSetup::new(ffai_aura_flash_p1_causal_kb4_vb2_d128::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("q_rot", pack_f32(&q_rot, dt), dt))
             .input(TestBuffer::from_vec("key_packed", pack_u32(&key_packed), DType::U32))
@@ -715,7 +715,7 @@ pub mod kernel_benches {
             variants(VB = [2, 2, 4, 4], DIM = [64, 128, 64, 128], suffix = "kb4_vb{VB}_d{DIM}"))]
     fn bench_flash_p1(dt: DType) -> BenchSetup {
         flash_p1(
-            BenchSetup::new(mt_aura_flash_p1_kb4_vbVB_dDIM::kernel_ir_for(dt)),
+            BenchSetup::new(ffai_aura_flash_p1_kb4_vbVB_dDIM::kernel_ir_for(dt)),
             dt,
             DIM,
             4,
@@ -729,7 +729,7 @@ pub mod kernel_benches {
             variants(DIM = [64, 128], suffix = "kb4_vb2_d{DIM}"))]
     fn bench_flash_p1_causal(dt: DType) -> BenchSetup {
         flash_p1(
-            BenchSetup::new(mt_aura_flash_p1_causal_kb4_vb2_dDIM::kernel_ir_for(dt)),
+            BenchSetup::new(ffai_aura_flash_p1_causal_kb4_vb2_dDIM::kernel_ir_for(dt)),
             dt,
             DIM,
             4,

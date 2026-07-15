@@ -4,7 +4,7 @@
 //!
 //! Each function is a `#[kernel]` primitive that takes a raw integer code and
 //! writes the decoded f32 value to an output slot. Callers in any kernel family
-//! use the cross-kernel call syntax (`let v = mt_decode_e2m1(nib)`);
+//! use the cross-kernel call syntax (`let v = ffai_decode_e2m1(nib)`);
 //! `KernelInlinePass` splices the body inline at codegen, so there is no memory
 //! round-trip — exactly as fast as pasting the body, written once. They are the
 //! kernel-side mirror of `kernels::quant::codec` (the Rust host-side source of truth);
@@ -20,7 +20,7 @@ use ffai_kernels::kernel;
 /// Codebook magnitudes `{0, 0.5, 1, 1.5, 2, 3, 4, 6}`, sign in bit 3.
 /// Operand `inp` is the 4-bit code in the low nibble of a `u32`.
 #[kernel]
-pub fn mt_decode_e2m1(inp: Tensor<u32>, out: Tensor<f32>) {
+pub fn ffai_decode_e2m1(inp: Tensor<u32>, out: Tensor<f32>) {
     let code = load(inp[0u32]);
     let m = code & 7u32;
     let mag = select(
@@ -52,7 +52,7 @@ pub fn mt_decode_e2m1(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Format: 1 sign · 4 exp (bias 7) · 3 mantissa. Max ±448, no infinity.
 /// Mirrors `kernels::quant::codec::e4m3_decode`.
 #[kernel]
-pub fn mt_decode_e4m3(inp: Tensor<u32>, out: Tensor<f32>) {
+pub fn ffai_decode_e4m3(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);
     let e = (c >> 3u32) & 15u32;
     let m = c & 7u32;
@@ -67,7 +67,7 @@ pub fn mt_decode_e4m3(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Format: 1 sign · 5 exp (bias 15) · 2 mantissa — the high byte of an IEEE
 /// half. Mirrors `kernels::quant::codec::e5m2_decode`.
 #[kernel]
-pub fn mt_decode_e5m2(inp: Tensor<u32>, out: Tensor<f32>) {
+pub fn ffai_decode_e5m2(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);
     let e = (c >> 2u32) & 31u32;
     let m = c & 3u32;
@@ -82,7 +82,7 @@ pub fn mt_decode_e5m2(inp: Tensor<u32>, out: Tensor<f32>) {
 /// Reinterprets the low 8 bits of `inp` as a signed byte (two's complement
 /// sign-extension via `<< 24 / >> 24`). Mirrors `kernels::quant::codec::int8_decode`.
 #[kernel]
-pub fn mt_decode_int8(inp: Tensor<u32>, out: Tensor<f32>) {
+pub fn ffai_decode_int8(inp: Tensor<u32>, out: Tensor<f32>) {
     let c = load(inp[0u32]);
     let extended = ((c << 24u32).cast::<i32>() >> 24i32).cast::<f32>();
     store(out[0u32], extended);
@@ -94,7 +94,7 @@ pub fn mt_decode_int8(inp: Tensor<u32>, out: Tensor<f32>) {
 /// This is the MX-spec block-scale encoding: values 0..255 map to
 /// `[2^−127, 2^128]`. Used by mxfp4, mxfp8, mxint2–8 formats.
 #[kernel]
-pub fn mt_decode_e8m0(inp: Tensor<u32>, out: Tensor<f32>) {
+pub fn ffai_decode_e8m0(inp: Tensor<u32>, out: Tensor<f32>) {
     let raw = load(inp[0u32]);
     store(out[0u32], exp2(raw.cast::<f32>() - 127.0f32));
 }
@@ -114,7 +114,7 @@ pub fn mt_decode_e8m0(inp: Tensor<u32>, out: Tensor<f32>) {
 ///   `spill    = BITS - lo_bits`
 ///   `w1` should equal `w0` when `spill == 0` (safe clamped load).
 #[kernel]
-pub fn mt_unpack_nbit(
+pub fn ffai_unpack_nbit(
     w0_inp: Tensor<u32>,
     w1_inp: Tensor<u32>,
     bit_in_w_inp: Tensor<u32>,

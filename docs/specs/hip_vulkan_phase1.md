@@ -81,8 +81,8 @@ The CUDA emitter, the CUDA runtime, and the Metal path are **unchanged**.
 3. **Zero-byte Vulkan allocations are rejected.** `vkCreateBuffer(size=0)`
    returns `VK_ERROR_INVALID_*`. Phase-1 alloc clamps small buffers to 4 B.
 4. **GLSL.std.450 is missing `erf` / `erfinv` / `expm1` / `log10`.**
-   The preamble synthesises them via `mt_erf`/`mt_erfinv`/`mt_expm1`/
-   `mt_log10`. `mt_erfinv` is a coarse Winitzki approximation —
+   The preamble synthesises them via `ffai_erf`/`ffai_erfinv`/`ffai_expm1`/
+   `ffai_log10`. `ffai_erfinv` is a coarse Winitzki approximation —
    sufficient for Phase-1 smoke but should be tuned to the CPU oracle's
    tolerance in Phase 2.
 5. **SPIR-V is u32 words, but shaderc returns bytes.** Verify

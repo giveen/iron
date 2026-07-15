@@ -105,8 +105,8 @@ pub(crate) enum VariantValue {
     /// `if` conditions (`if FMT == 0u32`), ident-embedding, and arithmetic in
     /// suffix expressions (`{FMT + 1}`).  The human-readable `name` is used
     /// when `{FMT}` appears as a bare parameter reference in a suffix template,
-    /// making kernel names like `mt_conv1d_block_scaled_0_mxfp4` instead of
-    /// `mt_conv1d_block_scaled_0_0`.
+    /// making kernel names like `ffai_conv1d_block_scaled_0_mxfp4` instead of
+    /// `ffai_conv1d_block_scaled_0_0`.
     Named {
         /// Human-readable label used in suffix templates.
         name: String,
@@ -1867,14 +1867,18 @@ mod tests {
     #[test]
     fn substitute_fn_correct_name_and_body() {
         let input_fn: ItemFn = parse_quote! {
-            pub fn mt_moe<T>(x: Tensor<T>) {
+            pub fn ffai_moe<T>(x: Tensor<T>) {
                 let y = M + 1u32;
             }
         };
-        let result =
-            substitute_fn(input_fn, &int_slice(&[("M", 16)]), "mt_moe", &Some("m{M}".to_string()))
-                .unwrap();
-        assert_eq!(result.sig.ident.to_string(), "mt_moe_m16");
+        let result = substitute_fn(
+            input_fn,
+            &int_slice(&[("M", 16)]),
+            "ffai_moe",
+            &Some("m{M}".to_string()),
+        )
+        .unwrap();
+        assert_eq!(result.sig.ident.to_string(), "ffai_moe_m16");
         let body = quote::quote! { #result }.to_string();
         assert!(body.contains("16 + 1u32"), "body substitution failed: {body}");
     }
@@ -1925,7 +1929,7 @@ mod tests {
     #[test]
     fn optional_constexpr_collected_from_signature() {
         let input: ItemFn = parse_quote! {
-            pub fn mt<T>(
+            pub fn ffai<T>(
                 input: Tensor<T>,
                 #[constexpr] a: u32,
                 #[constexpr(only_when = "DILATED == 1u32")] dilation: u32,
@@ -1941,7 +1945,7 @@ mod tests {
     fn optional_constexpr_requires_constexpr_attr() {
         // `#[optional]` on a non-`#[constexpr]` param is silently ignored.
         let input: ItemFn = parse_quote! {
-            pub fn mt(
+            pub fn ffai(
                 #[optional(only_when = "DILATED == 1u32")] dilation: u32,
             ) {}
         };
@@ -1952,7 +1956,7 @@ mod tests {
     #[test]
     fn optional_constexpr_stripped_when_condition_false() {
         let input: ItemFn = parse_quote! {
-            pub fn mt<T>(
+            pub fn ffai<T>(
                 input: Tensor<T>,
                 #[constexpr] batch: u32,
                 #[constexpr(only_when = "DILATED == 1u32")] dilation: u32,
@@ -1976,7 +1980,7 @@ mod tests {
     #[test]
     fn optional_constexpr_kept_when_condition_true() {
         let input: ItemFn = parse_quote! {
-            pub fn mt<T>(
+            pub fn ffai<T>(
                 #[constexpr] batch: u32,
                 #[constexpr(only_when = "DILATED == 1u32")] dilation: u32,
             ) {}
@@ -2096,7 +2100,7 @@ mod tests {
         // Full pipeline: define a function with an `#[optional]` constexpr,
         // substitute a DILATED=0 variant, and verify dilation is gone.
         let input: ItemFn = parse_quote! {
-            pub fn mt<T>(
+            pub fn ffai<T>(
                 #[constexpr] batch: u32,
                 #[constexpr(only_when = "DILATED == 1u32")] dilation: u32,
             ) {
@@ -2111,12 +2115,12 @@ mod tests {
         let result = substitute_fn(
             input,
             &int_slice(&[("DILATED", 0)]),
-            "mt",
+            "ffai",
             &Some("d{DILATED}".to_string()),
         )
         .unwrap();
         let s = quote::quote! { #result }.to_string();
         assert!(!s.contains("dilation"), "dilation leaked at DILATED=0: {s}");
-        assert_eq!(result.sig.ident.to_string(), "mt_d0");
+        assert_eq!(result.sig.ident.to_string(), "ffai_d0");
     }
 }

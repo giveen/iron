@@ -51,7 +51,7 @@ use ffai_kernels::kernel;
 
 /// Gather GEMM, both `(BM, BN, WM, WN)` block-shape instantiations.
 ///
-/// Produces: `mt_steel_gemm_gather_64x64x16_2x2`, `_32x32x16_2x2`.
+/// Produces: `ffai_steel_gemm_gather_64x64x16_2x2`, `_32x32x16_2x2`.
 #[kernel(variants(
     BM = [64u32, 32u32],
     BN = [64u32, 32u32],
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
     WN = [2u32,  2u32],
     suffix = "{BM}x{BN}x16_{WM}x{WN}"
 ))]
-pub fn mt_steel_gemm_gather<T>(
+pub fn ffai_steel_gemm_gather<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     lhs_indices: Tensor<u32>,
@@ -201,17 +201,17 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gather_64x64x16_2x2(dt: DType) -> BenchSetup {
-        gb(mt_steel_gemm_gather_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        gb(ffai_steel_gemm_gather_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gather_32x32x16_2x2(dt: DType) -> BenchSetup {
-        gb(mt_steel_gemm_gather_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        gb(ffai_steel_gemm_gather_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }
 
 /// New-syntax correctness tests for the gather steel GEMM — ports the
 /// oracle from the legacy `tests/steel_gemm_gather_gpu_correctness.rs`
-/// (removed in #240). The kernel
+/// (since removed). The kernel
 /// computes `out[r,c] = Σ_k a[lhs_indices[r], k] · b_sel[k, c]` where
 /// `b_sel` is the `[K, N]` matrix `rhs_indices[c/BN]` stored flat in `b`
 /// at offset `idx*K*N`.
@@ -289,10 +289,10 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_gather_64x64x16_2x2(dt: DType) -> TestSetup {
-        gather_setup(mt_steel_gemm_gather_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        gather_setup(ffai_steel_gemm_gather_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_gather_32x32x16_2x2(dt: DType) -> TestSetup {
-        gather_setup(mt_steel_gemm_gather_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        gather_setup(ffai_steel_gemm_gather_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }

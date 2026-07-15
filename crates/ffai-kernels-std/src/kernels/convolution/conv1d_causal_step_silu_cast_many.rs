@@ -5,7 +5,7 @@
 //! in thread-local registers across the sweep.
 //!
 //! Identical math to the per-token pair `conv1d_causal_step` (in
-//! `ssm.rs`) + `mt_silu_cast_to_f32` (in `mlx/unary.rs`) looped T times,
+//! `ssm.rs`) + `ffai_silu_cast_to_f32` (in `mlx/unary.rs`) looped T times,
 //! but collapses T × 2 dispatches into one and keeps the K-1-element
 //! rolling state in registers for the duration of the channel's T-sweep
 //! instead of round-tripping it through device memory once per token.
@@ -21,8 +21,8 @@
 //!
 //! On top of the bandwidth save the per-channel kernel collapses
 //! `T * (conv_step + silu_cast) = 2T` dispatches per layer into one —
-//! same dispatch-saving pattern as `mt_rope_banded` and
-//! `mt_kv_cache_update_many`.
+//! same dispatch-saving pattern as `ffai_rope_banded` and
+//! `ffai_kv_cache_update_many`.
 //!
 //! Layout:
 //!
@@ -59,7 +59,7 @@
 //! K-1=3 state slots `(s0, s1, s2)` map to state rows `(0, 1, 2)`.
 //!
 //! SiLU + cast: `out = (acc * sigmoid(acc)).cast::<f32>()` in fp32.
-//! Identical to `mt_silu_cast_to_f32` (`x * sigmoid(x)` with
+//! Identical to `ffai_silu_cast_to_f32` (`x * sigmoid(x)` with
 //! `sigmoid(x) = 1 / (1 + exp(-x))`).
 //!
 //! `state_in` and `state_out` are decoupled tensors in the kernel
@@ -70,7 +70,7 @@
 //! safe). The runtime decides the residency / barrier story.
 //!
 //! Codegen-only. Correctness validated against the
-//! `conv1d_causal_step` + `mt_silu_cast_to_f32` looped pair by the in-source
+//! `conv1d_causal_step` + `ffai_silu_cast_to_f32` looped pair by the in-source
 //! `#[test_kernel]`s.
 
 use ffai_kernels::kernel;
@@ -112,7 +112,7 @@ pub fn ffai_conv1d_causal_step_silu_cast_many<T>(
         // in ascending index). Matters for f32 reassociation parity
         // with the per-row oracle.
         let acc = b_d + w3 * x_r + w0 * s0 + w1 * s1 + w2 * s2;
-        // SiLU + cast — identical form to `mt_silu_cast_to_f32`:
+        // SiLU + cast — identical form to `ffai_silu_cast_to_f32`:
         // sigmoid via `1 / (1 + exp(-x))`, all in fp32.
         let sig = 1.0f32 / (1.0f32 + exp(0.0f32 - acc));
         let y = acc * sig;

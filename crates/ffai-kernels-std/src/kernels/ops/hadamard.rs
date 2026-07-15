@@ -25,8 +25,8 @@ use ffai_kernels::kernel;
 
 /// Fast Walsh–Hadamard transform — variable sizes (N = 64, 128, 256, 512, 1024).
 ///
-/// Produces kernels: `mt_hadamard_n64`, `mt_hadamard_n128`, `mt_hadamard_n256`,
-/// `mt_hadamard_n512`, `mt_hadamard_n1024`.
+/// Produces kernels: `ffai_hadamard_n64`, `ffai_hadamard_n128`, `ffai_hadamard_n256`,
+/// `ffai_hadamard_n512`, `ffai_hadamard_n1024`.
 ///
 /// Each variant fixes `N` (the transform size) and `LOG_N = log2(N)` at
 /// compile time. Both are substituted via the `variants` mechanism so the
@@ -35,7 +35,7 @@ use ffai_kernels::kernel;
 ///
 /// Grid: Reduction, `[rows, 1, 1]` × `[N, 1, 1]` (one thread per element).
 #[kernel(variants(N = [64, 128, 256, 512, 1024], LOG_N = [6, 7, 8, 9, 10], suffix = "n{N}"))]
-pub fn mt_hadamard<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] scale: f32) {
+pub fn ffai_hadamard<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] scale: f32) {
     let row = program_id::<0>();
     let base = row * N;
     threadgroup_alloc("buf", N, "f32");
@@ -98,11 +98,11 @@ pub mod kernel_tests {
             fn $name(dt: DType) -> TestSetup { setup($kernel::kernel_ir_for(dt), $n, dt) }
         };
     }
-    had_test!(test_hadamard_n64, mt_hadamard_n64, 64);
-    had_test!(test_hadamard_n128, mt_hadamard_n128, 128);
-    had_test!(test_hadamard_n256, mt_hadamard_n256, 256);
-    had_test!(test_hadamard_n512, mt_hadamard_n512, 512);
-    had_test!(test_hadamard_n1024, mt_hadamard_n1024, 1024);
+    had_test!(test_hadamard_n64, ffai_hadamard_n64, 64);
+    had_test!(test_hadamard_n128, ffai_hadamard_n128, 128);
+    had_test!(test_hadamard_n256, ffai_hadamard_n256, 256);
+    had_test!(test_hadamard_n512, ffai_hadamard_n512, 512);
+    had_test!(test_hadamard_n1024, ffai_hadamard_n1024, 1024);
 }
 
 /// New-syntax benchmarks for the Walsh–Hadamard transforms.
@@ -127,9 +127,9 @@ pub mod kernel_benches {
             }
         };
     }
-    had_bench!(bench_hadamard_n64, mt_hadamard_n64, 64);
-    had_bench!(bench_hadamard_n128, mt_hadamard_n128, 128);
-    had_bench!(bench_hadamard_n256, mt_hadamard_n256, 256);
-    had_bench!(bench_hadamard_n512, mt_hadamard_n512, 512);
-    had_bench!(bench_hadamard_n1024, mt_hadamard_n1024, 1024);
+    had_bench!(bench_hadamard_n64, ffai_hadamard_n64, 64);
+    had_bench!(bench_hadamard_n128, ffai_hadamard_n128, 128);
+    had_bench!(bench_hadamard_n256, ffai_hadamard_n256, 256);
+    had_bench!(bench_hadamard_n512, ffai_hadamard_n512, 512);
+    had_bench!(bench_hadamard_n1024, ffai_hadamard_n1024, 1024);
 }

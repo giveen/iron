@@ -6,7 +6,7 @@ expression: msl
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mt_aura_dequant_rotated_int4(
+kernel void ffai_aura_dequant_rotated_int4(
     const device uint *packed [[buffer(0)]],
     const device float *norms [[buffer(1)]],
     const device float *codebook [[buffer(2)]],

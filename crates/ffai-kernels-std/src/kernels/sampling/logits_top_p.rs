@@ -42,7 +42,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_logits_top_p_mask<T>(
+pub fn ffai_logits_top_p_mask<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n: u32,
@@ -54,7 +54,7 @@ pub fn mt_logits_top_p_mask<T>(
     // Pass 1: one streaming pass for both the row max and the partition
     // function Z = Σ exp(logit − row_max). Each lane keeps a running
     // (max, sum) pair in online-softmax form; the pair is then merged
-    // across the threadgroup. This mirrors `mt_softmax`'s looped path.
+    // across the threadgroup. This mirrors `ffai_softmax`'s looped path.
     let mut lm = neg_infinity();
     let mut ls = 0.0f32;
     for _i in range(rs + tid, re, lsize) {
@@ -102,7 +102,7 @@ pub fn mt_logits_top_p_mask<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_logits_top_p_mask;
+    use super::ffai_logits_top_p_mask;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Bisection halvings — must match the kernel's loop bound.
@@ -142,7 +142,7 @@ pub mod kernel_tests {
         let logits: Vec<f32> = (0..n * rows).map(|i| (i % 53) as f32 * 0.2 - 5.0).collect();
         let rounded = unpack_f32(&pack_f32(&logits, dt), dt);
         let expected = cpu_top_p_mask(&rounded, n, rows, top_p);
-        TestSetup::new(mt_logits_top_p_mask::kernel_ir_for(dt))
+        TestSetup::new(ffai_logits_top_p_mask::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&logits, dt), dt))
             .input(TestBuffer::zeros("out", n * rows, dt))
@@ -153,17 +153,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_logits_top_p_mask` at Qwen3 vocab scale
+/// New-syntax benchmark for `ffai_logits_top_p_mask` at Qwen3 vocab scale
 /// (Reduction, one TG per row; 24 bisection passes over the row).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_logits_top_p_mask;
+    use super::ffai_logits_top_p_mask;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_logits_top_p_mask(dt: DType) -> BenchSetup {
         let (n, rows) = (152_064usize, 2usize);
-        BenchSetup::new(mt_logits_top_p_mask::kernel_ir_for(dt))
+        BenchSetup::new(ffai_logits_top_p_mask::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", n * rows, dt))
             .buffer(BenchBuffer::zeros("out", n * rows, dt).output())

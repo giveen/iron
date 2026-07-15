@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `mt_gemv_q8` — Q8_0 inline-dequant gemv
+//! GPU correctness for `ffai_gemv_q8` — Q8_0 inline-dequant gemv
 //! vs a CPU reference using the same dequant (value = d * int8).
 #![cfg(target_os = "macos")]
 
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::gemm::gemv_quantized::mt_gemv_q8;
+use ffai_kernels_std::kernels::gemm::gemv_quantized::ffai_gemv_q8;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -59,7 +59,7 @@ fn run_case(dt: Dt, k_in: usize, m_out: usize, tol: f32) {
     buffers.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut kernel = mt_gemv_q8::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_gemv_q8::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [m_out, 1, 1], [32, 1, 1])
@@ -86,7 +86,7 @@ fn gemv_q8_f16() {
 
 #[test]
 fn grouped_gemv_q8_f32() {
-    use ffai_kernels_std::kernels::gemm::gemv_quantized::mt_grouped_gemv_q8;
+    use ffai_kernels_std::kernels::gemm::gemv_quantized::ffai_grouped_gemv_q8;
     let _g = gpu_lock();
     let k_in = 4096usize;
     let rows_per_group = 1024usize;
@@ -125,7 +125,7 @@ fn grouped_gemv_q8_f32() {
     buffers.insert("m_out".into(), (m_out as u32).to_le_bytes().to_vec());
     buffers.insert("rows_per_group".into(), (rows_per_group as u32).to_le_bytes().to_vec());
     let ctx = Context::new().expect("ctx");
-    let mut kernel = mt_grouped_gemv_q8::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_grouped_gemv_q8::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [m_out, 1, 1], [32, 1, 1])

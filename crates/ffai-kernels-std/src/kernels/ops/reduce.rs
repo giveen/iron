@@ -3,15 +3,15 @@
 //! Reduce benchmarks — #[kernel] DSL vs MLX metal/reduce.metal
 //!
 //! Covers four reduction shapes:
-//!   - **all-reduce** — `mt_all_reduce*`: one threadgroup folds the
+//!   - **all-reduce** — `ffai_all_reduce*`: one threadgroup folds the
 //!     whole input to a scalar (Reduction mode).
-//!   - **row-reduce** — `mt_row_reduce*`: one threadgroup per row of a
+//!   - **row-reduce** — `ffai_row_reduce*`: one threadgroup per row of a
 //!     `[rows, n]` input (Reduction mode).
-//!   - **column-reduce** — `mt_col_reduce*`: one thread per column of a
+//!   - **column-reduce** — `ffai_col_reduce*`: one thread per column of a
 //!     `[rows, cols]` input; each thread walks its column with a
 //!     `cols`-strided `strided_reduce` (Grid3D, no threadgroup
 //!     cooperation). Mirrors MLX's `col_reduce_*` family.
-//!   - **segmented-reduce** — `mt_seg_reduce*`: one thread per segment
+//!   - **segmented-reduce** — `ffai_seg_reduce*`: one thread per segment
 //!     of a flat input split into `n_segments` fixed-length contiguous
 //!     runs; each thread contiguously folds its `seg_len`-element run
 //!     (Grid3D). Suits many short segments where the row-reduce
@@ -20,7 +20,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_all_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_all_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let zero = 0;
     let acc = strided_reduce(inp, zero, n, sum);
     let result = reduce_sum(acc);
@@ -28,7 +28,7 @@ pub fn mt_all_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 }
 
 #[kernel]
-pub fn mt_all_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_all_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let off = 0;
     let acc = strided_reduce(inp, off, n, product);
     let result = reduce_product(acc);
@@ -36,7 +36,7 @@ pub fn mt_all_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32
 }
 
 #[kernel]
-pub fn mt_all_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_all_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let zero = 0;
     let acc = strided_reduce(inp, zero, n, max);
     let result = reduce_max(acc);
@@ -44,7 +44,7 @@ pub fn mt_all_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 }
 
 #[kernel]
-pub fn mt_all_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_all_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let zero = 0;
     let acc = strided_reduce(inp, zero, n, min);
     let result = reduce_min(acc);
@@ -52,7 +52,7 @@ pub fn mt_all_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 }
 
 #[kernel]
-pub fn mt_row_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_row_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -62,7 +62,7 @@ pub fn mt_row_reduce<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 }
 
 #[kernel]
-pub fn mt_row_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_row_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -72,7 +72,7 @@ pub fn mt_row_reduce_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32
 }
 
 #[kernel]
-pub fn mt_row_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_row_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -82,7 +82,7 @@ pub fn mt_row_reduce_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 }
 
 #[kernel]
-pub fn mt_row_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_row_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<0>();
     let rs = row * n;
     let re = rs + n;
@@ -102,14 +102,14 @@ pub fn mt_row_reduce_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 // (see codegen `emit_block.rs` — the `stride` field is honoured only
 // outside Reduction mode), so the strided walk is correct here.
 //
-// Unlike the Reduction-mode `mt_row_reduce`, NO `reduce_*(acc)`
+// Unlike the Reduction-mode `ffai_row_reduce`, NO `reduce_*(acc)`
 // finishing step is applied: in Grid3D the `strided_reduce` loop is
 // run by a single thread and already folds the whole column. A
 // `reduce_sum` here would lower to `simd_sum` and wrongly sum 32
 // independent columns together.
 
 #[kernel]
-pub fn mt_col_reduce<T>(
+pub fn ffai_col_reduce<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] rows: u32,
@@ -124,7 +124,7 @@ pub fn mt_col_reduce<T>(
 }
 
 #[kernel]
-pub fn mt_col_reduce_prod<T>(
+pub fn ffai_col_reduce_prod<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] rows: u32,
@@ -139,7 +139,7 @@ pub fn mt_col_reduce_prod<T>(
 }
 
 #[kernel]
-pub fn mt_col_reduce_max<T>(
+pub fn ffai_col_reduce_max<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] rows: u32,
@@ -154,7 +154,7 @@ pub fn mt_col_reduce_max<T>(
 }
 
 #[kernel]
-pub fn mt_col_reduce_min<T>(
+pub fn ffai_col_reduce_min<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] rows: u32,
@@ -176,13 +176,13 @@ pub fn mt_col_reduce_min<T>(
 // per segment (Grid3D), each folding its run contiguously
 // (stride = 1).
 //
-// This is the one-thread-per-segment counterpart to `mt_row_reduce`'s
+// This is the one-thread-per-segment counterpart to `ffai_row_reduce`'s
 // one-threadgroup-per-row layout: for many short segments the
 // threadgroup-per-row form under-occupies the GPU (most lanes idle),
 // whereas one thread per segment keeps every lane busy.
 
 #[kernel]
-pub fn mt_seg_reduce<T>(
+pub fn ffai_seg_reduce<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n_segments: u32,
@@ -198,7 +198,7 @@ pub fn mt_seg_reduce<T>(
 }
 
 #[kernel]
-pub fn mt_seg_reduce_prod<T>(
+pub fn ffai_seg_reduce_prod<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n_segments: u32,
@@ -214,7 +214,7 @@ pub fn mt_seg_reduce_prod<T>(
 }
 
 #[kernel]
-pub fn mt_seg_reduce_max<T>(
+pub fn ffai_seg_reduce_max<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n_segments: u32,
@@ -230,7 +230,7 @@ pub fn mt_seg_reduce_max<T>(
 }
 
 #[kernel]
-pub fn mt_seg_reduce_min<T>(
+pub fn ffai_seg_reduce_min<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n_segments: u32,
@@ -293,7 +293,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 2.0, 16.0])]
     fn test_all_reduce_sum(dt: DType) -> TestSetup {
         all_setup_for(
-            mt_all_reduce::kernel_ir_for(dt),
+            ffai_all_reduce::kernel_ir_for(dt),
             2048,
             &sum_vals(2048),
             0.0,
@@ -304,7 +304,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 1.0])]
     fn test_all_reduce_prod(dt: DType) -> TestSetup {
         all_setup_for(
-            mt_all_reduce_prod::kernel_ir_for(dt),
+            ffai_all_reduce_prod::kernel_ir_for(dt),
             512,
             &prod_vals(512),
             1.0,
@@ -315,7 +315,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_all_reduce_max(dt: DType) -> TestSetup {
         all_setup_for(
-            mt_all_reduce_max::kernel_ir_for(dt),
+            ffai_all_reduce_max::kernel_ir_for(dt),
             2048,
             &ext_vals(2048),
             f32::NEG_INFINITY,
@@ -326,7 +326,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_all_reduce_min(dt: DType) -> TestSetup {
         all_setup_for(
-            mt_all_reduce_min::kernel_ir_for(dt),
+            ffai_all_reduce_min::kernel_ir_for(dt),
             2048,
             &ext_vals(2048),
             f32::INFINITY,
@@ -365,7 +365,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1.0, 8.0])]
     fn test_row_reduce_sum(dt: DType) -> TestSetup {
         row_setup_for(
-            mt_row_reduce::kernel_ir_for(dt),
+            ffai_row_reduce::kernel_ir_for(dt),
             4,
             1024,
             &|r| (0..1024).map(|i| ((i % 17) as f32 - 8.0) * 0.01 + r as f32 * 0.001).collect(),
@@ -377,7 +377,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_row_reduce_max(dt: DType) -> TestSetup {
         row_setup_for(
-            mt_row_reduce_max::kernel_ir_for(dt),
+            ffai_row_reduce_max::kernel_ir_for(dt),
             4,
             1024,
             &|r| (0..1024).map(|i| ((i * 7919 % 1000) as f32) * 0.01 - 5.0 + r as f32).collect(),
@@ -389,7 +389,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_row_reduce_min(dt: DType) -> TestSetup {
         row_setup_for(
-            mt_row_reduce_min::kernel_ir_for(dt),
+            ffai_row_reduce_min::kernel_ir_for(dt),
             4,
             1024,
             &|r| (0..1024).map(|i| ((i * 7919 % 1000) as f32) * 0.01 - 5.0 + r as f32).collect(),
@@ -423,15 +423,22 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_col_reduce_sum(dt: DType) -> TestSetup {
-        col_setup_for(mt_col_reduce::kernel_ir_for(dt), 37, 100, 0.0, |a, b| a + b, dt)
+        col_setup_for(ffai_col_reduce::kernel_ir_for(dt), 37, 100, 0.0, |a, b| a + b, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_col_reduce_max(dt: DType) -> TestSetup {
-        col_setup_for(mt_col_reduce_max::kernel_ir_for(dt), 50, 70, f32::NEG_INFINITY, f32::max, dt)
+        col_setup_for(
+            ffai_col_reduce_max::kernel_ir_for(dt),
+            50,
+            70,
+            f32::NEG_INFINITY,
+            f32::max,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_col_reduce_min(dt: DType) -> TestSetup {
-        col_setup_for(mt_col_reduce_min::kernel_ir_for(dt), 50, 70, f32::INFINITY, f32::min, dt)
+        col_setup_for(ffai_col_reduce_min::kernel_ir_for(dt), 50, 70, f32::INFINITY, f32::min, dt)
     }
 
     // ── seg-reduce: Grid3D, one thread per contiguous segment ─────────────
@@ -460,15 +467,22 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_seg_reduce_sum(dt: DType) -> TestSetup {
-        seg_setup_for(mt_seg_reduce::kernel_ir_for(dt), 64, 48, 0.0, |a, b| a + b, dt)
+        seg_setup_for(ffai_seg_reduce::kernel_ir_for(dt), 64, 48, 0.0, |a, b| a + b, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_seg_reduce_max(dt: DType) -> TestSetup {
-        seg_setup_for(mt_seg_reduce_max::kernel_ir_for(dt), 64, 48, f32::NEG_INFINITY, f32::max, dt)
+        seg_setup_for(
+            ffai_seg_reduce_max::kernel_ir_for(dt),
+            64,
+            48,
+            f32::NEG_INFINITY,
+            f32::max,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_seg_reduce_min(dt: DType) -> TestSetup {
-        seg_setup_for(mt_seg_reduce_min::kernel_ir_for(dt), 64, 48, f32::INFINITY, f32::min, dt)
+        seg_setup_for(ffai_seg_reduce_min::kernel_ir_for(dt), 64, 48, f32::INFINITY, f32::min, dt)
     }
 
     // ── prod: separate setups with inputs near 1.0 so the running product
@@ -485,7 +499,7 @@ pub mod kernel_tests {
         let id = unpack_f32(&pack_f32(&inp, dt), dt);
         let expected: Vec<f32> =
             (0..cols).map(|c| (0..rows).map(|r| id[r * cols + c]).product()).collect();
-        TestSetup::new(mt_col_reduce_prod::kernel_ir_for(dt))
+        TestSetup::new(ffai_col_reduce_prod::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", cols, dt))
             .constexpr("rows", rows as u32)
@@ -501,7 +515,7 @@ pub mod kernel_tests {
         let id = unpack_f32(&pack_f32(&inp, dt), dt);
         let expected: Vec<f32> =
             (0..n_segments).map(|s| (0..seg_len).map(|j| id[s * seg_len + j]).product()).collect();
-        TestSetup::new(mt_seg_reduce_prod::kernel_ir_for(dt))
+        TestSetup::new(ffai_seg_reduce_prod::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", n_segments, dt))
             .constexpr("n_segments", n_segments as u32)
@@ -525,12 +539,12 @@ pub mod kernel_benches {
     // all-reduce: one threadgroup folds N elements to a scalar. Attaches the MLX
     // `metal/reduce.metal` `all_reduce_<sub><tn>` reference for an A/B perf +
     // correctness comparison. MLX `all_reduce(in, out, in_size, row_size)` folds
-    // a single block when `in_size == row_size == N` (matching MT's single
+    // a single block when `in_size == row_size == N` (matching FFAI's single
     // threadgroup); both are `size_t` (8-byte) scalars.
     //
-    // `inp` is shared by name with the reference (the runner injects the MT
+    // `inp` is shared by name with the reference (the runner injects the FFAI
     // bytes), so both kernels reduce identical `Positive` data. `tol_floor` is
-    // the legacy reduction floor — large for sum/prod because MT accumulates in
+    // the legacy reduction floor — large for sum/prod because FFAI accumulates in
     // f32 while MLX accumulates in the (lossy) reduce dtype over 16M elements.
     fn all_ref(
         kernel: Kernel,
@@ -548,7 +562,7 @@ pub mod kernel_benches {
             .constexpr("n", n as u32)
             .grid_3d(1, 1, 1, [256, 1, 1])
             .bytes_moved((n * dt.size_bytes()) as u64);
-        // `sum` folds 16M elements: MT accumulates in f32 but MLX accumulates in
+        // `sum` folds 16M elements: FFAI accumulates in f32 but MLX accumulates in
         // the (lossy) reduce dtype, so for f16/bf16 the two legitimately diverge
         // by thousands — no meaningful tolerance. Compare only f32, where both
         // are faithful; f16/bf16 stay perf-only rows.
@@ -560,7 +574,7 @@ pub mod kernel_benches {
                     format!("all_reduce_{mlx_sub}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/reduce.metal")),
                 )
-                // in[0] shared by name with the MT `inp` above (placeholder).
+                // in[0] shared by name with the FFAI `inp` above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", n, dt))
                 .buffer(BenchBuffer::zeros("out", 1, dt).output())
                 // in_size + row_size are both `size_t` (8 bytes) = N → single block.
@@ -573,25 +587,25 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_all_sum(dt: DType) -> BenchSetup {
-        all_ref(mt_all_reduce::kernel_ir_for(dt), dt, "sum", 256.0, true)
+        all_ref(ffai_all_reduce::kernel_ir_for(dt), dt, "sum", 256.0, true)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_all_prod(dt: DType) -> BenchSetup {
-        all_ref(mt_all_reduce_prod::kernel_ir_for(dt), dt, "prod", 1024.0, false)
+        all_ref(ffai_all_reduce_prod::kernel_ir_for(dt), dt, "prod", 1024.0, false)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_all_max(dt: DType) -> BenchSetup {
-        all_ref(mt_all_reduce_max::kernel_ir_for(dt), dt, "max", 0.0, false)
+        all_ref(ffai_all_reduce_max::kernel_ir_for(dt), dt, "max", 0.0, false)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_all_min(dt: DType) -> BenchSetup {
-        all_ref(mt_all_reduce_min::kernel_ir_for(dt), dt, "min", 0.0, false)
+        all_ref(ffai_all_reduce_min::kernel_ir_for(dt), dt, "min", 0.0, false)
     }
 
     // row-reduce: one threadgroup per row. Attaches the MLX
     // `metal/reduce.metal` `row_reduce_simple_<sub><tn>` reference. That kernel
     // indexes the row via `gid.y`, so its dispatch grid puts the rows on the Y
-    // axis (`[1, rows, 1]`) — unlike the MT kernel which uses `program_id::<0>()`
+    // axis (`[1, rows, 1]`) — unlike the FFAI kernel which uses `program_id::<0>()`
     // (X axis). `reduction_size` is `size_t` (8 bytes) = N; `out_size` is
     // `int64_t` (8 bytes) = rows.
     fn row_ref(kernel: Kernel, dt: DType, mlx_sub: &str, tol_floor: f32) -> BenchSetup {
@@ -609,7 +623,7 @@ pub mod kernel_benches {
                     format!("row_reduce_simple_{mlx_sub}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/reduce.metal")),
                 )
-                // in[0] shared by name with the MT `inp` above (placeholder).
+                // in[0] shared by name with the FFAI `inp` above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", rows * n, dt))
                 .buffer(BenchBuffer::zeros("out", rows, dt).output())
                 // reduction_size (size_t, 8 bytes) = N; out_size (int64_t, 8 bytes) = rows.
@@ -623,19 +637,19 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_row_sum(dt: DType) -> BenchSetup {
-        row_ref(mt_row_reduce::kernel_ir_for(dt), dt, "sum", 128.0)
+        row_ref(ffai_row_reduce::kernel_ir_for(dt), dt, "sum", 128.0)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_row_prod(dt: DType) -> BenchSetup {
-        row_ref(mt_row_reduce_prod::kernel_ir_for(dt), dt, "prod", 32.0)
+        row_ref(ffai_row_reduce_prod::kernel_ir_for(dt), dt, "prod", 32.0)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_row_max(dt: DType) -> BenchSetup {
-        row_ref(mt_row_reduce_max::kernel_ir_for(dt), dt, "max", 0.0)
+        row_ref(ffai_row_reduce_max::kernel_ir_for(dt), dt, "max", 0.0)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_row_min(dt: DType) -> BenchSetup {
-        row_ref(mt_row_reduce_min::kernel_ir_for(dt), dt, "min", 0.0)
+        row_ref(ffai_row_reduce_min::kernel_ir_for(dt), dt, "min", 0.0)
     }
 
     // col-reduce: Grid3D, one thread per output column of a [rows, cols] matrix.
@@ -652,13 +666,15 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_col_sum(dt: DType) -> BenchSetup { col_b(mt_col_reduce::kernel_ir_for(dt), dt) }
+    fn bench_col_sum(dt: DType) -> BenchSetup { col_b(ffai_col_reduce::kernel_ir_for(dt), dt) }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_col_prod(dt: DType) -> BenchSetup { col_b(mt_col_reduce_prod::kernel_ir_for(dt), dt) }
+    fn bench_col_prod(dt: DType) -> BenchSetup {
+        col_b(ffai_col_reduce_prod::kernel_ir_for(dt), dt)
+    }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_col_max(dt: DType) -> BenchSetup { col_b(mt_col_reduce_max::kernel_ir_for(dt), dt) }
+    fn bench_col_max(dt: DType) -> BenchSetup { col_b(ffai_col_reduce_max::kernel_ir_for(dt), dt) }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_col_min(dt: DType) -> BenchSetup { col_b(mt_col_reduce_min::kernel_ir_for(dt), dt) }
+    fn bench_col_min(dt: DType) -> BenchSetup { col_b(ffai_col_reduce_min::kernel_ir_for(dt), dt) }
 
     // seg-reduce: Grid3D, one thread per contiguous segment.
     fn seg_b(kernel: Kernel, dt: DType) -> BenchSetup {
@@ -674,11 +690,13 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_seg_sum(dt: DType) -> BenchSetup { seg_b(mt_seg_reduce::kernel_ir_for(dt), dt) }
+    fn bench_seg_sum(dt: DType) -> BenchSetup { seg_b(ffai_seg_reduce::kernel_ir_for(dt), dt) }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_seg_prod(dt: DType) -> BenchSetup { seg_b(mt_seg_reduce_prod::kernel_ir_for(dt), dt) }
+    fn bench_seg_prod(dt: DType) -> BenchSetup {
+        seg_b(ffai_seg_reduce_prod::kernel_ir_for(dt), dt)
+    }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_seg_max(dt: DType) -> BenchSetup { seg_b(mt_seg_reduce_max::kernel_ir_for(dt), dt) }
+    fn bench_seg_max(dt: DType) -> BenchSetup { seg_b(ffai_seg_reduce_max::kernel_ir_for(dt), dt) }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_seg_min(dt: DType) -> BenchSetup { seg_b(mt_seg_reduce_min::kernel_ir_for(dt), dt) }
+    fn bench_seg_min(dt: DType) -> BenchSetup { seg_b(ffai_seg_reduce_min::kernel_ir_for(dt), dt) }
 }

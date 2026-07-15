@@ -2,10 +2,10 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::manual_is_multiple_of)]
 
-//! GPU correctness for `kernels::moe::moe_mpp::mt_moe_gather_qmm_mma_int8_bm16_mpp`.
+//! GPU correctness for `kernels::moe::moe_mpp::ffai_moe_gather_qmm_mma_int8_bm16_mpp`.
 //!
 //! MPP (MetalPerformancePrimitives) int8 MoE BGEMM — same algorithm as
-//! `mt_moe_gather_qmm_mma_int4_bm16_mpp` but with pack-aligned 8-bit
+//! `ffai_moe_gather_qmm_mma_int4_bm16_mpp` but with pack-aligned 8-bit
 //! weight dequant (4 bytes/u32 vs 8 nibbles/u32). Validated against the
 //! CPU oracle at the same "clean tile" shape (n_experts=4, T=64, N=64,
 //! K=64, group_size=32). Cosine ≥ 0.999 for f32/f16, ≥ 0.997 for bf16.
@@ -132,7 +132,7 @@ fn run_mpp_int8(
     buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new");
-    let mut k = moe_mpp::mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt.to_dtype());
+    let mut k = moe_mpp::ffai_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt.to_dtype());
     k.mode = KernelMode::Reduction;
     // Grid: [N/BN=32, ceil(T/BM=16), 1], TG: [32, 1, 1] (1 SG — MPP matmul2d).
     let r = ctx

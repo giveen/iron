@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Dense Q8_0 GEMM via cooperative-tensor MMA — the MMA replacement for the
-//! SCALAR `mt_gemm_q8` (which does `acc += w*x` on the ALUs, ~12× slower
+//! SCALAR `ffai_gemm_q8` (which does `acc += w*x` on the ALUs, ~12× slower
 //! than a simdgroup-MMA Q8 matmul). Used for the attention Q/KV/q_a/q_b
 //! projections and the O-LoRA-B / shared-expert dense Q8 matmuls in prefill.
 //!
@@ -20,7 +20,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gemm_q8_mpp<T>(
+pub fn ffai_gemm_q8_mpp<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
@@ -108,15 +108,15 @@ pub fn mt_gemm_q8_mpp<T>(
 }
 
 /// GROUPED dense Q8 GEMM via cooperative-tensor MMA — the MMA version of
-/// `mt_grouped_gemm_q8` (which is scalar). For prefill O-LoRA-A: output
+/// `ffai_grouped_gemm_q8` (which is scalar). For prefill O-LoRA-A: output
 /// column o belongs to group g = o/rows_per_group, and group g reads input
 /// columns [g*k_in, (g+1)*k_in) of an (n_groups*k_in)-wide activation row.
 /// A 64-wide output tile is uniform-group (rows_per_group % 64 == 0), so the
 /// group offset is computed once per threadgroup. Same 64×64×32 coop_tile
-/// MMA as mt_gemm_q8_mpp. Live-compiled (name has _mpp_).
+/// MMA as ffai_gemm_q8_mpp. Live-compiled (name has _mpp_).
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_grouped_gemm_q8_mpp<T>(
+pub fn ffai_grouped_gemm_q8_mpp<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
@@ -212,7 +212,7 @@ pub fn mt_grouped_gemm_q8_mpp<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_gemm_q8_mpp, mt_grouped_gemm_q8_mpp};
+    use super::{ffai_gemm_q8_mpp, ffai_grouped_gemm_q8_mpp};
 
     // q_a-like shape: in=4096, out=1024, 256 tokens.
     #[bench(dtypes = [f32, f16, bf16])]
@@ -221,7 +221,7 @@ pub mod kernel_benches {
         let out_dim = 1024usize;
         let k_in = 4096usize;
         let n_blocks = out_dim * k_in / 32;
-        BenchSetup::new(mt_gemm_q8_mpp::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gemm_q8_mpp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", n_rows * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_blocks * 8, DType::U32))
@@ -243,7 +243,7 @@ pub mod kernel_benches {
         let n_groups = 8usize;
         let rows_per_group = out_dim / n_groups;
         let n_blocks = out_dim * k_in / 32;
-        BenchSetup::new(mt_grouped_gemm_q8_mpp::kernel_ir_for(dt))
+        BenchSetup::new(ffai_grouped_gemm_q8_mpp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", n_rows * n_groups * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_blocks * 8, DType::U32))

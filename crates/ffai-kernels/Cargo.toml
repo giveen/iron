@@ -6,8 +6,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "Rust DSL for writing Apple Metal GPU kernels — write once, run fast on Apple Silicon"
-keywords = ["metal", "gpu", "apple-silicon", "dsl", "shader"]
+description = "Rust DSL for writing fast and stable GPU kernels across all platforms — write once, run fast on Apple Silicon, NVIDIA, AMD and Vulkan supporteddevices"
+keywords = ["metal", "gpu", "apple-silicon", "cuda", "hip", "amd", "vulkan", "dsl", "shader"]
 categories = ["compilers", "hardware-support"]
 publish = false
 

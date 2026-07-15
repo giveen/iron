@@ -1393,17 +1393,17 @@ impl CudaDevice {
         // the oracle's rounding tightens bit-accuracy for the correctness
         // suite. For inference/perf runs FMA is strictly better (one fused op
         // per mul-add ⇒ half the FP issue + shorter dep chain in the hot GEMV/
-        // gather/sdpa loops); opt in with `MT_FMAD=1`.
+        // gather/sdpa loops); opt in with `FFAI_FMAD=1`.
         // FMAD: default ON for inference (FMA fusion halves mul+add latency in
-        // GEMV/SDPA dot-products). Opt out with MT_FMAD=0 for exact CPU-oracle
+        // GEMV/SDPA dot-products). Opt out with FFAI_FMAD=0 for exact CPU-oracle
         // comparison. The correctness test (argmax 1234) passes with FMAD=true.
-        let fmad_on = std::env::var("MT_FMAD").map(|v| v != "0" && v != "false").unwrap_or(true);
+        let fmad_on = std::env::var("FFAI_FMAD").map(|v| v != "0" && v != "false").unwrap_or(true);
         let fmad = CString::new(if fmad_on { "--fmad=true" } else { "--fmad=false" }).unwrap();
-        // MT_FAST_MATH=1: enable --use_fast_math (implies --fmad=true + fast
+        // FFAI_FAST_MATH=1: enable --use_fast_math (implies --fmad=true + fast
         // intrinsics: __expf, __sinf, etc.). Trades ~1-2 ULP precision for
         // ~2-4x faster transcendentals. Safe for inference softmax.
         let fast_math_on =
-            std::env::var("MT_FAST_MATH").map(|v| v == "1" || v == "true").unwrap_or(false);
+            std::env::var("FFAI_FAST_MATH").map(|v| v == "1" || v == "true").unwrap_or(false);
         let compile_res = match (fast_math_on, cccl_inc.as_ref()) {
             (true, Some(cccl)) => {
                 let fast = CString::new("--use_fast_math").unwrap();
@@ -1935,8 +1935,8 @@ impl CudaDevice {
         // 1. IR → CUDA C++ → module.
         let cg = CudaGenerator::new();
         let src = cg.generate(kernel).map_err(FFAIError::Codegen)?;
-        // MT_DUMP_CUDA_SRC=<path>: write generated CUDA C++ for every kernel.
-        if let Ok(dir) = std::env::var("MT_DUMP_CUDA_SRC") {
+        // FFAI_DUMP_CUDA_SRC=<path>: write generated CUDA C++ for every kernel.
+        if let Ok(dir) = std::env::var("FFAI_DUMP_CUDA_SRC") {
             let path = format!("{}/{}.cu", dir, kernel.name);
             let _ = std::fs::write(&path, &src);
         }

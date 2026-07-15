@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_steel_gemm_gather_nax` — gather GEMM via `mpp::tensor_ops::matmul2d`.
+//! `ffai_steel_gemm_gather_nax` — gather GEMM via `mpp::tensor_ops::matmul2d`.
 //!
 //! NAX (Apple tensor-core) port of the `nn` steel gather-GEMM
 //! `C = A_gathered · B_gathered`:
@@ -16,7 +16,7 @@
 //! `Context::chip_family()`.
 //!
 //! Expressed entirely in the `#[kernel]` DSL via the `coop_tile_*`
-//! intrinsics — no `Op::InlineMsl`. It is exactly `mt_steel_gemm_fused_nax`
+//! intrinsics — no `Op::InlineMsl`. It is exactly `ffai_steel_gemm_fused_nax`
 //! with two extra integer loads before the address arithmetic — the
 //! gather index of an output row is a per-row scalar, the B-matrix index
 //! a per-N-block scalar. No new codegen primitive is required.
@@ -26,7 +26,7 @@
 //! `coop_stage(T)` = `half` for bf16 (Apple `matmul2d` mishandles
 //! `bfloat` cooperative tensors), else `T`. Accumulation is fp32.
 //!
-//! ## Geometry (mirrors `mt_steel_gemm_fused_nax`)
+//! ## Geometry (mirrors `ffai_steel_gemm_fused_nax`)
 //!
 //! - **TPG: 128 threads** (4 SG × 32 lanes, WM=WN=2). Fixed.
 //! - **BM = BN = BK = 32** → 32×32 output tile per TG.
@@ -54,7 +54,7 @@ use ffai_kernels::kernel;
 /// `rhs_indices [n/32]`, `out [m, n]`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_steel_gemm_gather_nax<T>(
+pub fn ffai_steel_gemm_gather_nax<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     lhs_indices: Tensor<u32>,
@@ -150,11 +150,11 @@ pub fn mt_steel_gemm_gather_nax<T>(
 /// single `[K, N]` matrix here (one expert). `bytes_moved` counts the
 /// three matmul streams plus the index reads. Bench-only — correctness
 /// lives in the in-source `#[test_kernel]`s (ported from the legacy
-/// `tests/steel_gemm_gather_nax_gpu_correctness.rs`, removed in #240).
+/// `tests/steel_gemm_gather_nax_gpu_correctness.rs`, since removed).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_steel_gemm_gather_nax;
+    use super::ffai_steel_gemm_gather_nax;
 
     const M: u32 = 4096;
     const N: u32 = 4096;
@@ -168,7 +168,7 @@ pub mod kernel_benches {
         let sz = dt.size_bytes();
         let n_blocks = n / TILE as usize;
         let bytes = (m * k + k * n + m * n) * sz + (m + n_blocks) * DType::U32.size_bytes();
-        BenchSetup::new(mt_steel_gemm_gather_nax::kernel_ir_for(dt))
+        BenchSetup::new(ffai_steel_gemm_gather_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("a", m * k, dt))
             .buffer(BenchBuffer::random("b", k * n, dt))
@@ -186,7 +186,7 @@ pub mod kernel_benches {
 
 /// New-syntax correctness tests for the NAX gather steel GEMM (MoE
 /// `gather_mm`) — ports the oracle from the legacy
-/// `tests/steel_gemm_gather_nax_gpu_correctness.rs` (removed in #240):
+/// `tests/steel_gemm_gather_nax_gpu_correctness.rs` (since removed):
 ///   `out[mr, nc] = Σ_k a[lhs_indices[mr], k] · b[rhs_indices[nc/32], k, nc]`,
 /// where `b` is the stacked `[n_b_mats, K, N]` operand.
 ///
@@ -198,7 +198,7 @@ pub mod kernel_benches {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_steel_gemm_gather_nax;
+    use super::ffai_steel_gemm_gather_nax;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -244,7 +244,7 @@ pub mod kernel_tests {
         let a = unpack_f32(&pack_f32(&a, dt), dt);
         let b = unpack_f32(&pack_f32(&b, dt), dt);
         let expected = naive_gather_matmul(&a, &b, &lhs, &rhs, m, n, k);
-        TestSetup::new(mt_steel_gemm_gather_nax::kernel_ir_for(dt))
+        TestSetup::new(ffai_steel_gemm_gather_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
             .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
@@ -270,8 +270,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_steel_gemm_gather_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_steel_gemm_gather_nax");
+            let k = ffai_steel_gemm_gather_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_steel_gemm_gather_nax");
             assert_eq!(k.params.len(), 5);
             assert_eq!(k.params[0].name, "a");
             assert_eq!(k.params[1].name, "b");
@@ -295,7 +295,7 @@ mod tests {
     /// bf16 must stage through `half` for matmul2d compatibility.
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_steel_gemm_gather_nax::kernel_ir_for(DType::BF16);
+        let k = ffai_steel_gemm_gather_nax::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -311,21 +311,21 @@ mod tests {
     #[test]
     fn codegen_emits_mpp_include_and_kernel_decl() {
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
-            let mut k = mt_steel_gemm_gather_nax::kernel_ir_for(dt);
+            let mut k = ffai_steel_gemm_gather_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 DType::BF16 => "bf16",
                 _ => unreachable!(),
             };
-            k.name = format!("mt_steel_gemm_gather_nax_{suffix}");
+            k.name = format!("ffai_steel_gemm_gather_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
             assert!(
                 msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"),
                 "MPP include missing from generated MSL:\n{msl}"
             );
             assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-            assert!(msl.contains(&format!("kernel void mt_steel_gemm_gather_nax_{suffix}")));
+            assert!(msl.contains(&format!("kernel void ffai_steel_gemm_gather_nax_{suffix}")));
             assert!(msl.contains(&format!("threadgroup {t_name} Xs")));
             assert!(msl.contains(&format!("threadgroup {t_name} Ws")));
             assert!(msl.contains("lhs_indices"));

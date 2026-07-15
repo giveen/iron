@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa<T>(
+pub fn ffai_sdpa<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -99,15 +99,15 @@ pub fn mt_sdpa<T>(
     }
 }
 
-/// New-syntax correctness + benchmark for `mt_sdpa` — the baseline decode SDPA
+/// New-syntax correctness + benchmark for `ffai_sdpa` — the baseline decode SDPA
 /// (head_dim hardcoded 128, one KV head per Q head, constexprs `n_kv` +
 /// `scale`). Reuses the triple-loop `softmax(Q·Kᵀ·scale)·V` oracle from
-/// `sdpa_vector` (gqa=1). Pre-this migration `mt_sdpa` had no CPU-oracle test
+/// `sdpa_vector` (gqa=1). Pre-this migration `ffai_sdpa` had no CPU-oracle test
 /// — validation flowed only through the `ffaik bench` head-to-head against MLX.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa;
+    use super::ffai_sdpa;
     use crate::{
         kernels::sdpa::sdpa_vector::kernel_tests::cpu_sdpa,
         utils::{pack_f32, unpack_f32},
@@ -127,7 +127,7 @@ pub mod kernel_tests {
         let v = unpack_f32(&pack_f32(&v_f, dt), dt);
         // gqa=1: one KV head per Q head.
         let expected = cpu_sdpa(&q, &k, &v, n_heads, n_heads, n_kv, HEAD_DIM);
-        TestSetup::new(mt_sdpa::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q_f, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k_f, dt), dt))
@@ -143,11 +143,11 @@ pub mod kernel_tests {
     fn test_sdpa(dt: DType) -> TestSetup { setup(8, 64, dt) }
 }
 
-/// New-syntax benchmark for `mt_sdpa` (decode attention, head_dim 128).
+/// New-syntax benchmark for `ffai_sdpa` (decode attention, head_dim 128).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa;
+    use super::ffai_sdpa;
 
     const HEAD_DIM: usize = 128;
 
@@ -157,7 +157,7 @@ pub mod kernel_benches {
         let scale = 1.0f32 / (HEAD_DIM as f32).sqrt();
         let kv_len = n_heads * n_kv * HEAD_DIM;
         let bytes = 2 * kv_len * dt.size_bytes() + 2 * n_heads * HEAD_DIM * dt.size_bytes();
-        BenchSetup::new(mt_sdpa::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_heads * HEAD_DIM, dt))
             .buffer(BenchBuffer::random("k", kv_len, dt))

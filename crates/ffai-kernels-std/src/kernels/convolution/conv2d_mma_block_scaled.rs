@@ -70,7 +70,7 @@ use ffai_kernels::kernel;
 /// Implicit-im2col A-load, the 8×8 simdgroup-fragment MMA, and the write-back are
 /// format-independent; only the W-dequant "B-load" folds onto `(BITS, WDEC,
 /// SKIND)` (buffer types `(WT, ST)`, legend in `gemm/block_scaled_matmul`),
-/// through `kernels/primitives.rs`. Produces `mt_<FMT>_conv2d_mma`.
+/// through `kernels/primitives.rs`. Produces `ffai_<FMT>_conv2d_mma`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -105,7 +105,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_conv2d_mma",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     input: Tensor<T>,
     weight: Tensor<WT>,
     scales: Tensor<ST>,
@@ -205,13 +205,13 @@ pub fn mt<T>(
             let scale = if SKIND == 0u32 {
                 exp2(sraw.cast::<f32>() - 127.0f32)
             } else if SKIND == 1u32 {
-                mt_decode_e4m3(sraw.cast::<u32>()) * global
+                ffai_decode_e4m3(sraw.cast::<u32>()) * global
             } else {
                 sraw.cast::<f32>()
             };
             let elem = if WDEC == 0u32 {
                 let pack = load(weight[w_pack_row_base + kt_safe / 8u32]);
-                mt_decode_e2m1((pack >> ((kt_safe & 7u32) * 4u32)) & 0xFu32)
+                ffai_decode_e2m1((pack >> ((kt_safe & 7u32) * 4u32)) & 0xFu32)
             } else if WDEC == 1u32 {
                 let bit_off = (w_byte_row_base + kt_safe) * BITS;
                 let word_idx = bit_off / 32u32;
@@ -221,17 +221,17 @@ pub fn mt<T>(
                 let spill = BITS - lo_bits;
                 let w0 = load(weight[word_idx]);
                 let w1 = load(weight[select(spill > 0u32, word_idx + 1u32, word_idx)]);
-                let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                 let qf = q.cast::<f32>();
                 select(q >= half, qf - full, qf)
             } else {
                 let raw = load(weight[w_byte_row_base + kt_safe]).cast::<u32>();
                 if WDEC == 2u32 {
-                    mt_decode_e4m3(raw)
+                    ffai_decode_e4m3(raw)
                 } else if WDEC == 3u32 {
-                    mt_decode_e5m2(raw)
+                    ffai_decode_e5m2(raw)
                 } else {
-                    mt_decode_int8(raw)
+                    ffai_decode_int8(raw)
                 }
             };
             let val = select(in_bounds, elem * scale, 0.0f32).cast::<T>();
@@ -489,23 +489,45 @@ pub mod kernel_tests {
     // 7×7 input → out 4×4, batch=2 → n_pixels=32; out_ch=32. One 32×32 tile.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp4_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_mxfp4_conv2d_mma::kernel_ir_for(dt), QFormat::Mxfp4, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(
+            ffai_mxfp4_conv2d_mma::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            2,
+            4,
+            7,
+            7,
+            32,
+            4,
+            4,
+            dt,
+        )
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp4_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_nvfp4_conv2d_mma::kernel_ir_for(dt), QFormat::Nvfp4, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(
+            ffai_nvfp4_conv2d_mma::kernel_ir_for(dt),
+            QFormat::Nvfp4,
+            2,
+            4,
+            7,
+            7,
+            32,
+            4,
+            4,
+            dt,
+        )
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_fp4_conv2d_mma::kernel_ir_for(dt), QFormat::Fp4, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_fp4_conv2d_mma::kernel_ir_for(dt), QFormat::Fp4, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxfp8_e4m3_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             2,
             4,
@@ -521,7 +543,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxfp8_e5m2_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             2,
             4,
@@ -536,14 +558,25 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_nvfp8_conv2d_mma::kernel_ir_for(dt), QFormat::Nvfp8, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(
+            ffai_nvfp8_conv2d_mma::kernel_ir_for(dt),
+            QFormat::Nvfp8,
+            2,
+            4,
+            7,
+            7,
+            32,
+            4,
+            4,
+            dt,
+        )
     }
 
     // fp8_e4m3 reuses the nvfp8 kernel (same 8-bit-E4M3 + f32-scale shape).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_nvfp8_conv2d_mma::kernel_ir_for(dt),
+            ffai_nvfp8_conv2d_mma::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             2,
             4,
@@ -559,7 +592,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_fp8_e5m2_conv2d_mma::kernel_ir_for(dt),
+            ffai_fp8_e5m2_conv2d_mma::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             2,
             4,
@@ -574,40 +607,40 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int8_conv2d_mma::kernel_ir_for(dt), QFormat::Int8, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int8_conv2d_mma::kernel_ir_for(dt), QFormat::Int8, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     // ── Symmetric integer formats (FP32 group scale, group 64) ──
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int2_conv2d_mma::kernel_ir_for(dt), QFormat::Int2, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int2_conv2d_mma::kernel_ir_for(dt), QFormat::Int2, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int3_conv2d_mma::kernel_ir_for(dt), QFormat::Int3, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int3_conv2d_mma::kernel_ir_for(dt), QFormat::Int3, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int4_conv2d_mma::kernel_ir_for(dt), QFormat::Int4, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int4_conv2d_mma::kernel_ir_for(dt), QFormat::Int4, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int5_conv2d_mma::kernel_ir_for(dt), QFormat::Int5, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int5_conv2d_mma::kernel_ir_for(dt), QFormat::Int5, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_conv2d_mma(dt: DType) -> TestSetup {
-        mma_setup(mt_int6_conv2d_mma::kernel_ir_for(dt), QFormat::Int6, 2, 4, 7, 7, 32, 4, 4, dt)
+        mma_setup(ffai_int6_conv2d_mma::kernel_ir_for(dt), QFormat::Int6, 2, 4, 7, 7, 32, 4, 4, dt)
     }
 
     // ── E8M0-scaled symmetric integer formats (block 32) ──
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint2_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint2_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint2,
             2,
             4,
@@ -623,7 +656,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint3_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint3_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint3,
             2,
             4,
@@ -639,7 +672,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint4_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint4_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint4,
             2,
             4,
@@ -655,7 +688,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint5_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint5_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint5,
             2,
             4,
@@ -671,7 +704,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint6_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint6_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint6,
             2,
             4,
@@ -687,7 +720,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_mxint8_conv2d_mma::kernel_ir_for(dt),
+            ffai_mxint8_conv2d_mma::kernel_ir_for(dt),
             QFormat::Mxint8,
             2,
             4,
@@ -704,7 +737,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_nvfp8_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_nvfp8_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             2,
             4,
@@ -721,7 +754,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_nvfp8_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_nvfp8_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             2,
             4,
@@ -737,7 +770,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_fp4_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_fp4_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Fp4F16,
             2,
             4,
@@ -753,7 +786,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_fp8_e5m2_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             2,
             4,
@@ -769,7 +802,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int2_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int2_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int2F16,
             2,
             4,
@@ -785,7 +818,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int3_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int3_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int3F16,
             2,
             4,
@@ -801,7 +834,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int4_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int4_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int4F16,
             2,
             4,
@@ -817,7 +850,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int5_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int5_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int5F16,
             2,
             4,
@@ -833,7 +866,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int6_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int6_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int6F16,
             2,
             4,
@@ -849,7 +882,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_conv2d_mma(dt: DType) -> TestSetup {
         mma_setup(
-            mt_int8_f16_conv2d_mma::kernel_ir_for(dt),
+            ffai_int8_f16_conv2d_mma::kernel_ir_for(dt),
             QFormat::Int8F16,
             2,
             4,
@@ -954,53 +987,81 @@ pub mod kernel_benches {
             }
         };
     }
-    conv2d_mma_bench_fmt!(bench_mxfp4, mt_mxfp4_conv2d_mma::kernel_ir_for, QFormat::Mxfp4);
-    conv2d_mma_bench_fmt!(bench_nvfp4, mt_nvfp4_conv2d_mma::kernel_ir_for, QFormat::Nvfp4);
-    conv2d_mma_bench_fmt!(bench_fp4, mt_fp4_conv2d_mma::kernel_ir_for, QFormat::Fp4);
+    conv2d_mma_bench_fmt!(bench_mxfp4, ffai_mxfp4_conv2d_mma::kernel_ir_for, QFormat::Mxfp4);
+    conv2d_mma_bench_fmt!(bench_nvfp4, ffai_nvfp4_conv2d_mma::kernel_ir_for, QFormat::Nvfp4);
+    conv2d_mma_bench_fmt!(bench_fp4, ffai_fp4_conv2d_mma::kernel_ir_for, QFormat::Fp4);
     conv2d_mma_bench_fmt!(
         bench_mxfp8_e4m3,
-        mt_mxfp8_e4m3_conv2d_mma::kernel_ir_for,
+        ffai_mxfp8_e4m3_conv2d_mma::kernel_ir_for,
         QFormat::Mxfp8E4
     );
     conv2d_mma_bench_fmt!(
         bench_mxfp8_e5m2,
-        mt_mxfp8_e5m2_conv2d_mma::kernel_ir_for,
+        ffai_mxfp8_e5m2_conv2d_mma::kernel_ir_for,
         QFormat::Mxfp8E5
     );
-    conv2d_mma_bench_fmt!(bench_nvfp8, mt_nvfp8_conv2d_mma::kernel_ir_for, QFormat::Nvfp8);
-    conv2d_mma_bench_fmt!(bench_fp8_e5m2, mt_fp8_e5m2_conv2d_mma::kernel_ir_for, QFormat::Fp8E5m2);
-    conv2d_mma_bench_fmt!(bench_int8, mt_int8_conv2d_mma::kernel_ir_for, QFormat::Int8);
-    conv2d_mma_bench_fmt!(bench_int2, mt_int2_conv2d_mma::kernel_ir_for, QFormat::Int2);
-    conv2d_mma_bench_fmt!(bench_int3, mt_int3_conv2d_mma::kernel_ir_for, QFormat::Int3);
-    conv2d_mma_bench_fmt!(bench_int4, mt_int4_conv2d_mma::kernel_ir_for, QFormat::Int4);
-    conv2d_mma_bench_fmt!(bench_int5, mt_int5_conv2d_mma::kernel_ir_for, QFormat::Int5);
-    conv2d_mma_bench_fmt!(bench_int6, mt_int6_conv2d_mma::kernel_ir_for, QFormat::Int6);
-    conv2d_mma_bench_fmt!(bench_mxint2, mt_mxint2_conv2d_mma::kernel_ir_for, QFormat::Mxint2);
-    conv2d_mma_bench_fmt!(bench_mxint3, mt_mxint3_conv2d_mma::kernel_ir_for, QFormat::Mxint3);
-    conv2d_mma_bench_fmt!(bench_mxint4, mt_mxint4_conv2d_mma::kernel_ir_for, QFormat::Mxint4);
-    conv2d_mma_bench_fmt!(bench_mxint5, mt_mxint5_conv2d_mma::kernel_ir_for, QFormat::Mxint5);
-    conv2d_mma_bench_fmt!(bench_mxint6, mt_mxint6_conv2d_mma::kernel_ir_for, QFormat::Mxint6);
-    conv2d_mma_bench_fmt!(bench_mxint8, mt_mxint8_conv2d_mma::kernel_ir_for, QFormat::Mxint8);
+    conv2d_mma_bench_fmt!(bench_nvfp8, ffai_nvfp8_conv2d_mma::kernel_ir_for, QFormat::Nvfp8);
+    conv2d_mma_bench_fmt!(
+        bench_fp8_e5m2,
+        ffai_fp8_e5m2_conv2d_mma::kernel_ir_for,
+        QFormat::Fp8E5m2
+    );
+    conv2d_mma_bench_fmt!(bench_int8, ffai_int8_conv2d_mma::kernel_ir_for, QFormat::Int8);
+    conv2d_mma_bench_fmt!(bench_int2, ffai_int2_conv2d_mma::kernel_ir_for, QFormat::Int2);
+    conv2d_mma_bench_fmt!(bench_int3, ffai_int3_conv2d_mma::kernel_ir_for, QFormat::Int3);
+    conv2d_mma_bench_fmt!(bench_int4, ffai_int4_conv2d_mma::kernel_ir_for, QFormat::Int4);
+    conv2d_mma_bench_fmt!(bench_int5, ffai_int5_conv2d_mma::kernel_ir_for, QFormat::Int5);
+    conv2d_mma_bench_fmt!(bench_int6, ffai_int6_conv2d_mma::kernel_ir_for, QFormat::Int6);
+    conv2d_mma_bench_fmt!(bench_mxint2, ffai_mxint2_conv2d_mma::kernel_ir_for, QFormat::Mxint2);
+    conv2d_mma_bench_fmt!(bench_mxint3, ffai_mxint3_conv2d_mma::kernel_ir_for, QFormat::Mxint3);
+    conv2d_mma_bench_fmt!(bench_mxint4, ffai_mxint4_conv2d_mma::kernel_ir_for, QFormat::Mxint4);
+    conv2d_mma_bench_fmt!(bench_mxint5, ffai_mxint5_conv2d_mma::kernel_ir_for, QFormat::Mxint5);
+    conv2d_mma_bench_fmt!(bench_mxint6, ffai_mxint6_conv2d_mma::kernel_ir_for, QFormat::Mxint6);
+    conv2d_mma_bench_fmt!(bench_mxint8, ffai_mxint8_conv2d_mma::kernel_ir_for, QFormat::Mxint8);
     conv2d_mma_bench_fmt!(
         bench_nvfp8_f16,
-        mt_nvfp8_f16_conv2d_mma::kernel_ir_for,
+        ffai_nvfp8_f16_conv2d_mma::kernel_ir_for,
         QFormat::Nvfp8F16
     );
     conv2d_mma_bench_fmt!(
         bench_fp8_e4m3_f16,
-        mt_nvfp8_f16_conv2d_mma::kernel_ir_for,
+        ffai_nvfp8_f16_conv2d_mma::kernel_ir_for,
         QFormat::Fp8E4m3F16
     );
-    conv2d_mma_bench_fmt!(bench_fp4_f16, mt_fp4_f16_conv2d_mma::kernel_ir_for, QFormat::Fp4F16);
+    conv2d_mma_bench_fmt!(bench_fp4_f16, ffai_fp4_f16_conv2d_mma::kernel_ir_for, QFormat::Fp4F16);
     conv2d_mma_bench_fmt!(
         bench_fp8_e5m2_f16,
-        mt_fp8_e5m2_f16_conv2d_mma::kernel_ir_for,
+        ffai_fp8_e5m2_f16_conv2d_mma::kernel_ir_for,
         QFormat::Fp8E5m2F16
     );
-    conv2d_mma_bench_fmt!(bench_int2_f16, mt_int2_f16_conv2d_mma::kernel_ir_for, QFormat::Int2F16);
-    conv2d_mma_bench_fmt!(bench_int3_f16, mt_int3_f16_conv2d_mma::kernel_ir_for, QFormat::Int3F16);
-    conv2d_mma_bench_fmt!(bench_int4_f16, mt_int4_f16_conv2d_mma::kernel_ir_for, QFormat::Int4F16);
-    conv2d_mma_bench_fmt!(bench_int5_f16, mt_int5_f16_conv2d_mma::kernel_ir_for, QFormat::Int5F16);
-    conv2d_mma_bench_fmt!(bench_int6_f16, mt_int6_f16_conv2d_mma::kernel_ir_for, QFormat::Int6F16);
-    conv2d_mma_bench_fmt!(bench_int8_f16, mt_int8_f16_conv2d_mma::kernel_ir_for, QFormat::Int8F16);
+    conv2d_mma_bench_fmt!(
+        bench_int2_f16,
+        ffai_int2_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int2F16
+    );
+    conv2d_mma_bench_fmt!(
+        bench_int3_f16,
+        ffai_int3_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int3F16
+    );
+    conv2d_mma_bench_fmt!(
+        bench_int4_f16,
+        ffai_int4_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int4F16
+    );
+    conv2d_mma_bench_fmt!(
+        bench_int5_f16,
+        ffai_int5_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int5F16
+    );
+    conv2d_mma_bench_fmt!(
+        bench_int6_f16,
+        ffai_int6_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int6F16
+    );
+    conv2d_mma_bench_fmt!(
+        bench_int8_f16,
+        ffai_int8_f16_conv2d_mma::kernel_ir_for,
+        QFormat::Int8F16
+    );
 }

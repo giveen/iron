@@ -1,8 +1,8 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Prefill SDPA via `simdgroup_multiply_accumulate` (MMA) — `mt_sdpa_prefill_mma`.
+//! Prefill SDPA via `simdgroup_multiply_accumulate` (MMA) — `ffai_sdpa_prefill_mma`.
 //!
-//! Mirrors `mt_sdpa_prefill`'s outer geometry (BQ=32, BK=16, BD=128, WM=4,
+//! Mirrors `ffai_sdpa_prefill`'s outer geometry (BQ=32, BK=16, BD=128, WM=4,
 //! WN=1, tpg=128 = 4 SGs sharing one K/V TG cache) but replaces the per-SG
 //! scalar simd_sum dot product with Apple's 8×8 simdgroup matrix MMA
 //! fragments. Per K-block per SG:
@@ -22,7 +22,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_prefill_mma<T>(
+pub fn ffai_sdpa_prefill_mma<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -697,7 +697,7 @@ pub fn mt_sdpa_prefill_mma<T>(
 }
 
 /// New-syntax correctness for the prefill-tile SDPA kernel
-/// (`mt_sdpa_prefill_mma`). This MMA kernel powers M7's K=8/16 batched-Q
+/// (`ffai_sdpa_prefill_mma`). This MMA kernel powers M7's K=8/16 batched-Q
 /// speculative-decode-verify path: a `q_len`-row query block attends a
 /// `k_len`-slot K/V cache under a hardcoded causal mask, where row `qi`
 /// attends `[0, q_len_off + qi + 1)` with `q_len_off = k_len - q_len`.
@@ -711,9 +711,9 @@ pub fn mt_sdpa_prefill_mma<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_prefill_mma;
+    use super::ffai_sdpa_prefill_mma;
     use crate::{
-        kernels::sdpa::steel_attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
+        kernels::sdpa::steel_attn::steel_attention_mma_bf16::ffai_sdpa_prefill_mma_bf16,
         utils::{pack_f32, unpack_f32},
     };
 
@@ -822,26 +822,26 @@ pub mod kernel_tests {
 
     // MHA, short prefix: k_len = 96 (6 KV-tiles of 16), 2 heads, 1 KV head.
     #[test_kernel(dtypes = [f32], tol = [5e-3])]
-    fn test_mt_sdpa_prefill_mma(dt: DType) -> TestSetup {
-        prefill_setup(mt_sdpa_prefill_mma::kernel_ir_for(dt), dt, 2, 1, 96)
+    fn test_ffai_sdpa_prefill_mma(dt: DType) -> TestSetup {
+        prefill_setup(ffai_sdpa_prefill_mma::kernel_ir_for(dt), dt, 2, 1, 96)
     }
 
     // GQA fan-out 4: 8 Q heads over 2 KV heads — exercises the kv-head
     // mapping in the prefill tile.
     #[test_kernel(dtypes = [f32], tol = [5e-3])]
-    fn test_mt_sdpa_prefill_mma_gqa(dt: DType) -> TestSetup {
-        prefill_setup(mt_sdpa_prefill_mma::kernel_ir_for(dt), dt, 8, 2, 96)
+    fn test_ffai_sdpa_prefill_mma_gqa(dt: DType) -> TestSetup {
+        prefill_setup(ffai_sdpa_prefill_mma::kernel_ir_for(dt), dt, 8, 2, 96)
     }
 
     // bf16-optimized M2 variant — identical signature/geometry/causal-prefix
     // semantics, so it reuses the same oracle. Tested at bf16 (its target) and
     // f32; the half-precision simdgroup-matrix accumulation widens the band.
     #[test_kernel(dtypes = [f32, bf16], tol = [5e-3, 1e-1])]
-    fn test_mt_sdpa_prefill_mma_bf16(dt: DType) -> TestSetup {
-        prefill_setup(mt_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt, 2, 1, 96)
+    fn test_ffai_sdpa_prefill_mma_bf16(dt: DType) -> TestSetup {
+        prefill_setup(ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt, 2, 1, 96)
     }
     #[test_kernel(dtypes = [f32, bf16], tol = [5e-3, 1e-1])]
-    fn test_mt_sdpa_prefill_mma_bf16_gqa(dt: DType) -> TestSetup {
-        prefill_setup(mt_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt, 8, 2, 96)
+    fn test_ffai_sdpa_prefill_mma_bf16_gqa(dt: DType) -> TestSetup {
+        prefill_setup(ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt, 8, 2, 96)
     }
 }

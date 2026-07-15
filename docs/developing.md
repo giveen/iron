@@ -191,7 +191,7 @@ Invariants for any codegen pass you write or touch:
 Detection — emit every kernel, then scan for empty bodies:
 
 ```bash
-ffaik build --emit all -o /tmp/mt-smoke
+ffaik build --emit all -o /tmp/ffai-smoke
 awk '
   /for \(.*\) \{$/               { f=1; fn=FILENAME; l=FNR; next }
   f && /^[[:space:]]*\}$/        { print fn":"l": empty for-loop body"; f=0; next }
@@ -200,7 +200,7 @@ awk '
   k && /^\{$/                    { next }
   k && /^\}$/                    { print fn":"l": empty kernel body"; k=0; next }
   k                              { k=0 }
-' /tmp/mt-smoke/Resources/kernels/*.metal
+' /tmp/ffai-smoke/Resources/kernels/*.metal
 ```
 
 Empty output = clean. Any hit = ship-stopper. **Neither `xcrun metal` nor MSL snapshots catch an empty body** — only a GPU correctness test does (see [Testing](testing.md)).

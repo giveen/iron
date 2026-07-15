@@ -36,7 +36,7 @@ use ffai_kernels::kernel;
 /// `conv3d` receptive-field walk; per-column filter decode + per-block scale
 /// fold onto `(BITS, WDEC, SKIND)` (buffer types `(WT, ST)`; legend in
 /// `gemm/block_scaled_matmul`). `col = ic·kd·kh·kw + kz·kh·kw + ky·kw + kx`.
-/// Decodes through `kernels/primitives.rs`. Produces `mt_<FMT>_conv3d`.
+/// Decodes through `kernels/primitives.rs`. Produces `ffai_<FMT>_conv3d`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -71,7 +71,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_conv3d",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     input: Tensor<T>,
     weight: Tensor<WT>,
     scales: Tensor<ST>,
@@ -144,7 +144,7 @@ pub fn mt<T>(
                     let pix_m = select(valid, pix, 0.0f32);
                     let col = col_kz + ky * kw + kx;
                     let elem = if WDEC == 0u32 {
-                        mt_decode_e2m1(
+                        ffai_decode_e2m1(
                             (load(weight[w_row_pack + col / 8u32]) >> ((col % 8u32) * 4u32))
                                 & 0xFu32,
                         )
@@ -159,24 +159,24 @@ pub fn mt<T>(
                         let w1 = load(
                             weight[w_row_word + select(spill > 0u32, word_idx + 1u32, word_idx)],
                         );
-                        let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                        let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                         let qf = q.cast::<f32>();
                         select(q >= half, qf - full, qf)
                     } else {
                         let raw = load(weight[w_row_byte + col]).cast::<u32>();
                         if WDEC == 2u32 {
-                            mt_decode_e4m3(raw)
+                            ffai_decode_e4m3(raw)
                         } else if WDEC == 3u32 {
-                            mt_decode_e5m2(raw)
+                            ffai_decode_e5m2(raw)
                         } else {
-                            mt_decode_int8(raw)
+                            ffai_decode_int8(raw)
                         }
                     };
                     let sraw = load(scales[w_row_blk + col / block_size]);
                     let scale = if SKIND == 0u32 {
                         exp2(sraw.cast::<f32>() - 127.0f32)
                     } else if SKIND == 1u32 {
-                        mt_decode_e4m3(sraw.cast::<u32>()) * global
+                        ffai_decode_e4m3(sraw.cast::<u32>()) * global
                     } else {
                         sraw.cast::<f32>()
                     };
@@ -377,44 +377,56 @@ pub mod kernel_tests {
             }
         };
     }
-    conv3d_test_fmt!(test_mxfp4_conv3d, mt_mxfp4_conv3d::kernel_ir_for, QFormat::Mxfp4);
-    conv3d_test_fmt!(test_nvfp4_conv3d, mt_nvfp4_conv3d::kernel_ir_for, QFormat::Nvfp4);
-    conv3d_test_fmt!(test_fp4_conv3d, mt_fp4_conv3d::kernel_ir_for, QFormat::Fp4);
-    conv3d_test_fmt!(test_mxfp8_e4m3_conv3d, mt_mxfp8_e4m3_conv3d::kernel_ir_for, QFormat::Mxfp8E4);
-    conv3d_test_fmt!(test_mxfp8_e5m2_conv3d, mt_mxfp8_e5m2_conv3d::kernel_ir_for, QFormat::Mxfp8E5);
-    conv3d_test_fmt!(test_fp8_e5m2_conv3d, mt_fp8_e5m2_conv3d::kernel_ir_for, QFormat::Fp8E5m2);
-    conv3d_test_fmt!(test_nvfp8_conv3d, mt_nvfp8_conv3d::kernel_ir_for, QFormat::Nvfp8);
-    conv3d_test_fmt!(test_fp8_e4m3_conv3d, mt_nvfp8_conv3d::kernel_ir_for, QFormat::Fp8E4m3);
-    conv3d_test_fmt!(test_int8_conv3d, mt_int8_conv3d::kernel_ir_for, QFormat::Int8);
-    conv3d_test_fmt!(test_int2_conv3d, mt_int2_conv3d::kernel_ir_for, QFormat::Int2);
-    conv3d_test_fmt!(test_int3_conv3d, mt_int3_conv3d::kernel_ir_for, QFormat::Int3);
-    conv3d_test_fmt!(test_int4_conv3d, mt_int4_conv3d::kernel_ir_for, QFormat::Int4);
-    conv3d_test_fmt!(test_int5_conv3d, mt_int5_conv3d::kernel_ir_for, QFormat::Int5);
-    conv3d_test_fmt!(test_int6_conv3d, mt_int6_conv3d::kernel_ir_for, QFormat::Int6);
-    conv3d_test_fmt!(test_mxint2_conv3d, mt_mxint2_conv3d::kernel_ir_for, QFormat::Mxint2);
-    conv3d_test_fmt!(test_mxint3_conv3d, mt_mxint3_conv3d::kernel_ir_for, QFormat::Mxint3);
-    conv3d_test_fmt!(test_mxint4_conv3d, mt_mxint4_conv3d::kernel_ir_for, QFormat::Mxint4);
-    conv3d_test_fmt!(test_mxint5_conv3d, mt_mxint5_conv3d::kernel_ir_for, QFormat::Mxint5);
-    conv3d_test_fmt!(test_mxint6_conv3d, mt_mxint6_conv3d::kernel_ir_for, QFormat::Mxint6);
-    conv3d_test_fmt!(test_mxint8_conv3d, mt_mxint8_conv3d::kernel_ir_for, QFormat::Mxint8);
-    conv3d_test_fmt!(test_nvfp8_f16_conv3d, mt_nvfp8_f16_conv3d::kernel_ir_for, QFormat::Nvfp8F16);
+    conv3d_test_fmt!(test_mxfp4_conv3d, ffai_mxfp4_conv3d::kernel_ir_for, QFormat::Mxfp4);
+    conv3d_test_fmt!(test_nvfp4_conv3d, ffai_nvfp4_conv3d::kernel_ir_for, QFormat::Nvfp4);
+    conv3d_test_fmt!(test_fp4_conv3d, ffai_fp4_conv3d::kernel_ir_for, QFormat::Fp4);
+    conv3d_test_fmt!(
+        test_mxfp8_e4m3_conv3d,
+        ffai_mxfp8_e4m3_conv3d::kernel_ir_for,
+        QFormat::Mxfp8E4
+    );
+    conv3d_test_fmt!(
+        test_mxfp8_e5m2_conv3d,
+        ffai_mxfp8_e5m2_conv3d::kernel_ir_for,
+        QFormat::Mxfp8E5
+    );
+    conv3d_test_fmt!(test_fp8_e5m2_conv3d, ffai_fp8_e5m2_conv3d::kernel_ir_for, QFormat::Fp8E5m2);
+    conv3d_test_fmt!(test_nvfp8_conv3d, ffai_nvfp8_conv3d::kernel_ir_for, QFormat::Nvfp8);
+    conv3d_test_fmt!(test_fp8_e4m3_conv3d, ffai_nvfp8_conv3d::kernel_ir_for, QFormat::Fp8E4m3);
+    conv3d_test_fmt!(test_int8_conv3d, ffai_int8_conv3d::kernel_ir_for, QFormat::Int8);
+    conv3d_test_fmt!(test_int2_conv3d, ffai_int2_conv3d::kernel_ir_for, QFormat::Int2);
+    conv3d_test_fmt!(test_int3_conv3d, ffai_int3_conv3d::kernel_ir_for, QFormat::Int3);
+    conv3d_test_fmt!(test_int4_conv3d, ffai_int4_conv3d::kernel_ir_for, QFormat::Int4);
+    conv3d_test_fmt!(test_int5_conv3d, ffai_int5_conv3d::kernel_ir_for, QFormat::Int5);
+    conv3d_test_fmt!(test_int6_conv3d, ffai_int6_conv3d::kernel_ir_for, QFormat::Int6);
+    conv3d_test_fmt!(test_mxint2_conv3d, ffai_mxint2_conv3d::kernel_ir_for, QFormat::Mxint2);
+    conv3d_test_fmt!(test_mxint3_conv3d, ffai_mxint3_conv3d::kernel_ir_for, QFormat::Mxint3);
+    conv3d_test_fmt!(test_mxint4_conv3d, ffai_mxint4_conv3d::kernel_ir_for, QFormat::Mxint4);
+    conv3d_test_fmt!(test_mxint5_conv3d, ffai_mxint5_conv3d::kernel_ir_for, QFormat::Mxint5);
+    conv3d_test_fmt!(test_mxint6_conv3d, ffai_mxint6_conv3d::kernel_ir_for, QFormat::Mxint6);
+    conv3d_test_fmt!(test_mxint8_conv3d, ffai_mxint8_conv3d::kernel_ir_for, QFormat::Mxint8);
+    conv3d_test_fmt!(
+        test_nvfp8_f16_conv3d,
+        ffai_nvfp8_f16_conv3d::kernel_ir_for,
+        QFormat::Nvfp8F16
+    );
     conv3d_test_fmt!(
         test_fp8_e4m3_f16_conv3d,
-        mt_nvfp8_f16_conv3d::kernel_ir_for,
+        ffai_nvfp8_f16_conv3d::kernel_ir_for,
         QFormat::Fp8E4m3F16
     );
-    conv3d_test_fmt!(test_fp4_f16_conv3d, mt_fp4_f16_conv3d::kernel_ir_for, QFormat::Fp4F16);
+    conv3d_test_fmt!(test_fp4_f16_conv3d, ffai_fp4_f16_conv3d::kernel_ir_for, QFormat::Fp4F16);
     conv3d_test_fmt!(
         test_fp8_e5m2_f16_conv3d,
-        mt_fp8_e5m2_f16_conv3d::kernel_ir_for,
+        ffai_fp8_e5m2_f16_conv3d::kernel_ir_for,
         QFormat::Fp8E5m2F16
     );
-    conv3d_test_fmt!(test_int2_f16_conv3d, mt_int2_f16_conv3d::kernel_ir_for, QFormat::Int2F16);
-    conv3d_test_fmt!(test_int3_f16_conv3d, mt_int3_f16_conv3d::kernel_ir_for, QFormat::Int3F16);
-    conv3d_test_fmt!(test_int4_f16_conv3d, mt_int4_f16_conv3d::kernel_ir_for, QFormat::Int4F16);
-    conv3d_test_fmt!(test_int5_f16_conv3d, mt_int5_f16_conv3d::kernel_ir_for, QFormat::Int5F16);
-    conv3d_test_fmt!(test_int6_f16_conv3d, mt_int6_f16_conv3d::kernel_ir_for, QFormat::Int6F16);
-    conv3d_test_fmt!(test_int8_f16_conv3d, mt_int8_f16_conv3d::kernel_ir_for, QFormat::Int8F16);
+    conv3d_test_fmt!(test_int2_f16_conv3d, ffai_int2_f16_conv3d::kernel_ir_for, QFormat::Int2F16);
+    conv3d_test_fmt!(test_int3_f16_conv3d, ffai_int3_f16_conv3d::kernel_ir_for, QFormat::Int3F16);
+    conv3d_test_fmt!(test_int4_f16_conv3d, ffai_int4_f16_conv3d::kernel_ir_for, QFormat::Int4F16);
+    conv3d_test_fmt!(test_int5_f16_conv3d, ffai_int5_f16_conv3d::kernel_ir_for, QFormat::Int5F16);
+    conv3d_test_fmt!(test_int6_f16_conv3d, ffai_int6_f16_conv3d::kernel_ir_for, QFormat::Int6F16);
+    conv3d_test_fmt!(test_int8_f16_conv3d, ffai_int8_f16_conv3d::kernel_ir_for, QFormat::Int8F16);
 }
 
 /// Decode-shape benches: a realistic conv (in_ch=32, out_ch=64, 2×2×2 kernel →
@@ -517,42 +529,46 @@ pub mod kernel_benches {
             }
         };
     }
-    conv3d_bench_fmt!(bench_mxfp4, mt_mxfp4_conv3d::kernel_ir_for, QFormat::Mxfp4);
-    conv3d_bench_fmt!(bench_nvfp4, mt_nvfp4_conv3d::kernel_ir_for, QFormat::Nvfp4);
-    conv3d_bench_fmt!(bench_fp4, mt_fp4_conv3d::kernel_ir_for, QFormat::Fp4);
-    conv3d_bench_fmt!(bench_mxfp8_e4m3, mt_mxfp8_e4m3_conv3d::kernel_ir_for, QFormat::Mxfp8E4);
-    conv3d_bench_fmt!(bench_mxfp8_e5m2, mt_mxfp8_e5m2_conv3d::kernel_ir_for, QFormat::Mxfp8E5);
-    conv3d_bench_fmt!(bench_fp8_e5m2, mt_fp8_e5m2_conv3d::kernel_ir_for, QFormat::Fp8E5m2);
-    conv3d_bench_fmt!(bench_nvfp8, mt_nvfp8_conv3d::kernel_ir_for, QFormat::Nvfp8);
-    conv3d_bench_fmt!(bench_int8, mt_int8_conv3d::kernel_ir_for, QFormat::Int8);
+    conv3d_bench_fmt!(bench_mxfp4, ffai_mxfp4_conv3d::kernel_ir_for, QFormat::Mxfp4);
+    conv3d_bench_fmt!(bench_nvfp4, ffai_nvfp4_conv3d::kernel_ir_for, QFormat::Nvfp4);
+    conv3d_bench_fmt!(bench_fp4, ffai_fp4_conv3d::kernel_ir_for, QFormat::Fp4);
+    conv3d_bench_fmt!(bench_mxfp8_e4m3, ffai_mxfp8_e4m3_conv3d::kernel_ir_for, QFormat::Mxfp8E4);
+    conv3d_bench_fmt!(bench_mxfp8_e5m2, ffai_mxfp8_e5m2_conv3d::kernel_ir_for, QFormat::Mxfp8E5);
+    conv3d_bench_fmt!(bench_fp8_e5m2, ffai_fp8_e5m2_conv3d::kernel_ir_for, QFormat::Fp8E5m2);
+    conv3d_bench_fmt!(bench_nvfp8, ffai_nvfp8_conv3d::kernel_ir_for, QFormat::Nvfp8);
+    conv3d_bench_fmt!(bench_int8, ffai_int8_conv3d::kernel_ir_for, QFormat::Int8);
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale) +
     // MXINT8 (8-bit, E8M0). C=256 ⇒ `C*bits % 32 == 0` for every width.
-    conv3d_bench_fmt!(bench_int2, mt_int2_conv3d::kernel_ir_for, QFormat::Int2);
-    conv3d_bench_fmt!(bench_int3, mt_int3_conv3d::kernel_ir_for, QFormat::Int3);
-    conv3d_bench_fmt!(bench_int4, mt_int4_conv3d::kernel_ir_for, QFormat::Int4);
-    conv3d_bench_fmt!(bench_int5, mt_int5_conv3d::kernel_ir_for, QFormat::Int5);
-    conv3d_bench_fmt!(bench_int6, mt_int6_conv3d::kernel_ir_for, QFormat::Int6);
-    conv3d_bench_fmt!(bench_mxint2, mt_mxint2_conv3d::kernel_ir_for, QFormat::Mxint2);
-    conv3d_bench_fmt!(bench_mxint3, mt_mxint3_conv3d::kernel_ir_for, QFormat::Mxint3);
-    conv3d_bench_fmt!(bench_mxint4, mt_mxint4_conv3d::kernel_ir_for, QFormat::Mxint4);
-    conv3d_bench_fmt!(bench_mxint5, mt_mxint5_conv3d::kernel_ir_for, QFormat::Mxint5);
-    conv3d_bench_fmt!(bench_mxint6, mt_mxint6_conv3d::kernel_ir_for, QFormat::Mxint6);
-    conv3d_bench_fmt!(bench_mxint8, mt_mxint8_conv3d::kernel_ir_for, QFormat::Mxint8);
+    conv3d_bench_fmt!(bench_int2, ffai_int2_conv3d::kernel_ir_for, QFormat::Int2);
+    conv3d_bench_fmt!(bench_int3, ffai_int3_conv3d::kernel_ir_for, QFormat::Int3);
+    conv3d_bench_fmt!(bench_int4, ffai_int4_conv3d::kernel_ir_for, QFormat::Int4);
+    conv3d_bench_fmt!(bench_int5, ffai_int5_conv3d::kernel_ir_for, QFormat::Int5);
+    conv3d_bench_fmt!(bench_int6, ffai_int6_conv3d::kernel_ir_for, QFormat::Int6);
+    conv3d_bench_fmt!(bench_mxint2, ffai_mxint2_conv3d::kernel_ir_for, QFormat::Mxint2);
+    conv3d_bench_fmt!(bench_mxint3, ffai_mxint3_conv3d::kernel_ir_for, QFormat::Mxint3);
+    conv3d_bench_fmt!(bench_mxint4, ffai_mxint4_conv3d::kernel_ir_for, QFormat::Mxint4);
+    conv3d_bench_fmt!(bench_mxint5, ffai_mxint5_conv3d::kernel_ir_for, QFormat::Mxint5);
+    conv3d_bench_fmt!(bench_mxint6, ffai_mxint6_conv3d::kernel_ir_for, QFormat::Mxint6);
+    conv3d_bench_fmt!(bench_mxint8, ffai_mxint8_conv3d::kernel_ir_for, QFormat::Mxint8);
     // FP16-scale twins of the FP32-scaled formats — same element packing, only
     // the per-block scale is f16. C=256 ⇒ word-aligned for every width.
-    conv3d_bench_fmt!(bench_nvfp8_f16, mt_nvfp8_f16_conv3d::kernel_ir_for, QFormat::Nvfp8F16);
+    conv3d_bench_fmt!(bench_nvfp8_f16, ffai_nvfp8_f16_conv3d::kernel_ir_for, QFormat::Nvfp8F16);
     // fp8_e4m3_f16 reuses the nvfp8_f16 kernel (8-bit E4M3 + f16 scale).
-    conv3d_bench_fmt!(bench_fp8_e4m3_f16, mt_nvfp8_f16_conv3d::kernel_ir_for, QFormat::Fp8E4m3F16);
-    conv3d_bench_fmt!(bench_fp4_f16, mt_fp4_f16_conv3d::kernel_ir_for, QFormat::Fp4F16);
+    conv3d_bench_fmt!(
+        bench_fp8_e4m3_f16,
+        ffai_nvfp8_f16_conv3d::kernel_ir_for,
+        QFormat::Fp8E4m3F16
+    );
+    conv3d_bench_fmt!(bench_fp4_f16, ffai_fp4_f16_conv3d::kernel_ir_for, QFormat::Fp4F16);
     conv3d_bench_fmt!(
         bench_fp8_e5m2_f16,
-        mt_fp8_e5m2_f16_conv3d::kernel_ir_for,
+        ffai_fp8_e5m2_f16_conv3d::kernel_ir_for,
         QFormat::Fp8E5m2F16
     );
-    conv3d_bench_fmt!(bench_int2_f16, mt_int2_f16_conv3d::kernel_ir_for, QFormat::Int2F16);
-    conv3d_bench_fmt!(bench_int3_f16, mt_int3_f16_conv3d::kernel_ir_for, QFormat::Int3F16);
-    conv3d_bench_fmt!(bench_int4_f16, mt_int4_f16_conv3d::kernel_ir_for, QFormat::Int4F16);
-    conv3d_bench_fmt!(bench_int5_f16, mt_int5_f16_conv3d::kernel_ir_for, QFormat::Int5F16);
-    conv3d_bench_fmt!(bench_int6_f16, mt_int6_f16_conv3d::kernel_ir_for, QFormat::Int6F16);
-    conv3d_bench_fmt!(bench_int8_f16, mt_int8_f16_conv3d::kernel_ir_for, QFormat::Int8F16);
+    conv3d_bench_fmt!(bench_int2_f16, ffai_int2_f16_conv3d::kernel_ir_for, QFormat::Int2F16);
+    conv3d_bench_fmt!(bench_int3_f16, ffai_int3_f16_conv3d::kernel_ir_for, QFormat::Int3F16);
+    conv3d_bench_fmt!(bench_int4_f16, ffai_int4_f16_conv3d::kernel_ir_for, QFormat::Int4F16);
+    conv3d_bench_fmt!(bench_int5_f16, ffai_int5_f16_conv3d::kernel_ir_for, QFormat::Int5F16);
+    conv3d_bench_fmt!(bench_int6_f16, ffai_int6_f16_conv3d::kernel_ir_for, QFormat::Int6F16);
+    conv3d_bench_fmt!(bench_int8_f16, ffai_int8_f16_conv3d::kernel_ir_for, QFormat::Int8F16);
 }

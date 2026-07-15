@@ -55,7 +55,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_dequant_gemv_int4_expert_indexed<T>(
+pub fn ffai_dequant_gemv_int4_expert_indexed<T>(
     weights_stacked: Tensor<u32>,
     scales_stacked: Tensor<T>,
     biases_stacked: Tensor<T>,
@@ -104,7 +104,7 @@ pub fn mt_dequant_gemv_int4_expert_indexed<T>(
     }
 }
 
-/// New-syntax correctness test for `mt_dequant_gemv_int4_expert_indexed` — the
+/// New-syntax correctness test for `ffai_dequant_gemv_int4_expert_indexed` — the
 /// per-expert-indexed int4 dequant GEMV. Reduction-mode (one threadgroup per
 /// output row, `reduce_sum` across the threadgroup).
 ///
@@ -118,7 +118,7 @@ pub fn mt_dequant_gemv_int4_expert_indexed<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_dequant_gemv_int4_expert_indexed;
+    use super::ffai_dequant_gemv_int4_expert_indexed;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -198,7 +198,7 @@ pub mod kernel_tests {
         let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
         let x = unpack_f32(&pack_f32(&input_f, dt), dt);
         let expected = oracle(&w, &s, &b, &x, expert, out_dim, in_dim, group_size);
-        TestSetup::new(mt_dequant_gemv_int4_expert_indexed::kernel_ir_for(dt))
+        TestSetup::new(ffai_dequant_gemv_int4_expert_indexed::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("weights_stacked", u32_bytes(&w), DType::U32))
             .input(TestBuffer::from_vec("scales_stacked", pack_f32(&scales_f, dt), dt))
@@ -214,12 +214,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_dequant_gemv_int4_expert_indexed`. Production-ish
+/// New-syntax benchmark for `ffai_dequant_gemv_int4_expert_indexed`. Production-ish
 /// shape (out_dim/in_dim 4096, group_size 64, 8 experts). One TG per output row.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_dequant_gemv_int4_expert_indexed;
+    use super::ffai_dequant_gemv_int4_expert_indexed;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_gemv_int4_expert_indexed(dt: DType) -> BenchSetup {
@@ -230,7 +230,7 @@ pub mod kernel_benches {
         // Active stream: one expert's weight slab + its scales/biases + input + output.
         let bytes =
             out_dim * packs_per_row * 4 + 2 * out_dim * n_groups * sz + in_dim * sz + out_dim * sz;
-        BenchSetup::new(mt_dequant_gemv_int4_expert_indexed::kernel_ir_for(dt))
+        BenchSetup::new(ffai_dequant_gemv_int4_expert_indexed::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random(
                 "weights_stacked",

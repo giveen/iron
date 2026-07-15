@@ -47,7 +47,7 @@ pub fn run(args: &InitArgs) -> Result<(), CliError> {
     std::fs::create_dir_all(&bin_dir).map_err(CliError::Io)?;
 
     // Cargo.toml
-    let mt_version = env!("CARGO_PKG_VERSION");
+    let ffai_version = env!("CARGO_PKG_VERSION");
     let cargo_toml = format!(
         r#"[package]
 name = "{name}"
@@ -55,8 +55,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ffai-kernels = "{mt_version}"
-ffai-kernels-std = "{mt_version}"
+ffai-kernels = "{ffai_version}"
+ffai-kernels-std = "{ffai_version}"
 
 # Hidden subprocess binary used by the `ffaik` CLI for kernel discovery.
 # Install to project bin/ with: cargo install --path . --root .
@@ -73,17 +73,17 @@ use ffai_kernels_std::prelude::*;
 
 /// Element-wise ReLU: out[i] = max(0, src[i]).
 #[kernel]
-pub fn mt_relu<T: Float>(src: &[T], out: &mut [T], n: uint) {
+pub fn ffai_relu<T: Float>(src: &[T], out: &mut [T], n: uint) {
     let i = program_id::<0>();
     if i < n {
         out[i] = src[i].max(T::zero());
     }
 }
 
-#[bench_kernel(name = "mt_relu", dtypes = [f32, f16, bf16])]
+#[bench_kernel(name = "ffai_relu", dtypes = [f32, f16, bf16])]
 fn bench_relu(dt: DType) -> BenchSetup {
     let n = 1 << 20;
-    BenchSetup::elementwise("mt_relu", n, dt)
+    BenchSetup::elementwise("ffai_relu", n, dt)
 }
 "#;
     write_file(&src_dir.join("lib.rs"), lib_rs)?;

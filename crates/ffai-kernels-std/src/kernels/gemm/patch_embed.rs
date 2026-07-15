@@ -14,7 +14,7 @@
 //! the image and dots them with one weight row, no intermediate buffer.
 //!
 //! It differs from `conv2d` in layout, not arithmetic — `conv2d` keeps
-//! the NCHW image convention and writes NCHW output; `mt_patch_embed` takes
+//! the NCHW image convention and writes NCHW output; `ffai_patch_embed` takes
 //! the same NCHW image but treats the weight as a flat linear matrix
 //! `[hidden, patch_dim]` and writes transformer-token output
 //! `[num_patches, hidden]`, which is what a ViT block consumes directly.
@@ -46,7 +46,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_patch_embed<T>(
+pub fn ffai_patch_embed<T>(
     image: Tensor<T>,
     weight: Tensor<T>,
     bias: Tensor<T>,
@@ -93,7 +93,7 @@ pub fn mt_patch_embed<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_patch_embed;
+    use super::ffai_patch_embed;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn ramp(n: usize, period: usize, amp: f32) -> Vec<f32> {
@@ -164,7 +164,7 @@ pub mod kernel_tests {
         let bias = unpack_f32(&pack_f32(&bias_f, dt), dt);
         let expected =
             naive_patch_embed(&image, &weight, &bias, in_ch, in_h, in_w, patch_h, patch_w, hidden);
-        TestSetup::new(mt_patch_embed::kernel_ir_for(dt))
+        TestSetup::new(ffai_patch_embed::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("image", pack_f32(&image_f, dt), dt))
             .input(TestBuffer::from_vec("weight", pack_f32(&weight_f, dt), dt))
@@ -199,12 +199,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax bench for `mt_patch_embed` (ViT-L SigLIP stem shape).
+/// New-syntax bench for `ffai_patch_embed` (ViT-L SigLIP stem shape).
 /// Grid3D, `grid_1d(num_patches * hidden, 256)`; bytes_moved = output stream.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_patch_embed;
+    use super::ffai_patch_embed;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_patch_embed(dt: DType) -> BenchSetup {
@@ -215,7 +215,7 @@ pub mod kernel_benches {
         let num_patches = (in_h / patch_h) * (in_w / patch_w);
         let patch_dim = in_ch * patch_h * patch_w;
         let n_out = num_patches * hidden;
-        BenchSetup::new(mt_patch_embed::kernel_ir_for(dt))
+        BenchSetup::new(ffai_patch_embed::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("image", in_ch * in_h * in_w, dt))
             .buffer(BenchBuffer::random("weight", hidden * patch_dim, dt))

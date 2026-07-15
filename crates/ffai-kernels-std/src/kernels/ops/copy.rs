@@ -5,18 +5,18 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_copy<T>(a: Tensor<T>, out: Tensor<T>) {
+pub fn ffai_copy<T>(a: Tensor<T>, out: Tensor<T>) {
     let idx = program_id(0);
     store(out[idx], load(a[idx]));
 }
 
-/// New-syntax correctness for `mt_copy` (elementwise, bit-exact).
+/// New-syntax correctness for `ffai_copy` (elementwise, bit-exact).
 // Contiguous device-slice copy (split a packed buffer on-device).
 /// Copy a contiguous device slice `dst[i] = src[off + i]` — lets the Mamba
 /// in_proj output be split (z / xBC / dt) ON-DEVICE instead of via a host
 /// download, so the layer runs pure-async. `offbuf[0]` is the start offset.
 #[kernel]
-pub fn mt_slice<T>(
+pub fn ffai_slice<T>(
     src: Tensor<T>,
     mut dst: Tensor<T>,
     #[constexpr] off: u32,
@@ -31,14 +31,14 @@ pub fn mt_slice<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_copy;
+    use super::ffai_copy;
     use crate::utils::pack_f32;
 
     // Copy is bit-exact within the dtype, so the expected output is just the
     // input packed to `dt` — the GPU reproduces it byte for byte.
     fn setup(n: usize, dt: DType) -> TestSetup {
         let a: Vec<f32> = (0..n).map(|i| (i % 23) as f32 * 0.1 - 1.0).collect();
-        TestSetup::new(mt_copy::kernel_ir_for(dt))
+        TestSetup::new(ffai_copy::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
             .expect(TestBuffer::from_vec("out", pack_f32(&a, dt), dt))
@@ -46,27 +46,27 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_copy(dt: DType) -> TestSetup { setup(1024, dt) }
+    fn test_ffai_copy(dt: DType) -> TestSetup { setup(1024, dt) }
 }
 
-/// New-syntax benchmark for `mt_copy` (vs MLX `metal/copy.metal`).
+/// New-syntax benchmark for `ffai_copy` (vs MLX `metal/copy.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_copy;
+    use super::ffai_copy;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // 64M elements (MLX default elementwise size); reads `a`, writes `out`.
     //
     // Same shape as unary's `ub_ref`: MLX `metal/copy.metal` `v_copy<tn><tn>`
     // (`copy_v`, 1 element/thread) takes `src [[buffer(0)]]`, `dst [[buffer(1)]]`,
-    // `size` — so the reference binds `a` (shared by name with the MT input),
+    // `size` — so the reference binds `a` (shared by name with the FFAI input),
     // `out`, then the U32 element count. Legacy spec: input=Signed, tol=1e-6.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_copy(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_copy::kernel_ir_for(dt))
+        BenchSetup::new(ffai_copy::kernel_ir_for(dt))
             .buffer(input_buffer("a", n, dt, InputDomain::Signed))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
             .grid_1d(n, 256)
@@ -76,8 +76,8 @@ pub mod kernel_benches {
                     format!("v_copy{tn}{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/copy.metal")),
                 )
-                // "a" is shared by name with the MT input above (same data); the
-                // runner overrides this placeholder with the MT bytes.
+                // "a" is shared by name with the FFAI input above (same data); the
+                // runner overrides this placeholder with the FFAI bytes.
                 .buffer(BenchBuffer::zeros("a", n, dt))
                 .buffer(BenchBuffer::zeros("out", n, dt).output())
                 .buffer(BenchBuffer::from_vec("n", (n as u32).to_le_bytes().to_vec(), DType::U32))

@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! GGUF IQ2_XXS dequant — raw-bytes variant.
 //!
-//! Same algorithm as `mt_gguf_dequant_iq2_xxs` but reads `qs` from
+//! Same algorithm as `ffai_gguf_dequant_iq2_xxs` but reads `qs` from
 //! the on-disk 66-byte block layout directly, skipping the CPU
 //! preprocess that split each block into a separate `qs_u32` buffer.
 //!
@@ -16,7 +16,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gguf_dequant_iq2_xxs_raw<T>(
+pub fn ffai_gguf_dequant_iq2_xxs_raw<T>(
     raw_bytes: Tensor<u8>,
     d_f32: Tensor<f32>,
     grid: Tensor<u8>,
@@ -70,12 +70,12 @@ pub fn mt_gguf_dequant_iq2_xxs_raw<T>(
 pub mod kernel_tests {
     use ffai_kernels::test::*;
 
-    use super::mt_gguf_dequant_iq2_xxs_raw;
+    use super::ffai_gguf_dequant_iq2_xxs_raw;
 
     #[test]
     fn codegen_iq2_xxs_raw_smoke() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let ir = mt_gguf_dequant_iq2_xxs_raw::kernel_ir_for(dt);
+            let ir = ffai_gguf_dequant_iq2_xxs_raw::kernel_ir_for(dt);
             assert!(!ir.body.ops.is_empty(), "kernel body emitted no ops for {dt:?}");
             assert!(ir.params.iter().any(|p| p.name == "raw_bytes"), "missing raw_bytes param");
         }
@@ -85,13 +85,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gguf_dequant_iq2_xxs_raw;
+    use super::ffai_gguf_dequant_iq2_xxs_raw;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_iq2_xxs_raw(dt: DType) -> BenchSetup {
         let n = 4096 * 4096usize;
         let n_blocks = n / 256;
-        BenchSetup::new(mt_gguf_dequant_iq2_xxs_raw::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gguf_dequant_iq2_xxs_raw::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("raw_bytes", n_blocks * 66, DType::U8))
             .buffer(BenchBuffer::random("d_f32", n_blocks, DType::F32))
             .buffer(BenchBuffer::random("grid", 2048, DType::U8))

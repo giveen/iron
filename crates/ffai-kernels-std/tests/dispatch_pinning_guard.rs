@@ -3,7 +3,7 @@
 //! End-to-end check that the runtime dispatch verifier rejects a GPU-pinning
 //! threadgroup geometry *before* it reaches the (non-preemptive) GPU.
 //!
-//! `mt_rms_norm` is a Reduction-mode kernel that derives `n_simd = lsize / 32`
+//! `ffai_rms_norm` is a Reduction-mode kernel that derives `n_simd = lsize / 32`
 //! and folds the row with a slow-path reduce. Dispatched with fewer than 32
 //! threads per threadgroup, `n_simd == 0` and the reduction loop would spin
 //! forever, hanging the device. The verifier must turn that into a clean
@@ -24,9 +24,9 @@ use ffai_kernels::{
     Context,
     core::{dtype::DType, ir::KernelMode},
 };
-use ffai_kernels_std::kernels::norm::rms_norm::mt_rms_norm;
+use ffai_kernels_std::kernels::norm::rms_norm::ffai_rms_norm;
 
-/// Buffers for an `n`-wide single-row `mt_rms_norm` dispatch (constexpr `n`
+/// Buffers for an `n`-wide single-row `ffai_rms_norm` dispatch (constexpr `n`
 /// is passed as a 4-byte buffer, matching the harness's dispatch convention).
 fn rms_norm_buffers(n: usize) -> BTreeMap<String, Vec<u8>> {
     let mut b = BTreeMap::new();
@@ -39,7 +39,7 @@ fn rms_norm_buffers(n: usize) -> BTreeMap<String, Vec<u8>> {
 }
 
 fn rms_norm_kernel() -> ffai_kernels::core::ir::Kernel {
-    let mut k = mt_rms_norm::kernel_ir_for(DType::F32);
+    let mut k = ffai_rms_norm::kernel_ir_for(DType::F32);
     k.mode = KernelMode::Reduction;
     k
 }

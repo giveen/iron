@@ -24,13 +24,13 @@
 //! MSL. Callers using `MslGenerator::default()` get the safe slow path
 //! (matching pre-specialization behavior — `None` is the default).
 //!
-//! This is the codegen counterpart to PR #49's softmax small-N bench, which
+//! This is the codegen counterpart to the softmax small-N bench, which
 //! pinned the 1.65× speedup at tpg=32 to "no second-level reduction overhead";
 //! before this change, the codegen emitted the two-level path unconditionally
 //! and the win at small N came from idle-thread elimination alone. With the
 //! `expected_tpg <= simd_size` specialization in place, every Reduction-mode
-//! kernel whose bench spec pins `tpg ≤ 32` (e.g. `mt_rms_norm_small`, the
-//! small-N softmax variant from #49) sheds the two `threadgroup_barrier`
+//! kernel whose bench spec pins `tpg ≤ 32` (e.g. `ffai_rms_norm_small`, the
+//! small-N softmax variant) sheds the two `threadgroup_barrier`
 //! calls + the 32-slot threadgroup buffer roundtrip in its generated MSL,
 //! no kernel-source changes required.
 
@@ -65,7 +65,7 @@ impl super::MslGenerator {
                 ReduceKind::Sum | ReduceKind::Mean => ("simd_sum", "0.0f"),
                 ReduceKind::Max => ("simd_max", "-INFINITY"),
                 ReduceKind::Min => ("simd_min", "INFINITY"),
-                ReduceKind::Product => ("__mt_simd_product", "1.0f"),
+                ReduceKind::Product => ("__ffai_simd_product", "1.0f"),
             };
 
             // Compile-time specialization: when the dispatched TPG is known
@@ -123,7 +123,7 @@ impl super::MslGenerator {
             ReduceKind::Max => wl!(out, "{pad}float {result_var} = simd_max(float({input_var}));"),
             ReduceKind::Min => wl!(out, "{pad}float {result_var} = simd_min(float({input_var}));"),
             ReduceKind::Product => {
-                wl!(out, "{pad}float {result_var} = __mt_simd_product(float({input_var}));")
+                wl!(out, "{pad}float {result_var} = __ffai_simd_product(float({input_var}));")
             },
             ReduceKind::Mean => {
                 wl!(

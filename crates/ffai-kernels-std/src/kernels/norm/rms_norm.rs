@@ -13,7 +13,7 @@
 //! `tests/rms_norm_per_head_gpu.rs`.
 //!
 //! Models with head_dim < 128 (older 7B-class, head_dim=64) dispatch
-//! [`mt_rms_norm_small`] instead, which uses a 2-elements-per-thread
+//! [`ffai_rms_norm_small`] instead, which uses a 2-elements-per-thread
 //! layout so head_dim=64 still hits the tpg=32 minimum.
 //!
 //! ## DISPATCH INVARIANTS
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
 ///
 /// ```rust
 /// // In the caller kernel body (after computing per-thread partial_ssq):
-/// let inv_rms = mt_rms_inv_scalar(partial_ssq, eps_buf, n);
+/// let inv_rms = ffai_rms_inv_scalar(partial_ssq, eps_buf, n);
 /// ```
 ///
 /// - `partial_ssq` → `KernelCallArg::Value`: the callee's param-load is
@@ -72,18 +72,18 @@ use ffai_kernels::kernel;
 ///
 /// ## Standalone vs inlined semantics
 ///
-/// `mt_rms_inv_scalar` is a **valid standalone kernel**: `partial_ssq` is a
+/// `ffai_rms_inv_scalar` is a **valid standalone kernel**: `partial_ssq` is a
 /// real 1-element `Tensor<f32>` and `load(partial_ssq[0u32])` is a legal
 /// memory access. It can be dispatched directly (e.g. in tests) by passing a
 /// 1-element buffer containing the pre-summed partial sum.
 ///
-/// When called via the cross-kernel DSL (`let inv = mt_rms_inv_scalar(g, ...)`)
+/// When called via the cross-kernel DSL (`let inv = ffai_rms_inv_scalar(g, ...)`)
 /// the caller passes `g` as a `KernelCallArg::Value` — a pre-computed scalar
 /// already in registers. `KernelInlinePass` detects the `Value` arg, skips the
 /// load, and substitutes `g` directly, eliminating the memory round-trip.
 /// This is load-forwarding: the callee is correct both ways.
 #[kernel]
-pub fn mt_rms_inv_scalar(
+pub fn ffai_rms_inv_scalar(
     partial_ssq: Tensor<f32>,
     eps_buf: Tensor<f32>,
     mut out: Tensor<f32>,
@@ -96,7 +96,7 @@ pub fn mt_rms_inv_scalar(
 }
 
 #[kernel]
-pub fn mt_rms_norm<T>(
+pub fn ffai_rms_norm<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     out: Tensor<T>,
@@ -146,16 +146,16 @@ pub fn mt_rms_norm<T>(
 /// `N = tpg * 2`. Covers per-head dispatch at head_dim ∈ {64, 128,
 /// 192, 256} (head_dim=64 → tpg=32 hits the single-simdgroup
 /// minimum that the 4-element variant misses). At head_dim ≥ 128
-/// the 4-element [`mt_rms_norm`] has better ILP per lane and is
+/// the 4-element [`ffai_rms_norm`] has better ILP per lane and is
 /// preferred; this variant exists to cover the small-head_dim
 /// regime (older 7B-class architectures) without a dispatch-time
 /// fallback.
 ///
-/// Algorithm-identical to `mt_rms_norm`: f32 accumulator for the
+/// Algorithm-identical to `ffai_rms_norm`: f32 accumulator for the
 /// sum-of-squares, threadgroup-wide `reduce_sum`, `rsqrt(ssq/n + eps)`
 /// scaling, per-element output store rounded through `T`.
 #[kernel]
-pub fn mt_rms_norm_small<T>(
+pub fn ffai_rms_norm_small<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     out: Tensor<T>,
@@ -179,7 +179,7 @@ pub fn mt_rms_norm_small<T>(
 }
 
 /// Wide-row RMSNorm — handles rows wider than the 4096-element cap of
-/// [`mt_rms_norm`]. Where `mt_rms_norm` fixes `N = TPG * 4` (so a
+/// [`ffai_rms_norm`]. Where `ffai_rms_norm` fixes `N = TPG * 4` (so a
 /// 1024-thread group tops out at 4096), this kernel has each thread
 /// *stride* over the row in steps of one full threadgroup, so any `n`
 /// is covered regardless of the threadgroup size. Needed for
@@ -189,7 +189,7 @@ pub fn mt_rms_norm_small<T>(
 /// sum-of-squares and reduces it threadgroup-wide; pass 2 re-reads `x`
 /// and writes the scaled output. The per-thread element count is
 /// `ceil(n / TPG)` and varies with `n`, so the `x` values cannot be
-/// held in registers across the reduction the way `mt_rms_norm` does
+/// held in registers across the reduction the way `ffai_rms_norm` does
 /// — hence the re-read. RMSNorm is memory-bound; the extra `x` read is
 /// the price of unbounded `n`.
 ///
@@ -203,10 +203,10 @@ pub fn mt_rms_norm_small<T>(
 ///   `grid = (nRows * TPG, 1, 1)`, `tg = (TPG, 1, 1)`.
 /// - **`n` may be any positive value.** The strided loops bound on
 ///   `n`, so no `N = TPG * k` relationship is required; threads whose
-///   stride walks past `n` simply stop. Unlike `mt_rms_norm` there is
+///   stride walks past `n` simply stop. Unlike `ffai_rms_norm` there is
 ///   no 128-alignment or `n ≤ 4096` requirement.
 #[kernel]
-pub fn mt_rms_norm_wide<T>(
+pub fn ffai_rms_norm_wide<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     out: Tensor<T>,
@@ -252,13 +252,13 @@ pub fn mt_rms_norm_wide<T>(
 ///   silu(z)[i]  = z[i] / (1 + exp(-z[i]))
 ///   out[i] = y_normed[i] * silu(z)[i]
 ///
-/// Same `N = TPG * 4` invariant as `mt_rms_norm` — Dv is multiple of
+/// Same `N = TPG * 4` invariant as `ffai_rms_norm` — Dv is multiple of
 /// 4 on every shipped Qwen3 hybrid (128 / 256 / 512). One thread owns
 /// 4 consecutive `Dv`-axis elements; the OOB clamp + mask copies the
-/// `mt_rms_norm` template so a wrong-TPG dispatch fails loudly rather
+/// `ffai_rms_norm` template so a wrong-TPG dispatch fails loudly rather
 /// than silently miscomputing.
 #[kernel]
-pub fn mt_gated_mixer_norm<T>(
+pub fn ffai_gated_mixer_norm<T>(
     y: Tensor<f32>,
     z: Tensor<T>,
     w: Tensor<T>,
@@ -273,7 +273,7 @@ pub fn mt_gated_mixer_norm<T>(
     let safe_col = select(in_bounds, col, 0u32);
     let safe_base = rs + safe_col;
     let base = rs + col;
-    // y is already fp32, but mirror the mt_rms_norm load pattern
+    // y is already fp32, but mirror the ffai_rms_norm load pattern
     // (`.cast::<f32>()` after each load) — the vectorize pass on this
     // codegen reads the cast as the consumer hook for the float4
     // load+extract emit. Removing the cast leaves the vectorize pass
@@ -298,11 +298,11 @@ pub fn mt_gated_mixer_norm<T>(
         let z1 = load(z[base + 1u32]).cast::<f32>();
         let z2 = load(z[base + 2u32]).cast::<f32>();
         let z3 = load(z[base + 3u32]).cast::<f32>();
-        // silu(z) = z / (1 + exp(-z)). Inlined per the `mt_sigmoid`
+        // silu(z) = z / (1 + exp(-z)). Inlined per the `ffai_sigmoid`
         // precedent — Activation::Sigmoid folds into FusedElementwise
         // and the per-kernel feature analyzer would miss it, so the
-        // emitted MSL stays self-contained without an `mt_sigmoid`
-        // helper. Same as `mt_gated_delta_prep_step`'s `beta` path.
+        // emitted MSL stays self-contained without an `ffai_sigmoid`
+        // helper. Same as `ffai_gated_delta_prep_step`'s `beta` path.
         let silu0 = z0 / (1.0f32 + exp(0.0f32 - z0));
         let silu1 = z1 / (1.0f32 + exp(0.0f32 - z1));
         let silu2 = z2 / (1.0f32 + exp(0.0f32 - z2));
@@ -321,12 +321,12 @@ mod wide_tests {
         core::{DType, ir::KernelMode},
     };
 
-    use super::mt_rms_norm_wide;
+    use super::ffai_rms_norm_wide;
 
     fn msl_for(dt: DType) -> String {
-        let mut k = mt_rms_norm_wide::kernel_ir_for(dt);
+        let mut k = ffai_rms_norm_wide::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_rms_norm_wide codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_rms_norm_wide codegen succeeds")
     }
 
     #[test]
@@ -335,21 +335,21 @@ mod wide_tests {
             let src = msl_for(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_rms_norm_wide"),
-                "MSL for {dt:?} should declare mt_rms_norm_wide:\n{src}",
+                src.contains("kernel void ffai_rms_norm_wide"),
+                "MSL for {dt:?} should declare ffai_rms_norm_wide:\n{src}",
             );
         }
     }
 }
 
-/// New-syntax correctness for `mt_rms_norm` (Reduction mode, one threadgroup
+/// New-syntax correctness for `ffai_rms_norm` (Reduction mode, one threadgroup
 /// per row, `tpg = n/4` — `n` a multiple of 128). Per-row oracle on
 /// dtype-rounded inputs: `out_i = x_i / sqrt(mean(x²) + eps) * w_i`. The
 /// rms_norm_small/wide/gated variants stay for the complex-mlx PR.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_gated_mixer_norm, mt_rms_norm, mt_rms_norm_wide};
+    use super::{ffai_gated_mixer_norm, ffai_rms_norm, ffai_rms_norm_wide};
     use crate::utils::{pack_f32, unpack_f32};
 
     // Per-row oracle: out_i = x_i / sqrt(mean(x²) + eps) * w_i, on
@@ -386,7 +386,7 @@ pub mod kernel_tests {
         let (w, x) = make_inputs(rows, n);
         let w_dt = unpack_f32(&pack_f32(&w, dt), dt);
         let expected = expected_rms(&x, &w_dt, rows, n, eps, dt);
-        TestSetup::new(mt_rms_norm::kernel_ir_for(dt))
+        TestSetup::new(ffai_rms_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
@@ -398,7 +398,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
-    fn test_mt_rms_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
+    fn test_ffai_rms_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
 
     // Non-power-of-two TPG: n=1536 (Qwen2.5-1.5B hidden) → tpg = n/4 = 384
     // = 2^7·3, which is NOT a power of two. The threadgroup barrier-tree
@@ -409,11 +409,11 @@ pub mod kernel_tests {
     // power-of-two tpg (512→128), so this regression went undetected and
     // broke real-model inference on the Vulkan/SPIR-V backend.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
-    fn test_mt_rms_norm_npot_tpg(dt: DType) -> TestSetup { setup(3, 1536, dt) }
+    fn test_ffai_rms_norm_npot_tpg(dt: DType) -> TestSetup { setup(3, 1536, dt) }
 
     // Non-128-aligned wide-row coverage (SmolVLM2 d=960; 960 = 7·128 +
-    // 64 is NOT a multiple of 128, so `mt_rms_norm` can't dispatch it).
-    // `mt_rms_norm_wide` strides over the row with a fixed TPG=1024 and
+    // 64 is NOT a multiple of 128, so `ffai_rms_norm` can't dispatch it).
+    // `ffai_rms_norm_wide` strides over the row with a fixed TPG=1024 and
     // imposes no `N = TPG·k` / 128-alignment constraint, so it covers
     // arbitrary widths. One threadgroup per row, TPG=1024.
     fn setup_wide(rows: usize, n: usize, dt: DType) -> TestSetup {
@@ -422,7 +422,7 @@ pub mod kernel_tests {
         let (w, x) = make_inputs(rows, n);
         let w_dt = unpack_f32(&pack_f32(&w, dt), dt);
         let expected = expected_rms(&x, &w_dt, rows, n, eps, dt);
-        TestSetup::new(mt_rms_norm_wide::kernel_ir_for(dt))
+        TestSetup::new(ffai_rms_norm_wide::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
@@ -434,16 +434,16 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-4, 2e-2, 1e-1])]
-    fn test_mt_rms_norm_wide_d960(dt: DType) -> TestSetup { setup_wide(3, 960, dt) }
+    fn test_ffai_rms_norm_wide_d960(dt: DType) -> TestSetup { setup_wide(3, 960, dt) }
 
     // Beyond a single TPG sweep: n=5376 = 5·1024 + 256 forces the strided loop
     // to run 6 iterations with an uneven tail (threads 0..256 do the 6th pass,
     // 256..1024 do only 5) — the multi-iteration path d960 (single sweep)
     // leaves dormant. Gemma-class wide hidden, single row.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-4, 2e-2, 1e-1])]
-    fn test_mt_rms_norm_wide_multi_iter(dt: DType) -> TestSetup { setup_wide(1, 5376, dt) }
+    fn test_ffai_rms_norm_wide_multi_iter(dt: DType) -> TestSetup { setup_wide(1, 5376, dt) }
 
-    // ── mt_gated_mixer_norm: out = (y · rms(y) · w) · silu(z) ──────────────
+    // ── ffai_gated_mixer_norm: out = (y · rms(y) · w) · silu(z) ──────────────
     //
     // Gated-DeltaNet output norm: RMS-normalise the f32 mixer output `y` over
     // the Dv axis, scale by per-channel `w`, then gate by `silu(z)`. `y` is
@@ -465,7 +465,7 @@ pub mod kernel_tests {
                 expected[r * n + i] = (y[r * n + i] * rms * w[i]) * silu(z[r * n + i]);
             }
         }
-        TestSetup::new(mt_gated_mixer_norm::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_mixer_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("y", pack_f32(&y, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("z", pack_f32(&z_raw, dt), dt))
@@ -480,24 +480,24 @@ pub mod kernel_tests {
     // Dv=128 (TPG 32, single simdgroup) and Dv=256 (TPG 64, cross-simdgroup
     // reduce) — the two Qwen3-hybrid mixer widths.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 2e-2])]
-    fn test_mt_gated_mixer_norm(dt: DType) -> TestSetup { setup_mixer(8, 128, dt) }
+    fn test_ffai_gated_mixer_norm(dt: DType) -> TestSetup { setup_mixer(8, 128, dt) }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 2e-2])]
-    fn test_mt_gated_mixer_norm_dv256(dt: DType) -> TestSetup { setup_mixer(4, 256, dt) }
+    fn test_ffai_gated_mixer_norm_dv256(dt: DType) -> TestSetup { setup_mixer(4, 256, dt) }
 }
 
-/// New-syntax benchmark for `mt_rms_norm` (vs MLX `metal/rms_norm.metal`).
+/// New-syntax benchmark for `ffai_rms_norm` (vs MLX `metal/rms_norm.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_gated_mixer_norm, mt_rms_norm, mt_rms_norm_small, mt_rms_norm_wide};
+    use super::{ffai_gated_mixer_norm, ffai_rms_norm, ffai_rms_norm_small, ffai_rms_norm_wide};
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // Build the MLX `rms_single_row` (`rms{tn}`) reference for a `(rows, n)`
     // RMSNorm bench. Buffer order: `x`[[buffer(0)]], `w`[[buffer(1)]],
     // `out`[[buffer(2)]], `eps`(float)[[buffer(3)]], `axis_size`(uint)[[buffer(4)]],
-    // `w_stride`(uint)[[buffer(5)]]. x/w/eps_buf are shared by name with the MT
+    // `w_stride`(uint)[[buffer(5)]]. x/w/eps_buf are shared by name with the FFAI
     // inputs; w_stride=1 (contiguous per-channel weight, the legacy `U32V(1)`).
-    // `eps` reuses the MT `eps_buf` (1e-5, F32) so both sides match.
+    // `eps` reuses the FFAI `eps_buf` (1e-5, F32) so both sides match.
     //
     // `rms_single_row` reads N_READS=4 elements per thread (`lid*4`), so MLX
     // dispatches it at one threadgroup per row, tpg=1024 (legacy RowNorm
@@ -512,7 +512,7 @@ pub mod kernel_benches {
             format!("rms{tn}"),
             include_str!(concat!(env!("OUT_DIR"), "/metal/rms_norm.metal")),
         )
-        // x/w/eps_buf shared by name with the MT inputs (placeholders).
+        // x/w/eps_buf shared by name with the FFAI inputs (placeholders).
         .buffer(BenchBuffer::zeros("x", rows * n, dt))
         .buffer(BenchBuffer::zeros("w", n, dt))
         .buffer(BenchBuffer::zeros("out", rows * n, dt).output())
@@ -526,7 +526,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 4096usize);
-        BenchSetup::new(mt_rms_norm::kernel_ir_for(dt))
+        BenchSetup::new(ffai_rms_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("x", rows * n, dt, InputDomain::Signed))
             .buffer(input_buffer("w", n, dt, InputDomain::Positive))
@@ -541,11 +541,11 @@ pub mod kernel_benches {
     // rms_norm_small: 2 elements per thread → tpg = n/2. Per-head shape
     // (head_dim=64, 1024 rows) matching the legacy bench(b=1024, n=64). The
     // MLX reference (`rms_single_row`, 4 elements/thread) is the same kernel as
-    // the parent bench; only the MT-side per-thread layout differs.
+    // the parent bench; only the FFAI-side per-thread layout differs.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm_small(dt: DType) -> BenchSetup {
         let (rows, n) = (1024usize, 64usize);
-        BenchSetup::new(mt_rms_norm_small::kernel_ir_for(dt))
+        BenchSetup::new(ffai_rms_norm_small::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("x", rows * n, dt, InputDomain::Signed))
             .buffer(input_buffer("w", n, dt, InputDomain::Positive))
@@ -558,13 +558,13 @@ pub mod kernel_benches {
     }
 
     // rms_norm_wide: strided over the row, one threadgroup (tpg=1024) per
-    // row. Handles rows wider than the 4096 cap of mt_rms_norm — use a
+    // row. Handles rows wider than the 4096 cap of ffai_rms_norm — use a
     // large-hidden shape (n=5376, Gemma-class) to exercise the strided path.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm_wide(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 5376usize);
         const TPG: u32 = 1024;
-        BenchSetup::new(mt_rms_norm_wide::kernel_ir_for(dt))
+        BenchSetup::new(ffai_rms_norm_wide::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", rows * n, dt))
             .buffer(BenchBuffer::random("w", n, dt))
@@ -580,7 +580,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gated_mixer_norm(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 512usize);
-        BenchSetup::new(mt_gated_mixer_norm::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_mixer_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("y", rows * n, DType::F32))
             .buffer(BenchBuffer::random("z", rows * n, dt))

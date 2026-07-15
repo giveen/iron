@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Prefill SDPA via `simdgroup_multiply_accumulate` (MMA) — `mt_sdpa_prefill_mma`.
+//! Prefill SDPA via `simdgroup_multiply_accumulate` (MMA) — `ffai_sdpa_prefill_mma`.
 //!
 //! MLX-style dd-loop (steel_attention.h `tile_matmad` body): per K-block, a
 //! single Q simdgroup-matrix fragment is reloaded per d_frag iteration,
@@ -28,7 +28,7 @@
 //!    -6%) — mild regression we accept for the bf16 swing. M5 unchanged on
 //!    all dtypes (bf16 already ~106% baseline, stays there).
 //!
-//! Geometry mirrors `mt_sdpa_prefill` (BQ=32, BK=16, BD=128, WM=4, WN=1,
+//! Geometry mirrors `ffai_sdpa_prefill` (BQ=32, BK=16, BD=128, WM=4, WN=1,
 //! tpg=128 = 4 SGs sharing one K/V TG cache). Per K-block per SG:
 //!   1. Coop load K, V tiles into TG memory (Q preloaded outside loop).
 //!   2. Q·K^T → S via dd-loop: 16 d_frags × 2 k_chunks = 32 matmuls per SG.
@@ -45,7 +45,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_prefill_mma_bf16<T>(
+pub fn ffai_sdpa_prefill_mma_bf16<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,

@@ -11,7 +11,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gemv<T>(mat: Tensor<T>, vec: Tensor<T>, out: Tensor<T>, #[constexpr] k: u32) {
+pub fn ffai_gemv<T>(mat: Tensor<T>, vec: Tensor<T>, out: Tensor<T>, #[constexpr] k: u32) {
     let row = program_id::<0>();
     let rs = row * k;
     let re = rs + k;
@@ -20,16 +20,16 @@ pub fn mt_gemv<T>(mat: Tensor<T>, vec: Tensor<T>, out: Tensor<T>, #[constexpr] k
     store(out[row], result);
 }
 
-/// New-syntax correctness for `mt_gemv` (Reduction, one threadgroup per row;
+/// New-syntax correctness for `ffai_gemv` (Reduction, one threadgroup per row;
 /// `out[r] = Σ_j mat[r,j]·vec[j]`). Oracle on dtype-rounded inputs.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gemv;
+    use super::ffai_gemv;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-1, 1.0])]
-    fn test_mt_gemv(dt: DType) -> TestSetup {
+    fn test_ffai_gemv(dt: DType) -> TestSetup {
         let (m, k) = (16usize, 256usize);
         let mat: Vec<f32> = (0..m * k).map(|i| ((i % 17) as f32 - 8.0) * 0.01).collect();
         let vec: Vec<f32> = (0..k).map(|j| ((j % 13) as f32 - 6.0) * 0.02).collect();
@@ -37,7 +37,7 @@ pub mod kernel_tests {
         let vec_dt = unpack_f32(&pack_f32(&vec, dt), dt);
         let expected: Vec<f32> =
             (0..m).map(|r| (0..k).map(|j| mat_dt[r * k + j] * vec_dt[j]).sum()).collect();
-        TestSetup::new(mt_gemv::kernel_ir_for(dt))
+        TestSetup::new(ffai_gemv::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("mat", pack_f32(&mat, dt), dt))
             .input(TestBuffer::from_vec("vec", pack_f32(&vec, dt), dt))
@@ -48,11 +48,11 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_gemv` (vs MLX `metal/gemv.metal`).
+/// New-syntax benchmark for `ffai_gemv` (vs MLX `metal/gemv.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gemv;
+    use super::ffai_gemv;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -77,15 +77,15 @@ pub mod kernel_benches {
         // With `nc0` (kDoNCBatch=false) the non-batch branch still dereferences
         // `vector_batch_stride[0]` and `matrix_batch_stride[0]` (×tid.z=0), so
         // those two int64 buffers must be present (value 0); buffers 13/14 are
-        // axpby-only and left unbound. `mat`/`vec` are shared by name with the MT
+        // axpby-only and left unbound. `mat`/`vec` are shared by name with the FFAI
         // inputs (placeholders) so both kernels see identical data. tol floor 1e-2
-        // is the legacy gemv reduction floor (MT folds the dot in f32; MLX
+        // is the legacy gemv reduction floor (FFAI folds the dot in f32; MLX
         // accumulates in the simdgroup acc dtype).
         // `mat`/`vec` seeded `Signed` (period-8 `[-3..3]`, nan-free, finite dot
         // over K) rather than raw `BenchBuffer::random` (random f32 *bytes* alias
         // to inf/nan and would poison the A/B); the runner shares these exact
         // bytes with the reference by name.
-        BenchSetup::new(mt_gemv::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gemv::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("mat", m * k, dt, InputDomain::Signed))
             .buffer(input_buffer("vec", k, dt, InputDomain::Signed))
@@ -100,7 +100,7 @@ pub mod kernel_benches {
                     format!("gemv_{tn}_bm4_bn1_sm1_sn32_tm4_tn4_nc0_axpby0"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/gemv.metal")),
                 )
-                // mat[[0]] / in_vec[[1]] shared by name with the MT inputs.
+                // mat[[0]] / in_vec[[1]] shared by name with the FFAI inputs.
                 .buffer(BenchBuffer::zeros("mat", m * k, dt))
                 .buffer(BenchBuffer::zeros("vec", k, dt))
                 // bias[[2]] — unused at axpby0, a 1-element placeholder.

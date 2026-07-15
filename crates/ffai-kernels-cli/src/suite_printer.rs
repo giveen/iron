@@ -84,8 +84,8 @@ impl SuitePrinter {
     /// Print one `ProtocolMessage::BenchResult` line (Phase 2 subprocess path).
     ///
     /// Rows are grouped under an op header (the kernel name stripped of its
-    /// `mt_` prefix / dtype suffix), with one compact row per (dtype × shape):
-    /// `  ✓/✗  <name> [<dtype>]  <shape>  <mt> GB/s  (ref: <ref>)  <pct>%`.
+    /// `ffai_` prefix / dtype suffix), with one compact row per (dtype × shape):
+    /// `  ✓/✗  <name> [<dtype>]  <shape>  <ffai> GB/s  (ref: <ref>)  <pct>%`.
     /// Full shared-column-width alignment with `print_batch` is still a
     /// follow-up once all commands are subprocess-based.
     pub fn print_bench_result(&mut self, r: &ProtoBenchResult) {
@@ -111,14 +111,14 @@ impl SuitePrinter {
             format!("  {}", paint_stdout(&r.shape, Style::new().fg(Color::BrightBlack)))
         };
         let mt = paint_stdout(
-            format!("{:.1} GB/s", r.mt_gbps),
+            format!("{:.1} GB/s", r.ffai_gbps),
             Style::new().fg(Color::BrightWhite).bold(),
         );
         let ref_part = match r.ref_gbps {
             Some(rg) => paint_stdout(format!("ref {rg:.1}"), Style::new().fg(Color::BrightBlack)),
             None => paint_stdout("no ref", Style::new().fg(Color::BrightBlack).dim()),
         };
-        let pct_part = match r.mt_pct {
+        let pct_part = match r.ffai_pct {
             Some(p) => {
                 let style = if p >= 90.0 {
                     Style::new().fg(Color::Green).bold()
@@ -174,21 +174,21 @@ impl SuitePrinter {
         let sep = col_sep();
         // Column headers use the same muted bold as the rest of the CLI's labels
         // (cf. `ffaik device`): BrightBlack-bold headers recede so the BrightWhite
-        // data values stand out. (Was BrightWhite-bold, which clashed with #255.)
+        // data values stand out. (Was BrightWhite-bold, which clashed with the value colour.)
         let bold = Style::new().fg(Color::BrightBlack).bold();
 
-        // Default columns: Shape │ MT(µs) │ Ref(perf) │ MT(perf) │ MT% │ GFLOP/s [│ ok].
+        // Default columns: Shape │ FFAI(µs) │ Ref(perf) │ FFAI(perf) │ FFAI % │ GFLOP/s [│ ok].
         let mut hdr = format!(
             "  {}  {} {} {} {} {} {} {} {} {} {}",
             paint_stdout(pad_left("Shape", w.shape), bold),
             sep,
-            paint_stdout(pad_right("MT(µs)", w.mt_us), bold),
+            paint_stdout(pad_right("FFAI(µs)", w.ffai_us), bold),
             sep,
             paint_stdout(pad_right(&format!("Ref({metric})"), w.ref_perf), bold),
             sep,
-            paint_stdout(pad_right(&format!("MT({metric})"), w.mt_perf), bold),
+            paint_stdout(pad_right(&format!("FFAI({metric})"), w.ffai_perf), bold),
             sep,
-            paint_stdout(pad_right("MT%", w.pct), bold),
+            paint_stdout(pad_right("FFAI %", w.pct), bold),
             sep,
             paint_stdout(pad_right("GFLOP/s", w.gflops), bold),
         );
@@ -239,7 +239,7 @@ impl SuitePrinter {
         println!("  {op}");
         println!("{hdr}");
 
-        // Columns sharing a " │ " gap: Shape, MT(µs), Ref, MT, MT%, GFLOP/s (+ok).
+        // Columns sharing a " │ " gap: Shape, FFAI(µs), Ref, FFAI, FFAI %, GFLOP/s (+ok).
         let n_cols: usize = if self.show_correctness { 7 } else { 6 };
         let gaps = (n_cols.saturating_sub(1)) * 3;
         let timing_cols = if self.verbose >= 2 { 5 + 3 + 5 + 3 + 5 + 3 } else { 0 };
@@ -258,10 +258,10 @@ impl SuitePrinter {
         };
         let total_w = 4
             + w.shape
-            + w.mt_us
+            + w.ffai_us
             + gaps
             + w.ref_perf
-            + w.mt_perf
+            + w.ffai_perf
             + w.pct
             + w.gflops
             + if self.show_correctness { w.ck } else { 0 }
@@ -277,19 +277,19 @@ impl SuitePrinter {
 
         let shape =
             paint_stdout(pad_left(result.shape(), w.shape), Style::new().fg(Color::BrightWhite));
-        let mt_us_cell = fmt_latency(result.mt_us(), w.mt_us, true);
+        let ffai_us_cell = fmt_latency(result.ffai_us(), w.ffai_us, true);
         let ref_s = fmt_perf(result.ref_perf(), metric, "—");
-        let mt_s = fmt_perf(result.mt_perf(), metric, "NYI");
+        let ffai_s = fmt_perf(result.ffai_perf(), metric, "NYI");
         let pct_s = result.pct().map(|p| format!("{p:.0}%")).unwrap_or_else(|| "—".into());
 
         let ref_cell = style_reference(&pad_right(&ref_s, w.ref_perf), result.ref_perf());
-        let mt_cell = style_ffai_kernels(&pad_right(&mt_s, w.mt_perf), result);
+        let ffai_cell = style_ffai_kernels(&pad_right(&ffai_s, w.ffai_perf), result);
         let pct_cell = style_pct(&pad_right(&pct_s, w.pct), result);
         let gflops_cell = fmt_gflops(result.metrics().and_then(|m| m.gflops), w.gflops);
         let sep = col_sep();
 
         let mut row = format!(
-            "  {shape} {sep} {mt_us_cell} {sep} {ref_cell} {sep} {mt_cell} {sep} {pct_cell} {sep} \
+            "  {shape} {sep} {ffai_us_cell} {sep} {ref_cell} {sep} {ffai_cell} {sep} {pct_cell} {sep} \
              {gflops_cell}"
         );
         if self.show_correctness {
@@ -328,9 +328,9 @@ fn term_width() -> usize {
     std::env::var("COLUMNS").ok().and_then(|s| s.parse().ok()).unwrap_or(80).clamp(60, 200)
 }
 
-/// Fixed width of the `MT(µs)` / `Ref(µs)` latency columns — holds the header
-/// `Ref(µs)` (7 chars) and a value up to ~5 digits plus `.1`.
-const US_COL_W: usize = 8;
+/// Fixed width of the `FFAI(µs)` / `Ref(µs)` latency columns — holds the header
+/// `FFAI(µs)` (8 chars) and a value up to ~5 digits plus `.1`.
+const US_COL_W: usize = 9;
 
 /// Fixed width of the `GFLOP/s` column (header is 7 chars; values like `12345.6`).
 const GFLOPS_COL_W: usize = 8;
@@ -351,9 +351,9 @@ const BN_COL_W: usize = 17;
 #[derive(Clone, Copy)]
 struct ColWidths {
     shape: usize,
-    mt_us: usize,
+    ffai_us: usize,
     ref_perf: usize,
-    mt_perf: usize,
+    ffai_perf: usize,
     pct: usize,
     gflops: usize,
     ck: usize,
@@ -362,20 +362,20 @@ struct ColWidths {
 fn sub_table_widths(term_width: usize, metric: &str, show_ck: bool) -> ColWidths {
     let avail = term_width.saturating_sub(2);
     let ref_w = 4 + metric.len() + 2;
-    let mt_w = 3 + metric.len() + 2;
-    let pct_w = 5;
+    let ffai_w = 5 + metric.len() + 2;
+    let pct_w = 6;
     let ck_w = if show_ck { 3 } else { 0 };
-    // Default data columns: MT(µs), Ref(perf), MT(perf), MT%, GFLOP/s, [ok].
-    let rhs = US_COL_W + ref_w + mt_w + pct_w + GFLOPS_COL_W + ck_w;
-    // Columns sharing a " │ " gap: Shape, MT(µs), Ref, MT, MT%, GFLOP/s (+ok).
+    // Default data columns: FFAI(µs), Ref(perf), FFAI(perf), FFAI %, GFLOP/s, [ok].
+    let rhs = US_COL_W + ref_w + ffai_w + pct_w + GFLOPS_COL_W + ck_w;
+    // Columns sharing a " │ " gap: Shape, FFAI(µs), Ref, FFAI, FFAI %, GFLOP/s (+ok).
     let n_cols: usize = if show_ck { 7 } else { 6 };
     let gaps = (n_cols.saturating_sub(1)) * 3;
     let shape_w = avail.saturating_sub(rhs + gaps + 2).clamp(8, 42);
     ColWidths {
         shape: shape_w,
-        mt_us: US_COL_W,
+        ffai_us: US_COL_W,
         ref_perf: ref_w,
-        mt_perf: mt_w,
+        ffai_perf: ffai_w,
         pct: pct_w,
         gflops: GFLOPS_COL_W,
         ck: ck_w,
@@ -399,7 +399,7 @@ fn fmt_perf(v: Option<f64>, _metric: &str, fallback: &str) -> String {
 }
 
 /// Render a latency cell (microseconds) right-padded to `width`. `primary` (the
-/// MT(µs) column) is bold; the secondary Ref(µs) column is plain. A missing
+/// FFAI(µs) column) is bold; the secondary Ref(µs) column is plain. A missing
 /// value (off-GPU / no reference) renders as a dim "—" rather than `0.0`.
 fn fmt_latency(us: Option<f64>, width: usize, primary: bool) -> String {
     match us {
@@ -418,7 +418,7 @@ fn fmt_latency(us: Option<f64>, width: usize, primary: bool) -> String {
 /// Render a compute-throughput cell (GFLOP/s) right-padded to `width`. Blank
 /// (dim "—") for memory-bound kernels that declared no FLOP count. Rendered in
 /// the standard BrightWhite value colour (Cyan is reserved for the op/title row,
-/// per the #255 CLI palette).
+/// per the CLI palette).
 fn fmt_gflops(gflops: Option<f64>, width: usize) -> String {
     match gflops {
         Some(x) =>
@@ -471,7 +471,7 @@ fn style_reference(text: &str, value: Option<f64>) -> String {
 }
 
 fn style_ffai_kernels(text: &str, result: &OpResult) -> String {
-    let style = match (result.mt_perf(), result.correctness_status()) {
+    let style = match (result.ffai_perf(), result.correctness_status()) {
         (Some(_), CorrectnessStatus::Failed { .. }) => Style::new().fg(Color::Red).bold(),
         (Some(_), _) => Style::new().fg(Color::BrightWhite).bold(),
         (None, _) => Style::new().fg(Color::Yellow).bold(),
@@ -504,7 +504,7 @@ fn style_correctness(text: &str, status: CorrectnessStatus) -> String {
 fn fmt_timing(result: &OpResult) -> String {
     let sep = col_sep();
     let dim = Style::new().fg(Color::BrightBlack).dim();
-    match result.mt_timing {
+    match result.ffai_timing {
         Some(ref t) if t.is_valid() => {
             let p95 =
                 paint_stdout(format!("{:>5.1}", t.p95_us), Style::new().fg(Color::BrightWhite));

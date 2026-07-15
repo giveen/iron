@@ -5,12 +5,12 @@
 //! Two stages cover arrays larger than one threadgroup, mirroring MLX's
 //! `block_sort` + `mb_block_merge` multi-block sort:
 //!
-//!   1. **`mt_sort<T>`** — single-block bitonic sort. Each threadgroup
+//!   1. **`ffai_sort<T>`** — single-block bitonic sort. Each threadgroup
 //!      sorts its own `n = 1024`-element block in shared memory. For an
 //!      array of `n_blocks * 1024` elements this leaves `n_blocks`
 //!      independently-sorted runs of length 1024.
 //!
-//!   2. **`mt_merge<T>`** — one bottom-up merge pass. Given sorted runs
+//!   2. **`ffai_merge<T>`** — one bottom-up merge pass. Given sorted runs
 //!      of length `run`, it merges each adjacent pair into a sorted run
 //!      of length `2 * run`. Running it for `log2(n_blocks)` passes
 //!      (`run` = 1024, 2048, 4096, …) collapses every per-block run into
@@ -27,12 +27,12 @@
 //! `n_blocks` is not a power of two) is handled by clamping run
 //! boundaries to `n` and treating out-of-range reads as `+∞` sentinels.
 //!
-//! ## DISPATCH INVARIANTS (mt_sort)
+//! ## DISPATCH INVARIANTS (ffai_sort)
 //! - **TPG: 256 threads** (each thread processes 4 elements).
 //! - **n = TPG * 4 = 1024** (elements per block — hardcoded in the kernel).
 //! - **Grid: 1 threadgroup per block** (1D, program_id<0> = block index).
 //!
-//! ## DISPATCH INVARIANTS (mt_merge)
+//! ## DISPATCH INVARIANTS (ffai_merge)
 //! - **Grid3D / Elementwise**, one thread per *output* element over the
 //!   whole array of `n` elements: `grid_x = ceil(n / tpg)`, any `tpg`.
 //! - `program_id<0>()` is the global output index `gi`; threads with
@@ -49,7 +49,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sort<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_sort<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let block_id = program_id::<0>();
     let t = tid;
     threadgroup_alloc("shared", 1024, T);
@@ -126,7 +126,7 @@ pub fn mt_sort<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 // against (MLX fuses partition + merge differently).
 
 #[kernel]
-pub fn mt_merge<T>(
+pub fn ffai_merge<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n: u32,
@@ -216,9 +216,9 @@ pub fn mt_merge<T>(
 
 // ── Per-row (segmented) sort ─────────────────────────────────────────────
 //
-// `mt_sort_segmented<T>` sorts each row of a `[batch, n]` matrix
+// `ffai_sort_segmented<T>` sorts each row of a `[batch, n]` matrix
 // independently. One threadgroup per row; each threadgroup uses a
-// single-block bitonic sort identical to `mt_sort`, covering rows of up
+// single-block bitonic sort identical to `ffai_sort`, covering rows of up
 // to `n = TPG * 4 = 1024` elements.
 //
 // For the typical top-k logits-processing shape (vocab chunks ≤ 1024),
@@ -242,7 +242,7 @@ pub fn mt_merge<T>(
 // Stability is documented as a non-guarantee.
 
 #[kernel]
-pub fn mt_sort_segmented<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_sort_segmented<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     // `tgid_x` = row index; `tid` = thread-local ID within the TG.
     let row = tgid_x;
     let t = tid;
@@ -265,7 +265,7 @@ pub fn mt_sort_segmented<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
     threadgroup_store("shared", i2, v2.cast::<T>());
     threadgroup_store("shared", i3, v3.cast::<T>());
     threadgroup_barrier();
-    // Bitonic sort network — identical structure to `mt_sort`.
+    // Bitonic sort network — identical structure to `ffai_sort`.
     // Outer loop `_k` grows the sorted sub-sequence length (2^_k).
     // Inner loop `_jb` walks the merge stages from `_k-1` down to 0.
     for _k in range(1u32, 11u32, 1u32) {
@@ -308,15 +308,15 @@ pub fn mt_sort_segmented<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
     }
 }
 
-/// New-syntax correctness for the sort family. `mt_sort` (single-block bitonic,
-/// Reduction, one TG per 1024-block), `mt_merge` (one bottom-up merge pass,
+/// New-syntax correctness for the sort family. `ffai_sort` (single-block bitonic,
+/// Reduction, one TG per 1024-block), `ffai_merge` (one bottom-up merge pass,
 /// Grid3D — input holds sorted runs of `run`, output sorts each `2*run` block),
-/// and `mt_sort_segmented` (Reduction, per-row sort, n ≤ 1024). All exact on the
+/// and `ffai_sort_segmented` (Reduction, per-row sort, n ≤ 1024). All exact on the
 /// multiset; oracles sort the relevant chunk.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_merge, mt_sort, mt_sort_segmented};
+    use super::{ffai_merge, ffai_sort, ffai_sort_segmented};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn sorted_chunks(v: &[f32], chunk: usize) -> Vec<f32> {
@@ -328,7 +328,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_merge(dt: DType) -> TestSetup {
+    fn test_ffai_merge(dt: DType) -> TestSetup {
         let (run, n) = (64usize, 256usize); // 4 runs → 2 merged 128-blocks
         let raw: Vec<f32> =
             (0..n).map(|i| (((i * 2_654_435_761) % 9973) as f32) * 0.01 - 50.0).collect();
@@ -337,7 +337,7 @@ pub mod kernel_tests {
         let inp_dt = unpack_f32(&pack_f32(&inp, dt), dt);
         // A merge pass turns each pair of `run`-runs into one sorted `2*run` run.
         let expected = sorted_chunks(&inp_dt, 2 * run);
-        TestSetup::new(mt_merge::kernel_ir_for(dt))
+        TestSetup::new(ffai_merge::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
@@ -349,14 +349,14 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_sort_segmented(dt: DType) -> TestSetup {
+    fn test_ffai_sort_segmented(dt: DType) -> TestSetup {
         let (batch, n) = (3usize, 512usize); // n ≤ 1024
         let raw: Vec<f32> = (0..batch * n)
             .map(|i| (((i * 2_654_435_761 + 7) % 9973) as f32) * 0.01 - 50.0)
             .collect();
         let raw_dt = unpack_f32(&pack_f32(&raw, dt), dt);
         let expected = sorted_chunks(&raw_dt, n); // each row sorted
-        TestSetup::new(mt_sort_segmented::kernel_ir_for(dt))
+        TestSetup::new(ffai_sort_segmented::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&raw, dt), dt))
             .input(TestBuffer::zeros("out", batch * n, dt))
@@ -366,7 +366,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_sort(dt: DType) -> TestSetup {
+    fn test_ffai_sort(dt: DType) -> TestSetup {
         let (n_blocks, n) = (3usize, 1024usize); // n hardcoded to TPG*4 in the kernel
         let mut inp = Vec::with_capacity(n_blocks * n);
         let mut expected = Vec::with_capacity(n_blocks * n);
@@ -381,7 +381,7 @@ pub mod kernel_tests {
             expected.extend_from_slice(&sorted);
             inp.extend_from_slice(&block);
         }
-        TestSetup::new(mt_sort::kernel_ir_for(dt))
+        TestSetup::new(ffai_sort::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&inp, dt), dt))
             .input(TestBuffer::zeros("out", n_blocks * n, dt))
@@ -391,11 +391,11 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_sort` (vs MLX `metal/sort.metal`).
+/// New-syntax benchmark for `ffai_sort` (vs MLX `metal/sort.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_merge, mt_sort, mt_sort_segmented};
+    use super::{ffai_merge, ffai_sort, ffai_sort_segmented};
     use crate::utils::{InputDomain, input_buffer, mlx_tname};
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -407,7 +407,7 @@ pub mod kernel_benches {
         // unordered/inconsistent across the two kernels — fatal at tol 0). The
         // many ties are fine: both run a stable sort, so identical input → bit-
         // identical sorted output. The runner shares these bytes by name.
-        BenchSetup::new(mt_sort::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sort::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("inp", n_blocks * n, dt, InputDomain::Signed))
             .buffer(BenchBuffer::zeros("out", n_blocks * n, dt).output())
@@ -416,7 +416,7 @@ pub mod kernel_benches {
             .bytes_moved((2 * n_blocks * n * dt.size_bytes()) as u64)
             // MLX `metal/sort.metal` `c_block_sort_<tn>_<tn>_bn256_tn4`: a
             // single-block bitonic sort, one threadgroup per block, matching the
-            // MT `mt_sort` layout (`bn256_tn4` → BLOCK_THREADS=256, N_PER_THREAD=4,
+            // FFAI `ffai_sort` layout (`bn256_tn4` → BLOCK_THREADS=256, N_PER_THREAD=4,
             // N_PER_BLOCK = 1024 = n). Buffer order (all `int`, 4 bytes):
             //   inp[[0]], out[[1]], size_sorted_axis[[2]]=n,
             //   in_stride_sorted_axis[[3]]=1, out_stride_sorted_axis[[4]]=1,
@@ -425,7 +425,7 @@ pub mod kernel_benches {
             // The block is selected by `tid.y` (the kernel does
             // `inp += tid.y * in_stride_segment_axis`; `tid.x` is unused for the
             // data offset), so the per-block dispatch puts the `n_blocks` blocks
-            // on the Y axis (`[1, n_blocks, 1]`) — unlike the MT kernel which
+            // on the Y axis (`[1, n_blocks, 1]`) — unlike the FFAI kernel which
             // indexes the block via `program_id::<0>()` (X axis). `inp` is shared
             // by name (placeholder); both sort identical random data so the A/B is
             // a true per-block equivalence (tol 0 — a sort permutes, never
@@ -451,7 +451,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_merge(dt: DType) -> BenchSetup {
         let (run, n) = (1024usize, 16 * 1024 * 1024usize);
-        BenchSetup::new(mt_merge::kernel_ir_for(dt))
+        BenchSetup::new(ffai_merge::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("inp", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
@@ -465,7 +465,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_segmented(dt: DType) -> BenchSetup {
         let (batch, n) = (16384usize, 1024usize);
-        BenchSetup::new(mt_sort_segmented::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sort_segmented::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", batch * n, dt))
             .buffer(BenchBuffer::zeros("out", batch * n, dt).output())

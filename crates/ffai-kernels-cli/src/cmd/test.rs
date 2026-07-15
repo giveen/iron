@@ -5,10 +5,10 @@
 //! ## Output format (forge-style)
 //!
 //! ```text
-//! Ran 3 tests for mt_add
-//! [PASS] mt_add [f32]   (err=0.00e0)
-//! [PASS] mt_add [f16]   (err=2.38e-7)
-//! [PASS] mt_add [bf16]  (err=1.56e-3)
+//! Ran 3 tests for ffai_add
+//! [PASS] ffai_add [f32]   (err=0.00e0)
+//! [PASS] ffai_add [f16]   (err=2.38e-7)
+//! [PASS] ffai_add [bf16]  (err=1.56e-3)
 //! Suite result: ok. 3 passed; 0 failed
 //!
 //! Ran 2 test suites in 57.46ms: 3 tests passed, 1 failed (4 total tests)

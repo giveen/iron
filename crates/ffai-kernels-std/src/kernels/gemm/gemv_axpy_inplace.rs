@@ -7,7 +7,7 @@
 //! routed-expert combine step where weight is the normalised top-K
 //! scalar and accum is moeAccum.
 //!
-//! Same reduction geometry as `mt_gemv` (one threadgroup per row,
+//! Same reduction geometry as `ffai_gemv` (one threadgroup per row,
 //! simdgroup reduce over k). The only differences:
 //!   - `accum` instead of `out` (load + add + store, not just store)
 //!   - extra `weight: f32` constexpr scalar applied before the add
@@ -20,7 +20,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gemv_axpy_inplace<T>(
+pub fn ffai_gemv_axpy_inplace<T>(
     mat: Tensor<T>,
     vec: Tensor<T>,
     mut accum: Tensor<T>,
@@ -39,7 +39,7 @@ pub fn mt_gemv_axpy_inplace<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gemv_axpy_inplace;
+    use super::ffai_gemv_axpy_inplace;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(m: usize, k: usize, weight: f32, dt: DType) -> TestSetup {
@@ -55,7 +55,7 @@ pub mod kernel_tests {
                 accum_dt[r] + weight * dot
             })
             .collect();
-        TestSetup::new(mt_gemv_axpy_inplace::kernel_ir_for(dt))
+        TestSetup::new(ffai_gemv_axpy_inplace::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("mat", pack_f32(&mat, dt), dt))
             .input(TestBuffer::from_vec("vec", pack_f32(&vec, dt), dt))
@@ -84,12 +84,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gemv_axpy_inplace;
+    use super::ffai_gemv_axpy_inplace;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemv_axpy(dt: DType) -> BenchSetup {
         let (m, k) = (4096usize, 2048usize);
-        BenchSetup::new(mt_gemv_axpy_inplace::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gemv_axpy_inplace::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("mat", m * k, dt))
             .buffer(BenchBuffer::random("vec", k, dt))

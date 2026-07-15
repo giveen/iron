@@ -6,9 +6,9 @@
 //! GDN-bearing models (Qwen 3.5 / 3.6).
 //!
 //! Two kernels:
-//!   - `mt_gated_delta_step_record` — the standard GatedDelta forward step
+//!   - `ffai_gated_delta_step_record` — the standard GatedDelta forward step
 //!     that *also* writes each step's `delta_t` to a `delta_log` tape.
-//!   - `mt_state_replay` — re-folds the accepted prefix `[0, accepted)` of
+//!   - `ffai_state_replay` — re-folds the accepted prefix `[0, accepted)` of
 //!     an innovation tape onto a pre-record state snapshot:
 //!     `state ← select(do_step, state·g_t + k_t·delta_t, state)`,
 //!     branchless via `select` (good SIMD occupancy when the timestep
@@ -40,7 +40,7 @@ use ffai_kernels::kernel;
     NPT = [6, 2],
     suffix = "d{DK}_{DV}_{HK}_{HV}"
 ))]
-pub fn mt_gated_delta_step_record<T>(
+pub fn ffai_gated_delta_step_record<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -123,7 +123,7 @@ pub fn mt_gated_delta_step_record<T>(
     NPT = [6, 2],
     suffix = "d{DK}_{DV}_{HV}_{HV}"
 ))]
-pub fn mt_state_replay<T>(
+pub fn ffai_state_replay<T>(
     delta_log: Tensor<T>,
     k_log: Tensor<T>,
     g_log: Tensor<T>,
@@ -175,7 +175,7 @@ pub fn mt_state_replay<T>(
 /// New-syntax correctness for the GDN innovation-tape record + replay kernels
 /// on the small `d64_32_2_2` cell (Dk=64, Dv=32, Hk=2, Hv=2). Oracles are
 /// ported verbatim from the legacy `tests/gated_delta_replay_gpu_correctness.rs`
-/// (removed in #240):
+/// (since removed):
 ///
 ///   - `record` runs the plain GatedDelta forward step and surfaces `delta_t`
 ///     to the tape; we check its `y` and `state_out`.
@@ -189,7 +189,7 @@ pub fn mt_state_replay<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_gated_delta_step_record_d64_32_2_2, mt_state_replay_d64_32_2_2};
+    use super::{ffai_gated_delta_step_record_d64_32_2_2, ffai_state_replay_d64_32_2_2};
     use crate::utils::{pack_f32, unpack_f32};
 
     // d64_32_2_2 cell dims.
@@ -304,7 +304,7 @@ pub mod kernel_tests {
         let (y_exp, s_exp) =
             naive_record(&r(&q), &r(&k), &r(&v), &r(&g), &r(&beta), &r(&state_in), batch, t_val);
 
-        TestSetup::new(mt_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -343,7 +343,7 @@ pub mod kernel_tests {
             accepted,
         );
 
-        TestSetup::new(mt_state_replay_d64_32_2_2::kernel_ir_for(dt))
+        TestSetup::new(ffai_state_replay_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("delta_log", pack_f32(&delta_log, dt), dt))
             .input(TestBuffer::from_vec("k_log", pack_f32(&k_log, dt), dt))
@@ -371,10 +371,10 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     use super::{
-        mt_gated_delta_step_record_d64_32_2_2,
-        mt_gated_delta_step_record_d192_128_4_4,
-        mt_state_replay_d64_32_2_2,
-        mt_state_replay_d192_128_4_4,
+        ffai_gated_delta_step_record_d64_32_2_2,
+        ffai_gated_delta_step_record_d192_128_4_4,
+        ffai_state_replay_d64_32_2_2,
+        ffai_state_replay_d192_128_4_4,
     };
 
     const DK: usize = 64;
@@ -395,7 +395,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_record(dt: DType) -> BenchSetup {
         let (batch, t_val) = (1usize, 8usize);
         let n_total = batch * HV;
-        BenchSetup::new(mt_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_step_record_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("q", batch * t_val * HK * DK, dt))
             .buffer(BenchBuffer::random("k", batch * t_val * HK * DK, dt))
@@ -422,7 +422,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_replay(dt: DType) -> BenchSetup {
         let (batch, t_log, accepted) = (1usize, 8usize, 8usize);
         let n_total = batch * HV;
-        BenchSetup::new(mt_state_replay_d64_32_2_2::kernel_ir_for(dt))
+        BenchSetup::new(ffai_state_replay_d64_32_2_2::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("delta_log", batch * t_log * HV * DV, dt))
             .buffer(BenchBuffer::random("k_log", batch * t_log * HV * DK, dt))
@@ -447,7 +447,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_record_d192_128_4_4(dt: DType) -> BenchSetup {
         let (batch, t_val) = (1usize, 8usize);
         let n_total = batch * P_HV;
-        BenchSetup::new(mt_gated_delta_step_record_d192_128_4_4::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_step_record_d192_128_4_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("q", batch * t_val * P_HK * P_DK, dt))
             .buffer(BenchBuffer::random("k", batch * t_val * P_HK * P_DK, dt))
@@ -475,7 +475,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_replay_d192_128_4_4(dt: DType) -> BenchSetup {
         let (batch, t_log, accepted) = (1usize, 8usize, 8usize);
         let n_total = batch * P_HV;
-        BenchSetup::new(mt_state_replay_d192_128_4_4::kernel_ir_for(dt))
+        BenchSetup::new(ffai_state_replay_d192_128_4_4::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("delta_log", batch * t_log * P_HV * P_DV, dt))
             .buffer(BenchBuffer::random("k_log", batch * t_log * P_HV * P_DK, dt))

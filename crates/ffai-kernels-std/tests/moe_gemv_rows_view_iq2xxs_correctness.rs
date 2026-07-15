@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_gemv_rows_view_iq2xxs` (u8-recombine
-//! reads) and `mt_moe_gemv_rows_view_u16_iq2xxs` (aligned u16 reads) — the
+//! GPU correctness for `ffai::ffai_moe_gemv_rows_view_iq2xxs` (u8-recombine
+//! reads) and `ffai_moe_gemv_rows_view_u16_iq2xxs` (aligned u16 reads) — the
 //! zero-copy gemv-over-rows MoE kernels that read raw 66-byte IQ2_XXS blocks
 //! straight from a no-copy view buffer. Oracle: per-row IQ2_XXS dequant gemv
 //! (same dequant as the proven `moe_gemv_rows_iq2xxs`), with the super-scale
@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::moe_gemv_rows_view_iq2xxs::{
-    mt_moe_gemv_rows_view_iq2xxs,
-    mt_moe_gemv_rows_view_u16_iq2xxs,
+    ffai_moe_gemv_rows_view_iq2xxs,
+    ffai_moe_gemv_rows_view_u16_iq2xxs,
 };
 use half::f16;
 
@@ -167,7 +167,7 @@ fn gemv_rows_view_iq2xxs_u8_matches_oracle() {
         .insert("expert_byte_stride".into(), (c.expert_byte_stride as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_gemv_rows_view_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_gemv_rows_view_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [c.m_out, c.m_total, 1], [32, 1, 1])
@@ -207,7 +207,7 @@ fn gemv_rows_view_u16_iq2xxs_matches_oracle() {
         .insert("expert_byte_stride".into(), (c.expert_byte_stride as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_gemv_rows_view_u16_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_gemv_rows_view_u16_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [c.m_out, c.m_total, 1], [32, 1, 1])

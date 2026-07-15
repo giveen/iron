@@ -232,7 +232,7 @@ mod tests {
         // the unroll pass's `next_vid = max_vid + 1` allocation collides
         // with the sub-op-ref encoding namespace and the MSL emitter
         // produces `0 /* bad sub-op ref */` placeholders. Regression
-        // test for the `mt_rope_f16` / `mt_affine_quantize_int8`
+        // test for the `ffai_rope_f16` / `ffai_affine_quantize_int8`
         // miscompiles.
         const SUB_OP_FLAG: u32 = 0x8000_0000;
         let sub_op_ref_0 = ValueId::new(SUB_OP_FLAG); // chain position 0

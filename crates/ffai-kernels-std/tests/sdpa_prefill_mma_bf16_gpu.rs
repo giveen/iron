@@ -1,19 +1,19 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness oracle for `mt_sdpa_prefill_mma_bf16` — the
+//! GPU correctness oracle for `ffai_sdpa_prefill_mma_bf16` — the
 //! bf16-emulated MMA prefill variant in
 //! `crates/ffai-kernels-std/src/mlx/steel/attn/steel_attention_mma_bf16.rs`.
 //!
 //! The bf16 variant is the M2-family bf16 routing target of
 //! `sdpa_prefill_mma_for` (`is_pre_m3_bf16` arm). Its sibling
-//! `mt_sdpa_prefill_mma` already has long-T + batched coverage in
+//! `ffai_sdpa_prefill_mma` already has long-T + batched coverage in
 //! `sdpa_prefill_mma_long_t.rs`, but all of those tests run at f32 and
 //! exercise the *sibling* kernel — leaving the bf16 single-Q dd-loop
 //! variant without a direct correctness oracle. The
 //! `/tmp/coverage_audit_all_kernels.md` audit flagged this gap; this
 //! file closes it.
 //!
-//! The kernel signature mirrors `mt_sdpa_prefill_mma`: same Q/K/V/O
+//! The kernel signature mirrors `ffai_sdpa_prefill_mma`: same Q/K/V/O
 //! tensors + `q_len / k_len / gqa_factor / n_q_heads / n_kv_heads /
 //! scale` constexprs. Same geometry too — BQ=32, BK=16, BD=128, WM=4,
 //! WN=1, tpg=128, grid `(q_len/32, n_q_heads, batch)` via
@@ -37,7 +37,7 @@ mod common;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::Context;
-use ffai_kernels_std::kernels::sdpa::steel_attn::steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16;
+use ffai_kernels_std::kernels::sdpa::steel_attn::steel_attention_mma_bf16::ffai_sdpa_prefill_mma_bf16;
 
 /// Causal-prefill SDPA reference for the (B, n_q_heads, q_len, head_dim)
 /// + (B, n_kv_heads, k_len, head_dim) layout the kernel reads.
@@ -159,7 +159,7 @@ fn run_sdpa_prefill_bf16(
     buffers.insert("n_kv_heads".into(), (n_kv_heads as u32).to_le_bytes().to_vec());
     buffers.insert("scale".into(), scale.to_le_bytes().to_vec());
 
-    let mut kernel = mt_sdpa_prefill_mma_bf16::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dt.to_dtype());
     // Same SimdGroup2D dispatch as the sibling: the kernel body reads
     // tgid_x/tgid_y/tgid_z directly, so only the 3D-axis mode resolves
     // all three grid coords.
@@ -231,7 +231,7 @@ fn assert_close(actual: &[f32], expected: &[f32], tol: f32, label: &str) {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_bf16_matches_cpu_reference_bf16_t512() {
+fn ffai_sdpa_prefill_mma_bf16_matches_cpu_reference_bf16_t512() {
     let _g = gpu_lock();
 
     // B=1, gqa=1, T=512. Smallest cell that exercises 16 q tiles per
@@ -273,7 +273,7 @@ fn mt_sdpa_prefill_mma_bf16_matches_cpu_reference_bf16_t512() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_bf16_gqa_factor_4_bf16_t512() {
+fn ffai_sdpa_prefill_mma_bf16_gqa_factor_4_bf16_t512() {
     let _g = gpu_lock();
 
     // GQA fan-out: n_q_heads=8, n_kv_heads=2 → gqa=4. Verifies the
@@ -311,7 +311,7 @@ fn mt_sdpa_prefill_mma_bf16_gqa_factor_4_bf16_t512() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_bf16_kernel_side_b2_t512_bf16() {
+fn ffai_sdpa_prefill_mma_bf16_kernel_side_b2_t512_bf16() {
     let _g = gpu_lock();
 
     // True B=2 dispatch: kernel reads `batch = tgid_z` and folds it

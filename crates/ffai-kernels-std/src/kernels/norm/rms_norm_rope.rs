@@ -10,7 +10,7 @@
 //! `(batch, seq_pos, head)` slice of length `axis_size`; thread `lid`
 //! owns the pair `(lid, lid + half)`.
 //!
-//! Phase 1 — `inv_rms = rsqrt(mean(x²) + eps)` via `mt_rms_inv_scalar`
+//! Phase 1 — `inv_rms = rsqrt(mean(x²) + eps)` via `ffai_rms_inv_scalar`
 //! cross-kernel call with `partial_ssq = v1² + v2²` as the Value arg.
 //! Phase 2 — `normed = w * x * inv_rms`, then rotate:
 //!   `out[lid]      = normed_a·cos θ − normed_b·sin θ`
@@ -35,7 +35,7 @@ use ffai_kernels::kernel;
 
 /// Fused RMSNorm + paired-layout RoPE for one Q/K head per threadgroup.
 #[kernel]
-pub fn mt_rms_norm_rope<T>(
+pub fn ffai_rms_norm_rope<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     inv_freqs: Tensor<f32>,
@@ -52,11 +52,11 @@ pub fn mt_rms_norm_rope<T>(
     let lid = tid;
     // Phase 1: per-thread pair → threadgroup-wide inv_rms via cross-kernel call.
     // partial_ssq is a Value arg; eps_buf and axis_size are Tensor args whose
-    // names are substituted into mt_rms_inv_scalar's callee loads.
+    // names are substituted into ffai_rms_inv_scalar's callee loads.
     let v1 = load(x[rs + lid]).cast::<f32>();
     let v2 = load(x[rs + lid + half]).cast::<f32>();
     let partial_ssq = v1 * v1 + v2 * v2;
-    let inv_rms = mt_rms_inv_scalar(partial_ssq, eps_buf, axis_size);
+    let inv_rms = ffai_rms_inv_scalar(partial_ssq, eps_buf, axis_size);
     // Phase 2: weight scale + RoPE rotation.
     let l = (row / n_heads) % seq_len;
     let pos = (offset + l).cast::<f32>();
@@ -69,7 +69,7 @@ pub fn mt_rms_norm_rope<T>(
     store(out[rs + lid + half], (normed_a * sin_t + normed_b * cos_t).cast::<T>());
 }
 
-/// New-syntax correctness for `mt_rms_norm_rope` (Reduction mode, one
+/// New-syntax correctness for `ffai_rms_norm_rope` (Reduction mode, one
 /// threadgroup per row, `tpg = axis_size/2` — `axis_size` a multiple of 64,
 /// `axis_size ≤ 2048`). Per-row oracle replays the whole-row RMSNorm scale,
 /// the per-row position `pos = offset + (row / n_heads) mod seq_len`, and the
@@ -77,7 +77,7 @@ pub fn mt_rms_norm_rope<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_rms_norm_rope;
+    use super::ffai_rms_norm_rope;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Small, deterministic inverse-frequency table (length `half`).
@@ -86,7 +86,7 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 1e-1])]
-    fn test_mt_rms_norm_rope(dt: DType) -> TestSetup {
+    fn test_ffai_rms_norm_rope(dt: DType) -> TestSetup {
         let (axis, n_heads, seq_len, offset, eps) = (128usize, 4usize, 8usize, 5usize, 1e-5f32);
         let rows = n_heads * seq_len; // one batch
         let half = axis / 2;
@@ -111,7 +111,7 @@ pub mod kernel_tests {
                 expected[base + lid + half] = na * s + nb * c;
             }
         }
-        TestSetup::new(mt_rms_norm_rope::kernel_ir_for(dt))
+        TestSetup::new(ffai_rms_norm_rope::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x_raw, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w_raw, dt), dt))
@@ -127,12 +127,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_rms_norm_rope` (fused RMSNorm + RoPE, one
+/// New-syntax benchmark for `ffai_rms_norm_rope` (fused RMSNorm + RoPE, one
 /// `(batch, seq, head)` row per threadgroup, axis_size=128, tpg=64).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_rms_norm_rope;
+    use super::ffai_rms_norm_rope;
 
     fn f32_bytes(v: &[f32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
@@ -143,7 +143,7 @@ pub mod kernel_benches {
         let half = axis / 2;
         let inv_freqs: Vec<f32> =
             (0..half).map(|i| 1.0 / 10000.0_f32.powf(i as f32 / half as f32)).collect();
-        BenchSetup::new(mt_rms_norm_rope::kernel_ir_for(dt))
+        BenchSetup::new(ffai_rms_norm_rope::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", rows * axis, dt))
             .buffer(BenchBuffer::random("w", axis, dt))

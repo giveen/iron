@@ -136,18 +136,18 @@ cargo test -p ffai-kernels-std --features hip --test hip_kernel_corpus -- --noca
 The 185 MISMATCH + 26 shaderc-failure kernels cluster into a few patterns:
 
 1. **DeclareLocal / SetLocal type mismatch** (`'=' : cannot convert from
-   float to uint`). My emit declares `mt_loc_<name>` as `float`, but in
+   float to uint`). My emit declares `ffai_loc_<name>` as `float`, but in
    some kernels the IR carries integer-typed values through a mutable
    local — the implicit `float → uint` reassignment fails. Phase 3 either
    tracks the value's GLSL type for the local or emits `uint` locals
    conditionally based on declared dtype.
-2. **`'[]' : scalar integer expression required`** (`mt_gemv`,
+2. **`'[]' : scalar integer expression required`** (`ffai_gemv`,
    `ffai_gemv_axpy_inplace`, `ffai_gate_up_swiglu_fused`). The array
    index in those kernels is itself derived from a constexpr-load /
    uint-arithmetic path I emit as `float` — the `uint(...)` outer cast
    isn't enough when the inner expression already had an implicit
    conversion. Fix is the same as (1).
-3. **`mt_sort` / `mt_sort_segmented` `unexpected SHARED`** — the IR has
+3. **`ffai_sort` / `ffai_sort_segmented` `unexpected SHARED`** — the IR has
    a `ThreadgroupAlloc` declared inside a nested block. I only hoist
    from the body block + named blocks; the syntax error means the decl
    leaked into local scope. Phase 3: walk every block transitively.

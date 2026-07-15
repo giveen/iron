@@ -23,7 +23,7 @@
 //!
 //! `fp8_e4m3` is **not** a separate kernel: its layout (8-bit E4M3 codes + a
 //! per-group FP32 scale) is identical to `nvfp8`, so the `fp8_e4m3` test + bench
-//! dispatch `mt_nvfp8_dequant_gemv_expert_indexed` with `QFormat::Fp8E4m3`.
+//! dispatch `ffai_nvfp8_dequant_gemv_expert_indexed` with `QFormat::Fp8E4m3`.
 //!
 //! ## Memory layout
 //!
@@ -49,7 +49,7 @@ use ffai_kernels::kernel;
 /// where `expert = expert_index[0]`. One threadgroup per output row. Per-element
 /// decode + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer types
 /// by `(WT, ST)` — see `gemm/block_scaled_matmul` for the legend. Decodes
-/// through `kernels/primitives.rs`. Produces `mt_<FMT>_dequant_gemv_expert_indexed`.
+/// through `kernels/primitives.rs`. Produces `ffai_<FMT>_dequant_gemv_expert_indexed`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -84,7 +84,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_dequant_gemv_expert_indexed",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     weights_stacked: Tensor<WT>,
     scales_stacked: Tensor<ST>,
     input: Tensor<T>,
@@ -114,14 +114,14 @@ pub fn mt<T>(
                 let scale = if SKIND == 0u32 {
                     exp2(sraw.cast::<f32>() - 127.0f32)
                 } else if SKIND == 1u32 {
-                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                    ffai_decode_e4m3(sraw.cast::<u32>()) * global
                 } else {
                     sraw.cast::<f32>()
                 };
                 let packed = load(weights_stacked[row_pack_off + pack_idx]);
                 let p_off = pack_idx * 8u32;
                 for i in range(0u32, 8u32, 1u32) {
-                    let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                    let val = ffai_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
                     acc = acc + (val * scale) * load(input[p_off + i]).cast::<f32>();
                 }
             }
@@ -155,17 +155,17 @@ pub fn mt<T>(
                         weights_stacked
                             [row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
-                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                    let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
                     select(q >= half, qf - full, qf)
                 } else {
                     let raw = load(weights_stacked[row_off + c]).cast::<u32>();
                     if WDEC == 2u32 {
-                        mt_decode_e4m3(raw)
+                        ffai_decode_e4m3(raw)
                     } else if WDEC == 3u32 {
-                        mt_decode_e5m2(raw)
+                        ffai_decode_e5m2(raw)
                     } else {
-                        mt_decode_int8(raw)
+                        ffai_decode_int8(raw)
                     }
                 };
                 acc = acc + (val * scale) * load(input[c]).cast::<f32>();
@@ -283,7 +283,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp4_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp4,
             4,
             4,
@@ -296,7 +296,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp4_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_nvfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp4,
             4,
             4,
@@ -309,7 +309,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxfp8_e4m3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             4,
             4,
@@ -322,7 +322,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxfp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             4,
             4,
@@ -335,7 +335,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp8,
             4,
             4,
@@ -350,7 +350,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_fp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp4,
             4,
             4,
@@ -363,7 +363,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             4,
             4,
@@ -376,7 +376,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_fp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             4,
             4,
@@ -390,7 +390,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int8,
             4,
             4,
@@ -408,7 +408,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int2,
             4,
             4,
@@ -420,7 +420,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int3,
             4,
             4,
@@ -432,7 +432,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int4,
             4,
             4,
@@ -444,7 +444,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int5,
             4,
             4,
@@ -456,7 +456,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int6,
             4,
             4,
@@ -468,7 +468,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint2,
             4,
             4,
@@ -480,7 +480,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint3,
             4,
             4,
@@ -492,7 +492,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint4,
             4,
             4,
@@ -504,7 +504,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint5,
             4,
             4,
@@ -516,7 +516,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint6,
             4,
             4,
@@ -528,7 +528,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_mxint8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint8,
             4,
             4,
@@ -545,7 +545,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             4,
             4,
@@ -557,7 +557,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             4,
             4,
@@ -569,7 +569,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_fp4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp4F16,
             4,
             4,
@@ -581,7 +581,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_fp8_e5m2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4,
             4,
@@ -593,7 +593,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int2F16,
             4,
             4,
@@ -605,7 +605,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int3_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int3_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int3F16,
             4,
             4,
@@ -617,7 +617,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int4F16,
             4,
             4,
@@ -629,7 +629,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int5_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int5_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int5F16,
             4,
             4,
@@ -641,7 +641,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int6_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int6_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int6F16,
             4,
             4,
@@ -653,7 +653,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_dequant_gemv_expert_indexed(dt: DType) -> TestSetup {
         expert_setup(
-            mt_int8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int8F16,
             4,
             4,
@@ -738,7 +738,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp4,
             8,
             4096,
@@ -749,7 +749,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_nvfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp4,
             8,
             4096,
@@ -760,7 +760,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxfp8_e4m3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             8,
             4096,
@@ -771,7 +771,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxfp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             8,
             4096,
@@ -782,7 +782,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp8,
             8,
             4096,
@@ -793,7 +793,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_fp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp4,
             8,
             4096,
@@ -804,7 +804,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             8,
             4096,
@@ -815,7 +815,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_fp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             8,
             4096,
@@ -826,7 +826,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int8,
             8,
             4096,
@@ -839,7 +839,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int2,
             8,
             4096,
@@ -850,7 +850,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int3,
             8,
             4096,
@@ -861,7 +861,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int4,
             8,
             4096,
@@ -872,7 +872,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int5,
             8,
             4096,
@@ -883,7 +883,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int6,
             8,
             4096,
@@ -894,7 +894,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint2_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint2,
             8,
             4096,
@@ -905,7 +905,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint3_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint3,
             8,
             4096,
@@ -916,7 +916,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint4_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint4,
             8,
             4096,
@@ -927,7 +927,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint5_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint5,
             8,
             4096,
@@ -938,7 +938,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint6_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint6,
             8,
             4096,
@@ -949,7 +949,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_mxint8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_mxint8_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Mxint8,
             8,
             4096,
@@ -962,7 +962,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             8,
             4096,
@@ -973,7 +973,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_nvfp8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             8,
             4096,
@@ -984,7 +984,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_fp4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp4F16,
             8,
             4096,
@@ -995,7 +995,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_fp8_e5m2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             8,
             4096,
@@ -1006,7 +1006,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int2_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int2F16,
             8,
             4096,
@@ -1017,7 +1017,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int3_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int3_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int3F16,
             8,
             4096,
@@ -1028,7 +1028,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int4_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int4F16,
             8,
             4096,
@@ -1039,7 +1039,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int5_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int5_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int5F16,
             8,
             4096,
@@ -1050,7 +1050,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int6_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int6_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int6F16,
             8,
             4096,
@@ -1061,7 +1061,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16_dequant_gemv_expert_indexed(dt: DType) -> BenchSetup {
         expert_bench(
-            mt_int8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
+            ffai_int8_f16_dequant_gemv_expert_indexed::kernel_ir_for(dt),
             QFormat::Int8F16,
             8,
             4096,

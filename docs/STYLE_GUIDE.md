@@ -56,9 +56,9 @@ family list and the migration state (the crate is mid-migration from the legacy
 A kernel whose *purpose* is to validate a codegen path or HW intrinsic
 end-to-end — not to do production work — is a **probe**. Probes live in
 `crates/ffai-kernels-std/src/probe/` (a crate-root module, like `utils`, **outside**
-the `kernels/<family>/` tree) and are named **`mt_<thing>_probe`**:
-`mt_simdgroup_load_probe` (the `Op::SimdgroupLoad` round-trip),
-`mt_mpp_matmul_probe`, `mt_mma_probe_*` (MMA layout). Use `_probe`, not `_smoke`
+the `kernels/<family>/` tree) and are named **`ffai_<thing>_probe`**:
+`ffai_simdgroup_load_probe` (the `Op::SimdgroupLoad` round-trip),
+`ffai_mpp_matmul_probe`, `ffai_mma_probe_*` (MMA layout). Use `_probe`, not `_smoke`
 — "smoke" is reserved for *test* code (backend bring-up tests like
 `tests/cuda_smoke.rs`, codegen-sanity `#[test] fn …_smoke()`), which stays
 test-side and is not a kernel.
@@ -92,29 +92,29 @@ use ffai-kernels::kernel;
 // ── 1. Kernel function(s) ────────────────────────────────────────────────────
 
 #[kernel]
-pub fn mt_my_kernel<T>(...) { ... }
+pub fn ffai_my_kernel<T>(...) { ... }
 
 // ── 2. Correctness tests ─────────────────────────────────────────────────────
 
 pub mod kernel_tests {
     use ffai-kernels::{test::*, test_kernel};
-    use super::mt_my_kernel;
+    use super::ffai_my_kernel;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(...) -> TestSetup { ... }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
-    fn test_mt_my_kernel(dt: DType) -> TestSetup { setup(..., dt) }
+    fn test_ffai_my_kernel(dt: DType) -> TestSetup { setup(..., dt) }
 }
 
 // ── 3. Benchmarks ────────────────────────────────────────────────────────────
 
 pub mod kernel_benches {
     use ffai-kernels::{bench, test::*};
-    use super::mt_my_kernel;
+    use super::ffai_my_kernel;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_mt_my_kernel(dt: DType) -> BenchSetup { ... }
+    fn bench_ffai_my_kernel(dt: DType) -> BenchSetup { ... }
 }
 ```
 
@@ -135,13 +135,14 @@ The `//!` block at the top is the public documentation for the kernel. It must i
 
 | Pattern | Used for |
 |---|---|
-| `mt_<op>` | The operation (`mt_softmax`, `mt_copy`, `mt_rope_banded`) |
-| `mt_<op>_<variant>` | A named variant (`mt_rms_norm_small`) |
-| `mt_<family>_<variant>` | Variant families from `variants(...)` (`mt_hadamard_n64`, `mt_int4_conv2d`) |
+| `ffai_<op>` | The operation (`ffai_softmax`, `ffai_copy`, `ffai_rope_banded`) |
+| `ffai_<op>_<variant>` | A named variant (`ffai_rms_norm_small`) |
+| `ffai_<family>_<variant>` | Variant families from `variants(...)` (`ffai_hadamard_n64`, `ffai_int4_conv2d`) |
 
-**Name the operation, not the model or the source.** No model names
-(`kokoro` → `adain1d`/`lstm`), no `mlx`/`ffai` coupling in the name. `ffai_<op>`
-is a legacy prefix being phased toward `mt_<op>`; don't introduce new ones.
+**Name the operation, not the model or the source.** The `ffai_` prefix marks
+an FFAI kernel; after it, describe the operation — not a model or a reference
+source (`kokoro` → `adain1d`/`lstm`; no `mlx`/model coupling in the name). The
+old `mt_` prefix has been retired in favour of `ffai_`; don't reintroduce it.
 
 ### Generic dtype parameter
 
@@ -149,13 +150,13 @@ Every kernel that operates on floating-point data is generic over `T`:
 
 ```rust
 #[kernel]
-pub fn mt_my_kernel<T>(inp: Tensor<T>, out: Tensor<T>, ...) { ... }
+pub fn ffai_my_kernel<T>(inp: Tensor<T>, out: Tensor<T>, ...) { ... }
 ```
 
 The convention for multi-type kernels (e.g. float input, u32 index output) is a single `T` for the primary floating-point type; integer buffers are typed concretely:
 
 ```rust
-pub fn mt_dequant<T>(packed: Tensor<u32>, scales: Tensor<T>, out: Tensor<T>, ...)
+pub fn ffai_dequant<T>(packed: Tensor<u32>, scales: Tensor<T>, out: Tensor<T>, ...)
 ```
 
 ### Output buffer detection
@@ -171,7 +172,7 @@ Prefer `mut` for new kernels; it is unambiguous and survives refactors.
 Scalar values baked in at dispatch time (shapes, bit-widths, thresholds):
 
 ```rust
-pub fn mt_my_kernel<T>(
+pub fn ffai_my_kernel<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n: u32,
@@ -245,12 +246,12 @@ Tests and benches must wire the same geometry. Mismatched geometry is the most c
 Use `#[kernel(variants(...))]` when the same algorithm is needed at multiple values of a compile-time integer (bit-widths, transform sizes, tile shapes). This eliminates `macro_rules!` dispatch and lets the compiler constant-fold the variant-specific values.
 
 ```rust
-/// Walsh–Hadamard transform — produces `mt_hadamard_n64`, `_n128`, … `_n1024`.
+/// Walsh–Hadamard transform — produces `ffai_hadamard_n64`, `_n128`, … `_n1024`.
 ///
-/// Produces kernels: `mt_hadamard_n64`, `mt_hadamard_n128`, `mt_hadamard_n256`,
-/// `mt_hadamard_n512`, `mt_hadamard_n1024`.
+/// Produces kernels: `ffai_hadamard_n64`, `ffai_hadamard_n128`, `ffai_hadamard_n256`,
+/// `ffai_hadamard_n512`, `ffai_hadamard_n1024`.
 #[kernel(variants(N = [64, 128, 256, 512, 1024], LOG_N = [6, 7, 8, 9, 10], suffix = "n{N}"))]
-pub fn mt_hadamard<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] scale: f32) {
+pub fn ffai_hadamard<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] scale: f32) {
     threadgroup_alloc("buf", N, "f32");  // N is a literal at compile time
     for s in range(0u32, LOG_N, 1u32) { // LOG_N is a literal at compile time
         ...
@@ -261,7 +262,7 @@ pub fn mt_hadamard<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] scale: f32) {
 Rules:
 - The `suffix` template uses `{PARAM}` interpolation: `"int{BITS}"` → `"int4"`.
 - Multiple correlated params (like `N` and `LOG_N`) are listed as parallel arrays of the same length.
-- Generated module names: `{fn_name}_{suffix}` — e.g. `mt_hadamard_n64`.
+- Generated module names: `{fn_name}_{suffix}` — e.g. `ffai_hadamard_n64`.
 - **Use ALL_CAPS, multi-character names** for variant params (`BITS`, `LOG_N`, not `b`, `n`) to avoid substring collisions in ident-embedding.
 
 ### Variant tests and benches
@@ -297,17 +298,17 @@ The single biggest LOC-reduction tool. A sub-expression that recurs across many 
 ```rust
 // kernels/primitives.rs  (or quant/codec for the decode family)
 #[kernel]
-pub fn mt_decode_e2m1(nib: u32) -> f32 { /* 4-bit E2M1 codebook */ }
+pub fn ffai_decode_e2m1(nib: u32) -> f32 { /* 4-bit E2M1 codebook */ }
 
 #[kernel]
-pub fn mt_decode_e8m0(byte: u32) -> f32 { exp2(byte.cast::<f32>() - 127.0f32) }
+pub fn ffai_decode_e8m0(byte: u32) -> f32 { exp2(byte.cast::<f32>() - 127.0f32) }
 ```
 
 ```rust
 // In a quantized matmul/conv body — call instead of re-deriving:
 let nib   = (load(weight[w_pack + col / 8u32]) >> ((col % 8u32) * 4u32)) & 0xFu32;
-let scale = mt_decode_e8m0(load(scales[w_blk + col / block_size]).cast::<u32>());
-acc = acc + pix * (mt_decode_e2m1(nib) * scale);
+let scale = ffai_decode_e8m0(load(scales[w_blk + col / block_size]).cast::<u32>());
+acc = acc + pix * (ffai_decode_e2m1(nib) * scale);
 ```
 
 Extract a primitive once it appears in **two or more** kernels. Keep primitives small and decode/reduce-focused. The host-side CPU oracle should call the *same* math (e.g. `quant::codec`) so the kernel and oracle can't drift apart.
@@ -351,7 +352,7 @@ fn setup(n: usize, dt: DType) -> TestSetup {
     let expected: Vec<f32> = xd.iter().map(|&v| ...).collect();
 
     // 4. Assemble TestSetup
-    TestSetup::new(mt_my_kernel::kernel_ir_for(dt))
+    TestSetup::new(ffai_my_kernel::kernel_ir_for(dt))
         .mode(KernelMode::Reduction)          // omit for elementwise (default)
         .input(TestBuffer::from_vec("inp", pack_f32(&x, dt), dt))
         .input(TestBuffer::zeros("out", n, dt))
@@ -377,7 +378,7 @@ Key builder methods:
 
 ```rust
 #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
-fn test_mt_my_kernel(dt: DType) -> TestSetup { setup(1024, dt) }
+fn test_ffai_my_kernel(dt: DType) -> TestSetup { setup(1024, dt) }
 ```
 
 - `dtypes` — always test all three float dtypes unless the kernel only supports a subset.
@@ -385,7 +386,7 @@ fn test_mt_my_kernel(dt: DType) -> TestSetup { setup(1024, dt) }
   - `f32`: `1e-4` (rounding + online-algorithm drift)
   - `f16`: `1e-2` (shorter mantissa; wide if the op has long reductions)
   - `bf16`: `5e-2` (only 7 mantissa bits)
-- Test name = function name (the inventory key is `test_mt_my_kernel_f32`, etc.).
+- Test name = function name (the inventory key is `test_ffai_my_kernel_f32`, etc.).
 
 ### What to test
 
@@ -394,7 +395,7 @@ Write at least two tests per kernel:
 1. **Standard shape** — representative production size, exercises the main code path.
 2. **Edge-case shape** — exercises a specific branch (e.g. large-magnitude inputs to pin the overflow guard, a shape that hits the spill path in a bit-stream read, single-simdgroup dispatch).
 
-Name edge-case tests descriptively: `test_mt_softmax_large_values`, not `test_mt_softmax_2`.
+Name edge-case tests descriptively: `test_ffai_softmax_large_values`, not `test_ffai_softmax_2`.
 
 ---
 
@@ -404,9 +405,9 @@ Name edge-case tests descriptively: `test_mt_softmax_large_values`, not `test_mt
 
 ```rust
 #[bench(dtypes = [f32, f16, bf16])]
-fn bench_mt_my_kernel(dt: DType) -> BenchSetup {
+fn bench_ffai_my_kernel(dt: DType) -> BenchSetup {
     let n = 64 * 1024 * 1024usize;
-    BenchSetup::new(mt_my_kernel::kernel_ir_for(dt))
+    BenchSetup::new(ffai_my_kernel::kernel_ir_for(dt))
         .mode(KernelMode::Reduction)              // omit for elementwise
         .buffer(BenchBuffer::random("inp", n, dt))
         .buffer(BenchBuffer::zeros("out", n, dt).output())  // .output() marks readback
@@ -420,7 +421,7 @@ fn bench_mt_my_kernel(dt: DType) -> BenchSetup {
 
 `#[bench]` has **no `name` key** — the registered bench name is always the
 function name (for a `variants(...)` bench, the suffix-renamed name). So make the
-function name descriptive: `bench_mt_softmax`, `bench_mxfp4_conv2d`. Do not encode
+function name descriptive: `bench_ffai_softmax`, `bench_mxfp4_conv2d`. Do not encode
 a `mlx/`/`ffai/` path in the name; the family is the folder, not the bench string.
 
 ### `bytes_moved`
@@ -553,7 +554,7 @@ use ffai-kernels::kernel;
 ///
 /// Grid: Elementwise, `[ceil(n/256), 1, 1]` × `[256, 1, 1]`.
 #[kernel]
-pub fn mt_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) {
+pub fn ffai_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) {
     let idx = program_id::<0>();
     store(out[idx], (load(inp[idx]).cast::<f32>() * alpha).cast::<T>());
 }
@@ -562,14 +563,14 @@ pub fn mt_scale<T>(inp: Tensor<T>, mut out: Tensor<T>, #[constexpr] alpha: f32) 
 pub mod kernel_tests {
     use ffai-kernels::{test::*, test_kernel};
 
-    use super::mt_scale;
+    use super::ffai_scale;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, alpha: f32, dt: DType) -> TestSetup {
         let x: Vec<f32> = (0..n).map(|i| (i % 17) as f32 * 0.1 - 0.8).collect();
         let xd = unpack_f32(&pack_f32(&x, dt), dt);
         let expected: Vec<f32> = xd.iter().map(|&v| v * alpha).collect();
-        TestSetup::new(mt_scale::kernel_ir_for(dt))
+        TestSetup::new(ffai_scale::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("inp", pack_f32(&x, dt), dt))
             .input(TestBuffer::zeros("out", n, dt))
             .constexpr("alpha", alpha)
@@ -578,23 +579,23 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-3, 1e-3])]
-    fn test_mt_scale(dt: DType) -> TestSetup { setup(1024, 2.5, dt) }
+    fn test_ffai_scale(dt: DType) -> TestSetup { setup(1024, 2.5, dt) }
 
     // alpha = 0 collapses every output to zero — pins the zero-multiply path.
     #[test_kernel(dtypes = [f32], tol = [1e-6])]
-    fn test_mt_scale_zero_alpha(dt: DType) -> TestSetup { setup(256, 0.0, dt) }
+    fn test_ffai_scale_zero_alpha(dt: DType) -> TestSetup { setup(256, 0.0, dt) }
 }
 
 /// Benchmark: 64M-element scale, reads + writes one stream each.
 pub mod kernel_benches {
     use ffai-kernels::{bench, test::*};
 
-    use super::mt_scale;
+    use super::ffai_scale;
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_mt_scale(dt: DType) -> BenchSetup {
+    fn bench_ffai_scale(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(mt_scale::kernel_ir_for(dt))
+        BenchSetup::new(ffai_scale::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("inp", n, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
             .constexpr("alpha", 2.5f32)

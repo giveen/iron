@@ -33,7 +33,7 @@ impl KernelEntry {
         KernelEntry { name, builder }
     }
 
-    /// The kernel's DSL function name (e.g. `"mt_silu"`, `"mt_rms_norm"`).
+    /// The kernel's DSL function name (e.g. `"ffai_silu"`, `"ffai_rms_norm"`).
     pub fn name(&self) -> &str { self.name }
 
     /// Build the kernel IR for the given dtype(s).

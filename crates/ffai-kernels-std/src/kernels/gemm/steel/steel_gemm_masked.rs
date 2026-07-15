@@ -55,7 +55,7 @@ use ffai_kernels::kernel;
 
 /// Block-masked GEMM, both `(BM, BN, WM, WN)` block-shape instantiations.
 ///
-/// Produces: `mt_steel_gemm_masked_64x64x16_2x2`, `_32x32x16_2x2`.
+/// Produces: `ffai_steel_gemm_masked_64x64x16_2x2`, `_32x32x16_2x2`.
 #[kernel(variants(
     BM = [64u32, 32u32],
     BN = [64u32, 32u32],
@@ -63,7 +63,7 @@ use ffai_kernels::kernel;
     WN = [2u32,  2u32],
     suffix = "{BM}x{BN}x16_{WM}x{WN}"
 ))]
-pub fn mt_steel_gemm_masked<T>(
+pub fn ffai_steel_gemm_masked<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     out_mask: Tensor<T>,
@@ -215,17 +215,17 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_masked_64x64x16_2x2(dt: DType) -> BenchSetup {
-        mb(mt_steel_gemm_masked_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        mb(ffai_steel_gemm_masked_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_masked_32x32x16_2x2(dt: DType) -> BenchSetup {
-        mb(mt_steel_gemm_masked_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        mb(ffai_steel_gemm_masked_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }
 
 /// New-syntax correctness tests for the block-masked steel GEMM — ports
 /// the oracle from the legacy `tests/steel_gemm_masked_gpu_correctness.rs`
-/// (removed in #240). The
+/// (since removed). The
 /// kernel computes `C = A · B` with block-level predication: an
 /// output-block mask zeroes whole `BM×BN` blocks, an operand-block mask
 /// scales each `BK`-block's contribution.
@@ -314,10 +314,10 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_masked_64x64x16_2x2(dt: DType) -> TestSetup {
-        masked_setup(mt_steel_gemm_masked_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        masked_setup(ffai_steel_gemm_masked_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_masked_32x32x16_2x2(dt: DType) -> TestSetup {
-        masked_setup(mt_steel_gemm_masked_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        masked_setup(ffai_steel_gemm_masked_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 }

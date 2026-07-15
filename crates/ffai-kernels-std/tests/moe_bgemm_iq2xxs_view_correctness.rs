@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_bgemm_iq2xxs_view` — the ZERO-COPY
+//! GPU correctness for `ffai::ffai_moe_bgemm_iq2xxs_view` — the ZERO-COPY
 //! prefill IQ2_XXS grouped BGEMM that reads raw 66-byte IQ2_XXS blocks
 //! straight from a no-copy mmap VIEW buffer (vs the repacked qs/d_f32 pool).
 //! Same oracle as the pool kernel (per-row IQ2_XXS dequant gemv), but the
@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_bgemm_iq2xxs_view::mt_moe_bgemm_iq2xxs_view;
+use ffai_kernels_std::kernels::moe::moe_bgemm_iq2xxs_view::ffai_moe_bgemm_iq2xxs_view;
 use half::f16;
 
 fn xorshift(s: &mut u32) -> u32 {
@@ -130,7 +130,7 @@ fn bgemm_iq2xxs_view_matches_gemv_oracle() {
     buffers.insert("expert_byte_stride".into(), (expert_byte_stride as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_bgemm_iq2xxs_view::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_bgemm_iq2xxs_view::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [
@@ -258,7 +258,7 @@ fn bgemm_iq2xxs_view_prod_dims_nonzero_offset() {
     buffers.insert("expert_byte_stride".into(), (expert_byte_stride as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_bgemm_iq2xxs_view::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_bgemm_iq2xxs_view::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out / 32, t_rows.div_ceil(16), 1], [

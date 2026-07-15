@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Prefill scaled-dot-product attention — `mt_sdpa_prefill`.
+//! Prefill scaled-dot-product attention — `ffai_sdpa_prefill`.
 //!
 //! Self-attention prefill with online softmax + causal masking. MLX
 //! reference is `steel_attention_*_bq32_bk16_bd128_wm4_wn1` (Flash-
@@ -29,7 +29,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_prefill<T>(
+pub fn ffai_sdpa_prefill<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -342,11 +342,11 @@ pub fn mt_sdpa_prefill<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_prefill;
+    use super::ffai_sdpa_prefill;
     use crate::{
         kernels::sdpa::steel_attn::{
-            steel_attention_mma::mt_sdpa_prefill_mma,
-            steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
+            steel_attention_mma::ffai_sdpa_prefill_mma,
+            steel_attention_mma_bf16::ffai_sdpa_prefill_mma_bf16,
         },
         utils::{InputDomain, dtype_tol, input_buffer, mlx_tname},
     };
@@ -362,13 +362,13 @@ pub mod kernel_benches {
     const BQ: u32 = 32;
     const TPG: u32 = 128;
     // MLX `steel_attention` tile params (fixed instantiation it ships):
-    // bq=32, bk=16 (bd=128 ⇒ bk=16), wm=4, wn=1. Our MT BQ is a separate
+    // bq=32, bk=16 (bd=128 ⇒ bk=16), wm=4, wn=1. Our FFAI BQ is a separate
     // tuning knob; the MLX dispatch always uses its bq=32/bk=16 tile.
     const MLX_BQ: usize = 32;
     const MLX_BK: usize = 16;
     const MLX_WM: u32 = 4;
     const MLX_WN: u32 = 1;
-    /// Tolerance floor — legacy steel_attention bench `tol=2e-2`. MT bakes
+    /// Tolerance floor — legacy steel_attention bench `tol=2e-2`. FFAI bakes
     /// `scale·log2(e)` and softmaxes with `exp2`; MLX applies `scale` with a
     /// natural-base softmax. The two are mathematically identical (softmax is
     /// log-base invariant), so f32 is bit-tight; f16/bf16 carry storage
@@ -470,11 +470,11 @@ pub mod kernel_benches {
                         "/metal/steel/attn/steel_attention.metal"
                     )),
                 )
-                // Q[[0]] / K[[1]] / V[[2]] shared by name with the MT inputs.
+                // Q[[0]] / K[[1]] / V[[2]] shared by name with the FFAI inputs.
                 .buffer(BenchBuffer::zeros("q", q_elems, dt))
                 .buffer(BenchBuffer::zeros("k", kv_elems, dt))
                 .buffer(BenchBuffer::zeros("v", kv_elems, dt))
-                // O[[3]] — fresh output, same [B, H, qL, D] layout as MT `out`.
+                // O[[3]] — fresh output, same [B, H, qL, D] layout as FFAI `out`.
                 .buffer(BenchBuffer::zeros("out", q_elems, dt).output())
                 // params[[4]] — 152-byte AttnParams struct.
                 .buffer(BenchBuffer::from_vec("attn_params", attn_params(scale), DType::U8))
@@ -496,12 +496,12 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_prefill(dt: DType) -> BenchSetup {
-        sdpa_b(mt_sdpa_prefill::kernel_ir_for(dt), dt)
+        sdpa_b(ffai_sdpa_prefill::kernel_ir_for(dt), dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_prefill_mma(dt: DType) -> BenchSetup {
-        sdpa_b(mt_sdpa_prefill_mma::kernel_ir_for(dt), dt)
+        sdpa_b(ffai_sdpa_prefill_mma::kernel_ir_for(dt), dt)
     }
 
     // bf16-emulated MMA variant — the M2-family bf16 routing target. Only
@@ -510,14 +510,14 @@ pub mod kernel_benches {
     // is monomorphized over all three input dtypes, same as the legacy spec).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_prefill_mma_bf16(dt: DType) -> BenchSetup {
-        sdpa_b(mt_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt)
+        sdpa_b(ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt)
     }
 }
 
 /// New-syntax correctness tests for the SDPA-prefill family — ports the
 /// causal-SDPA oracle from the legacy
-/// `tests/steel_attention_gpu_correctness.rs` (removed in #240).
-/// All three variants (`mt_sdpa_prefill` scalar flash, `_mma`, and
+/// `tests/steel_attention_gpu_correctness.rs` (since removed).
+/// All three variants (`ffai_sdpa_prefill` scalar flash, `_mma`, and
 /// `_mma_bf16`) share the same dispatch contract and the same reference:
 ///   `O = softmax(Q·Kᵀ · scale)·V` per Q head, with causal masking
 ///   (`k_abs ≤ q_abs`, `q_abs = (k_len - q_len) + qi`) and GQA via
@@ -531,11 +531,11 @@ pub mod kernel_benches {
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
-    use super::mt_sdpa_prefill;
+    use super::ffai_sdpa_prefill;
     use crate::{
         kernels::sdpa::steel_attn::{
-            steel_attention_mma::mt_sdpa_prefill_mma,
-            steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16,
+            steel_attention_mma::ffai_sdpa_prefill_mma,
+            steel_attention_mma_bf16::ffai_sdpa_prefill_mma_bf16,
         },
         utils::{pack_f32, unpack_f32},
     };
@@ -635,14 +635,14 @@ pub mod kernel_tests {
     // 2e-1 (online-softmax + matmul drift at head_dim=128).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_prefill::kernel_ir_for(dt), dt)
+        sdpa_setup(ffai_sdpa_prefill::kernel_ir_for(dt), dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_mma(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_prefill_mma::kernel_ir_for(dt), dt)
+        sdpa_setup(ffai_sdpa_prefill_mma::kernel_ir_for(dt), dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_mma_bf16(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt)
+        sdpa_setup(ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt)
     }
 }

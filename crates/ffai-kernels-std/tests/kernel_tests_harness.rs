@@ -6,8 +6,8 @@
 //! GPU through the shared in-process runner, asserting each passes within its
 //! tolerance. This makes the new test path part of `cargo test --workspace`
 //! (the commit gate) without requiring `ffaik test` — this harness is the
-//! replacement for the former `tests/*_gpu_correctness.rs` files (removed in
-//! #240; per-kernel coverage now lives in in-source `#[test_kernel]`s).
+//! replacement for the former `tests/*_gpu_correctness.rs` files (since
+//! removed; per-kernel coverage now lives in in-source `#[test_kernel]`s).
 //!
 //! macOS-gated; shares the global `gpu_lock` so it serialises with the other
 //! GPU integration tests.

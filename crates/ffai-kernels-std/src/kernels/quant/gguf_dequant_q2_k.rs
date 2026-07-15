@@ -54,7 +54,7 @@ use ffai_kernels::kernel;
 // Bare `#[kernel]` — see Q8_0 sibling for why; mixed concrete +
 // generic param dtype set doesn't fit the legacy `bench(...)` shape.
 #[kernel]
-pub fn mt_gguf_dequant_q2_k<T>(
+pub fn ffai_gguf_dequant_q2_k<T>(
     qs_packed: Tensor<u32>,
     scales: Tensor<u8>,
     d_f32: Tensor<f32>,
@@ -106,7 +106,7 @@ pub fn mt_gguf_dequant_q2_k<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gguf_dequant_q2_k;
+    use super::ffai_gguf_dequant_q2_k;
     use crate::{kernels::quant::gguf, utils::pack_f32};
 
     fn setup(n_blocks: usize, dt: DType) -> TestSetup {
@@ -115,12 +115,12 @@ pub mod kernel_tests {
         // Pack + dequant via the shared GgufFormat oracle (kernels::quant::gguf) — the
         // canonical q2_k_qpos map + two-level decode now live in one place the
         // kernel, the quantizer, and this oracle all share, so the oracle can't
-        // drift from the kernel (the bug class fixed in #264).
+        // drift from the kernel (the bug class this fixes).
         let p = gguf::pack_q2_k(&values);
         let dequantized = gguf::dequant_q2_k(&p);
         // Pack u32 vec as little-endian bytes for the test framework.
         let qs_bytes: Vec<u8> = p.qs_packed.iter().flat_map(|w| w.to_le_bytes()).collect();
-        TestSetup::new(mt_gguf_dequant_q2_k::kernel_ir_for(dt))
+        TestSetup::new(ffai_gguf_dequant_q2_k::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("qs_packed", qs_bytes, DType::U32))
             .input(TestBuffer::from_vec("scales", p.scales, DType::U8))
             .input(TestBuffer::from_vec("d_f32", pack_f32(&p.d, DType::F32), DType::F32))
@@ -141,14 +141,14 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gguf_dequant_q2_k;
+    use super::ffai_gguf_dequant_q2_k;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_q2_k(dt: DType) -> BenchSetup {
         // Representative MoE-expert down-proj slab — 4096 × 4096.
         let n = 4096 * 4096usize;
         let n_blocks = n / 256;
-        BenchSetup::new(mt_gguf_dequant_q2_k::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gguf_dequant_q2_k::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("qs_packed", n_blocks * 16, DType::U32))
             .buffer(BenchBuffer::random("scales", n_blocks * 16, DType::U8))
             .buffer(BenchBuffer::random("d_f32", n_blocks, DType::F32))

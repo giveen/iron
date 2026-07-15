@@ -16,7 +16,7 @@ relevant issue with `#<issue-number>`.
 ## Testing
 
 <!-- If bench numbers changed, paste relevant rows from `cargo bench` output. -->
-<!-- Format: op | dtype | MT GB/s | MLX GB/s | MT% | correct? -->
+<!-- Format: op | dtype | FFAI GB/s | MLX GB/s | FFAI % | correct? -->
 
 ## Checklist
 

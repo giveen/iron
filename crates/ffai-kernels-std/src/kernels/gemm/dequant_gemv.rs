@@ -29,21 +29,21 @@
 //! ## Variant axis
 //!
 //! `#[kernel(variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]`
-//! produces kernels: `mt_dequant_gemv_int2`, `_int3`, `_int4`, `_int5`,
-//! `_int6`, `_int8`. The `mt_dequant_gemv_int4_fast` kernel is a separate
+//! produces kernels: `ffai_dequant_gemv_int2`, `_int3`, `_int4`, `_int5`,
+//! `_int6`, `_int8`. The `ffai_dequant_gemv_int4_fast` kernel is a separate
 //! perf-tuned variant with a different algorithm.
 
 use ffai_kernels::kernel;
 
 /// Dequantizing GEMV — variable bit-widths (2, 3, 4, 5, 6, 8).
 ///
-/// Produces: `mt_dequant_gemv_int2`, `_int3`, `_int4`, `_int5`, `_int6`,
+/// Produces: `ffai_dequant_gemv_int2`, `_int3`, `_int4`, `_int5`, `_int6`,
 /// `_int8`. One threadgroup per output row; `reduce_sum` across lanes.
 ///
 /// `32 % BITS == 0` (BITS ∈ {2,4,8}): pack-strided (one u32 covers `32/BITS` elements).
 /// `32 % BITS != 0` (BITS ∈ {3,5,6}): element-strided two-word bit-stream (`lo | hi` formula).
 #[kernel(variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]
-pub fn mt_dequant_gemv<T>(
+pub fn ffai_dequant_gemv<T>(
     weight: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -117,16 +117,16 @@ pub fn mt_dequant_gemv<T>(
 
 // ── Perf-tuned int4 GEMV — 8 output rows per TG ─────────────────────────
 //
-// Mirrors `mt_qmv`'s geometry: tpg = 64 (2 simdgroups × 32 lanes);
+// Mirrors `ffai_qmv`'s geometry: tpg = 64 (2 simdgroups × 32 lanes);
 // each simdgroup computes 4 output rows (indexed by `simd_id`); each
 // lane caches 16 X values per 512-wide K-block. Uses the mask-without-
 // shift trick + algebraic-split accumulator `s*q_dot + b*xs` from
-// `mt_qmv` / MLX `qdot` (quantized.h:235-244).
+// `ffai_qmv` / MLX `qdot` (quantized.h:235-244).
 //
-// Kept separate from `mt_dequant_gemv_int4` (the one-row-per-TG scalar)
+// Kept separate from `ffai_dequant_gemv_int4` (the one-row-per-TG scalar)
 // for backward compat — FFAI's GPU-router uses the indirect variant of
 // the scalar kernel. The fast variant has no indirect consumer today;
-// adding one is a one-line edit in `mt_dequant_gemv_wants_indirect`.
+// adding one is a one-line edit in `ffai_dequant_gemv_wants_indirect`.
 //
 // Dispatch:
 //   Grid: [out_dim/8, 1, 1]  — one TG per 8-row tile.
@@ -135,13 +135,13 @@ pub fn mt_dequant_gemv<T>(
 //   out_dim: multiple of 8.
 //   group_size: 64.
 
-/// Perf-tuned int4 dequant GEMV — 8 rows per TG, `mt_qmv` geometry.
+/// Perf-tuned int4 dequant GEMV — 8 rows per TG, `ffai_qmv` geometry.
 ///
 /// `output[row] = Σ_i (q[row,i]·scale_g + bias_g) · input[i]`
 /// for 8 consecutive output rows per dispatch. Grid: `[out_dim/8, 1, 1]`,
 /// TPG = 64, group_size = 64, in_dim a multiple of 512.
 ///
-/// The existing `mt_dequant_gemv_int4` is kept unchanged for backward compat
+/// The existing `ffai_dequant_gemv_int4` is kept unchanged for backward compat
 /// (FFAI's indirect-dispatch router uses that name). This variant is the
 /// perf path for new callers that can guarantee the alignment constraints.
 ///
@@ -157,7 +157,7 @@ pub fn mt_dequant_gemv<T>(
 /// runtime-indexed `let mut [T; N]` arrays (see the `_m{16,32}` notes in
 /// `ffai/moe.rs` for the same constraint).
 #[kernel]
-pub fn mt_dequant_gemv_int4_fast<T>(
+pub fn ffai_dequant_gemv_int4_fast<T>(
     weight: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -183,7 +183,7 @@ pub fn mt_dequant_gemv_int4_fast<T>(
         stack_store("accs", _r, 0.0f32);
     }
     // Mask-without-shift constants — eliminates 56 shifts per block.
-    // Matches `mt_qmv` / MLX `qdot` (quantized.h:235-244): instead of
+    // Matches `ffai_qmv` / MLX `qdot` (quantized.h:235-244): instead of
     // shifting each nibble to position 0, multiply x[1/2/3] by 1/16,
     // 1/256, 1/4096 once and keep the nibble in its native bit slot.
     let s_16 = 0.0625f32;
@@ -299,12 +299,12 @@ pub fn mt_dequant_gemv_int4_fast<T>(
 /// kernel, not a special-case match buried in the codegen pass.
 /// The `tile emit` driver consumes this on the way to setting
 /// `Kernel::wants_indirect_variant` before codegen runs.
-pub fn mt_dequant_gemv_wants_indirect(kernel_name: &str) -> bool {
-    matches!(kernel_name, "mt_dequant_gemv_int4_f16" | "mt_dequant_gemv_int4_bf16")
+pub fn ffai_dequant_gemv_wants_indirect(kernel_name: &str) -> bool {
+    matches!(kernel_name, "ffai_dequant_gemv_int4_f16" | "ffai_dequant_gemv_int4_bf16")
 }
 
-/// New-syntax correctness tests for the `mt_dequant_gemv_int{2,3,4,5,6,8}`
-/// family + the perf-tuned `mt_dequant_gemv_int4_fast`. All are Reduction-mode
+/// New-syntax correctness tests for the `ffai_dequant_gemv_int{2,3,4,5,6,8}`
+/// family + the perf-tuned `ffai_dequant_gemv_int4_fast`. All are Reduction-mode
 /// (one threadgroup per output row, `reduce_sum` across the threadgroup).
 ///
 /// Oracle: synthesize bit-stream-packed int-`bits` weights `[out_dim, in_dim]`
@@ -364,7 +364,7 @@ pub mod kernel_tests {
     /// `weight` packs `[out_dim, in_dim]` int-`bits` codes, `scales`/`biases`
     /// are `[out_dim, in_dim/group_size]`, `input` is `[in_dim]`, out `[out_dim]`.
     #[allow(clippy::too_many_arguments)]
-    fn mt_dequant_gemv_oracle(
+    fn ffai_dequant_gemv_oracle(
         weight: &[u32],
         scales: &[f32],
         biases: &[f32],
@@ -426,7 +426,7 @@ pub mod kernel_tests {
         let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
         let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
         let x = unpack_f32(&pack_f32(&input_f, dt), dt);
-        let expected = mt_dequant_gemv_oracle(&w, &s, &b, &x, in_dim, group_size, bits, out_dim);
+        let expected = ffai_dequant_gemv_oracle(&w, &s, &b, &x, in_dim, group_size, bits, out_dim);
         TestSetup::new(kernel)
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("weight", u32_bytes(&w), DType::U32))
@@ -447,9 +447,9 @@ pub mod kernel_tests {
                   variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]
     fn test_dequant_gemv(dt: DType) -> TestSetup {
         if 32u32 % BITS == 0 {
-            gemv_setup(mt_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4, 256, 64, 4, TPG, dt)
+            gemv_setup(ffai_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4, 256, 64, 4, TPG, dt)
         } else {
-            gemv_setup(mt_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4, 64, 32, 4, TPG, dt)
+            gemv_setup(ffai_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4, 64, 32, 4, TPG, dt)
         }
     }
 
@@ -460,7 +460,7 @@ pub mod kernel_tests {
     fn test_dequant_gemv_int4_fast(dt: DType) -> TestSetup {
         let (out_dim, in_dim, group_size) = (8usize, 512usize, 64usize);
         gemv_setup(
-            mt_dequant_gemv_int4_fast::kernel_ir_for(dt),
+            ffai_dequant_gemv_int4_fast::kernel_ir_for(dt),
             4,
             out_dim,
             in_dim,
@@ -514,12 +514,12 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]
     fn bench_dequant_gemv(dt: DType) -> BenchSetup {
-        gb(mt_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4096, 4096, 64, 4096, 64, dt)
+        gb(ffai_dequant_gemv_intBITS::kernel_ir_for(dt), BITS, 4096, 4096, 64, 4096, 64, dt)
     }
 
     // 8-rows-per-TG fast int4: grid [out_dim/8, 1, 1], TPG 64.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_gemv_int4_fast(dt: DType) -> BenchSetup {
-        gb(mt_dequant_gemv_int4_fast::kernel_ir_for(dt), 4, 4096, 4096, 64, 4096 / 8, 64, dt)
+        gb(ffai_dequant_gemv_int4_fast::kernel_ir_for(dt), 4, 4096, 4096, 64, 4096 / 8, 64, dt)
     }
 }

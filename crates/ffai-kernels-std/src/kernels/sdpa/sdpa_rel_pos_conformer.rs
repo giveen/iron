@@ -41,7 +41,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_rel_pos_conformer_d128<T>(
+pub fn ffai_sdpa_rel_pos_conformer_d128<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -193,7 +193,7 @@ pub fn mt_sdpa_rel_pos_conformer_d128<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_rel_pos_conformer_d128;
+    use super::ffai_sdpa_rel_pos_conformer_d128;
     use crate::utils::{pack_f32, unpack_f32};
 
     // Per (query, q_head): softmax(scale·((q+u)·kᵀ + (q+v)·rel_embᵀ))·V
@@ -297,7 +297,7 @@ pub mod kernel_tests {
             kv_stride, rel_zero, rel_len, scale,
         );
 
-        TestSetup::new(mt_sdpa_rel_pos_conformer_d128::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_rel_pos_conformer_d128::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -332,7 +332,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_rel_pos_conformer_d128;
+    use super::ffai_sdpa_rel_pos_conformer_d128;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_conformer(dt: DType) -> BenchSetup {
@@ -347,7 +347,7 @@ pub mod kernel_benches {
         let n_kv = base_kv + n_query;
         let bytes = (2 * n_query * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim)
             * dt.size_bytes();
-        BenchSetup::new(mt_sdpa_rel_pos_conformer_d128::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_rel_pos_conformer_d128::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

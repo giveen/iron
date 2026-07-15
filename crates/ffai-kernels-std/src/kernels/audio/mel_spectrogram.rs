@@ -45,7 +45,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_mel_spectrogram<T>(
+pub fn ffai_mel_spectrogram<T>(
     audio: Tensor<T>,
     window: Tensor<T>,
     mel_weight: Tensor<T>,
@@ -98,27 +98,27 @@ pub fn mt_mel_spectrogram<T>(
 // ─────────────────────────────────────────────────────────────────────────
 // FFT-routed STFT path.
 //
-// `mt_mel_spectrogram` does a direct DFT *inside every (frame, mel_bin)
+// `ffai_mel_spectrogram` does a direct DFT *inside every (frame, mel_bin)
 // thread* — so the full O(n_freq·n_fft) power spectrum is recomputed
 // `n_mels` times per frame. The FFT route splits it into three stages:
 //
-//   1. `mt_mel_stft_window`  — extract + window each frame into FFT input
+//   1. `ffai_mel_stft_window`  — extract + window each frame into FFT input
 //                           planes (real = windowed sample, imag = 0).
-//   2. `mt_fft_n{n_fft}`  — one radix-2 FFT per frame (O(n_fft·log n_fft)).
-//   3. `mt_mel_filterbank`   — power = re²+im², Mel-weight, log.
+//   2. `ffai_fft_n{n_fft}`  — one radix-2 FFT per frame (O(n_fft·log n_fft)).
+//   3. `ffai_mel_filterbank`   — power = re²+im², Mel-weight, log.
 //
 // The spectrum is now computed once per (frame, k) and the transform is
 // O(N log N) instead of O(N²). `n_fft` must be a power of two (the
-// `mt_fft_n*` set). The single-kernel `mt_mel_spectrogram` is kept for
+// `ffai_fft_n*` set). The single-kernel `ffai_mel_spectrogram` is kept for
 // non-pow2 `n_fft` and single-dispatch callers.
 // ─────────────────────────────────────────────────────────────────────────
 
 /// STFT stage 1 — extract and window each frame into the real/imag input
-/// planes the `mt_fft_n*` kernels expect. `out_re[frame*n_fft + t] =
+/// planes the `ffai_fft_n*` kernels expect. `out_re[frame*n_fft + t] =
 /// audio[frame*hop + t] · window[t]`, `out_im` zeroed. One thread per
 /// `(frame, t)`; dispatch flat over `n_frames * n_fft`.
 #[kernel]
-pub fn mt_mel_stft_window<T>(
+pub fn ffai_mel_stft_window<T>(
     audio: Tensor<T>,
     window: Tensor<T>,
     mut out_re: Tensor<T>,
@@ -128,7 +128,7 @@ pub fn mt_mel_stft_window<T>(
     #[constexpr] n_out: u32,
 ) {
     // `n_out = n_frames * n_fft`. Guard the threadgroup-rounded dispatch tail
-    // (see `mt_mel_spectrogram`) from OOB `audio` reads / `out_re`/`out_im` writes.
+    // (see `ffai_mel_spectrogram`) from OOB `audio` reads / `out_re`/`out_im` writes.
     let idx = program_id::<0>();
     if idx < n_out {
         let t = idx % n_fft;
@@ -142,12 +142,12 @@ pub fn mt_mel_stft_window<T>(
 
 /// STFT stage 3 — Mel filterbank over an FFT'd frame buffer. `out[frame,
 /// mel] = log(Σ_{k<n_freq} mel_weight[mel,k]·(re²+im²) + log_eps)`, where
-/// `re`/`im` are `fft_re`/`fft_im` from `mt_fft_n{n_fft}`. One thread per
+/// `re`/`im` are `fft_re`/`fft_im` from `ffai_fft_n{n_fft}`. One thread per
 /// `(frame, mel)`; dispatch flat over `n_frames * n_mels`. Output is
-/// bit-identical in form to `mt_mel_spectrogram` — only the spectrum source
+/// bit-identical in form to `ffai_mel_spectrogram` — only the spectrum source
 /// (FFT vs in-thread DFT) differs.
 #[kernel]
-pub fn mt_mel_filterbank<T>(
+pub fn ffai_mel_filterbank<T>(
     fft_re: Tensor<T>,
     fft_im: Tensor<T>,
     mel_weight: Tensor<T>,
@@ -159,7 +159,7 @@ pub fn mt_mel_filterbank<T>(
     #[constexpr] n_out: u32,
 ) {
     // `n_out = n_frames * n_mels`. Guard the threadgroup-rounded dispatch tail
-    // (see `mt_mel_spectrogram`) from OOB `fft_re`/`fft_im` reads / `out` writes.
+    // (see `ffai_mel_spectrogram`) from OOB `fft_re`/`fft_im` reads / `out` writes.
     let idx = program_id::<0>();
     if idx < n_out {
         let mel_bin = idx % n_mels;
@@ -180,12 +180,12 @@ pub fn mt_mel_filterbank<T>(
 }
 
 /// **Magnitude** log-Mel front-end — `|STFT| = sqrt(re²+im²)` through the
-/// filterbank, vs the power (`re²+im²`) front-end of `mt_mel_spectrogram` above.
+/// filterbank, vs the power (`re²+im²`) front-end of `ffai_mel_spectrogram` above.
 /// The amplitude-correct front-end the Gemma 4 audio encoder + several
 /// streaming-ASR models are trained on (feeding power degrades them).
 /// Direct-DFT, one thread per `(frame, mel_bin)`.
 #[kernel]
-pub fn mt_mel_spectrogram_magnitude<T>(
+pub fn ffai_mel_spectrogram_magnitude<T>(
     audio: Tensor<T>,
     window: Tensor<T>,
     mel_weight: Tensor<T>,
@@ -198,7 +198,7 @@ pub fn mt_mel_spectrogram_magnitude<T>(
     #[constexpr] n_out: u32,
 ) {
     // `n_out = n_frames * n_mels`. Guard the threadgroup-rounded dispatch tail
-    // (see `mt_mel_spectrogram`) from OOB `audio`/`mel_weight` reads / `out` writes.
+    // (see `ffai_mel_spectrogram`) from OOB `audio`/`mel_weight` reads / `out` writes.
     let idx = program_id::<0>();
     if idx < n_out {
         let mel_bin = idx % n_mels;
@@ -235,10 +235,10 @@ pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
     use super::{
-        mt_mel_filterbank,
-        mt_mel_spectrogram,
-        mt_mel_spectrogram_magnitude,
-        mt_mel_stft_window,
+        ffai_mel_filterbank,
+        ffai_mel_spectrogram,
+        ffai_mel_spectrogram_magnitude,
+        ffai_mel_stft_window,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -314,7 +314,7 @@ pub mod kernel_tests {
     // error — but only under low-precision *input* rounding (f16/bf16 quantize
     // the audio enough to sit a bin on the null; f32's finer grid does not).
     // The kernel is generic and correct — the math is identical across dtypes
-    // — so correctness is gated at f32; the post-FFT `mt_mel_filterbank` test below
+    // — so correctness is gated at f32; the post-FFT `ffai_mel_filterbank` test below
     // keeps f16/bf16 coverage on the path with no in-thread cancellation. See
     // the mel row in `specs/KERNEL_AUDIT.md`.
     #[test_kernel(dtypes = [f32], tol = [3e-3])]
@@ -335,7 +335,7 @@ pub mod kernel_tests {
             &audio_dt, &window_dt, &mw_dt, n_fft, n_freq, n_mels, hop_length, n_frames, log_eps,
         );
         let n_out = n_frames * n_mels;
-        TestSetup::new(mt_mel_spectrogram::kernel_ir_for(dt))
+        TestSetup::new(ffai_mel_spectrogram::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("audio", pack_f32(&audio, dt), dt))
             .input(TestBuffer::from_vec("window", pack_f32(&window, dt), dt))
@@ -369,7 +369,7 @@ pub mod kernel_tests {
             }
         }
         let exp_im = vec![0.0f32; n];
-        TestSetup::new(mt_mel_stft_window::kernel_ir_for(dt))
+        TestSetup::new(ffai_mel_stft_window::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("audio", pack_f32(&audio, dt), dt))
             .input(TestBuffer::from_vec("window", pack_f32(&window, dt), dt))
@@ -410,7 +410,7 @@ pub mod kernel_tests {
                 expected[frame * n_mels + mel_bin] = (acc + log_eps).ln();
             }
         }
-        TestSetup::new(mt_mel_filterbank::kernel_ir_for(dt))
+        TestSetup::new(ffai_mel_filterbank::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("fft_re", pack_f32(&fft_re, dt), dt))
             .input(TestBuffer::from_vec("fft_im", pack_f32(&fft_im, dt), dt))
@@ -468,7 +468,7 @@ pub mod kernel_tests {
 
     // f32-only correctness gate, same direct-DFT cancellation-null reason as
     // `test_mel_spectrogram` (magnitude folds an extra `sqrt`, if anything
-    // sharpening the null sensitivity); the post-FFT `mt_mel_filterbank` test keeps
+    // sharpening the null sensitivity); the post-FFT `ffai_mel_filterbank` test keeps
     // f16/bf16 coverage. Looser f32 tol than the power sibling: the `sqrt`
     // amplifies the benign GPU↔CPU DFT accumulation-order difference.
     #[test_kernel(dtypes = [f32], tol = [1.5e-2])]
@@ -489,7 +489,7 @@ pub mod kernel_tests {
             &audio_dt, &window_dt, &mw_dt, n_fft, n_freq, n_mels, hop_length, n_frames, log_eps,
         );
         let n_out = n_frames * n_mels;
-        TestSetup::new(mt_mel_spectrogram_magnitude::kernel_ir_for(dt))
+        TestSetup::new(ffai_mel_spectrogram_magnitude::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("audio", pack_f32(&audio, dt), dt))
             .input(TestBuffer::from_vec("window", pack_f32(&window, dt), dt))
@@ -512,10 +512,10 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
     use super::{
-        mt_mel_filterbank,
-        mt_mel_spectrogram,
-        mt_mel_spectrogram_magnitude,
-        mt_mel_stft_window,
+        ffai_mel_filterbank,
+        ffai_mel_spectrogram,
+        ffai_mel_spectrogram_magnitude,
+        ffai_mel_stft_window,
     };
 
     const N_FFT: usize = 400;
@@ -529,7 +529,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mel_spectrogram(dt: DType) -> BenchSetup {
         let n_out = N_FRAMES * N_MELS;
-        BenchSetup::new(mt_mel_spectrogram::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mel_spectrogram::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("audio", n_samples(), dt))
             .buffer(BenchBuffer::random("window", N_FFT, dt))
@@ -553,7 +553,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mel_stft_window(dt: DType) -> BenchSetup {
         let n = N_FRAMES * N_FFT;
-        BenchSetup::new(mt_mel_stft_window::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mel_stft_window::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("audio", n_samples(), dt))
             .buffer(BenchBuffer::random("window", N_FFT, dt))
@@ -569,7 +569,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mel_filterbank(dt: DType) -> BenchSetup {
         let n_out = N_FRAMES * N_MELS;
-        BenchSetup::new(mt_mel_filterbank::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mel_filterbank::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("fft_re", N_FRAMES * N_FFT, dt))
             .buffer(BenchBuffer::random("fft_im", N_FRAMES * N_FFT, dt))
@@ -590,7 +590,7 @@ pub mod kernel_benches {
         let n_freq = n_fft / 2 + 1;
         let n_samples = (n_frames - 1) * hop_length + n_fft;
         let n_out = n_frames * n_mels;
-        BenchSetup::new(mt_mel_spectrogram_magnitude::kernel_ir_for(dt))
+        BenchSetup::new(ffai_mel_spectrogram_magnitude::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("audio", n_samples, dt))
             .buffer(BenchBuffer::random("window", n_fft, dt))

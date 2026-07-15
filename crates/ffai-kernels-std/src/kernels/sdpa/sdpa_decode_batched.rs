@@ -4,21 +4,21 @@
 //! positions share one KV walk per dispatch, amortizing KV memory
 //! bandwidth by K× vs. K independent single-Q `sdpa_decode` dispatches.
 //!
-//! This file ships the K=2 (`mt_sdpa_decode_batched_q2`) and K=4
-//! (`mt_sdpa_decode_batched_q4`) decode-form specializations. K=8 and
+//! This file ships the K=2 (`ffai_sdpa_decode_batched_q2`) and K=4
+//! (`ffai_sdpa_decode_batched_q4`) decode-form specializations. K=8 and
 //! K=16 land separately via prefill-tile reuse through
-//! `mt_sdpa_prefill_mma` (the FA-2 tile already implements the
+//! `ffai_sdpa_prefill_mma` (the FA-2 tile already implements the
 //! KV-reuse pattern at BQ × BK; the batched variant arm dispatches it
 //! with `q_len = K, k_len = n_kv`). See
 //! `ffai-kernels-planning/M7-batched-q-sdpa-plan.md`.
 //!
 //! ## DISPATCH INVARIANTS
 //!
-//! - **K=2 (`mt_sdpa_decode_batched_q2`):** TPG = 1024 (32 simdgroups × 32
+//! - **K=2 (`ffai_sdpa_decode_batched_q2`):** TPG = 1024 (32 simdgroups × 32
 //!   lanes). The kernel emits MSL that pins this layout via the
 //!   threadgroup-memory allocations and the cross-simdgroup reduction;
 //!   any other TPG breaks the bank-conflict-padded `tg_out` stride.
-//! - **K=4 (`mt_sdpa_decode_batched_q4`):** TPG ≤ 768; recommended 512
+//! - **K=4 (`ffai_sdpa_decode_batched_q4`):** TPG ≤ 768; recommended 512
 //!   (16 simdgroups × 32 lanes). **Dispatching at 1024 silently
 //!   produces all-zero outputs** — Metal's pipeline-state compiler caps
 //!   `maxTotalThreadsPerThreadgroup` at 768 for this kernel's register
@@ -88,7 +88,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_decode_batched_q2<T>(
+pub fn ffai_sdpa_decode_batched_q2<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -358,7 +358,7 @@ pub fn mt_sdpa_decode_batched_q2<T>(
 // `sdpa_decode`'s sink + window passes.
 
 #[kernel]
-pub fn mt_sdpa_decode_batched_q4<T>(
+pub fn ffai_sdpa_decode_batched_q4<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -707,7 +707,7 @@ pub fn mt_sdpa_decode_batched_q4<T>(
 // Each phase's body duplicates the established pattern.
 
 #[kernel]
-pub fn mt_sdpa_decode_batched_q8<T>(
+pub fn ffai_sdpa_decode_batched_q8<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -1299,12 +1299,12 @@ mod tests {
         core::{DType, ir::KernelMode},
     };
 
-    use super::mt_sdpa_decode_batched_q2;
+    use super::ffai_sdpa_decode_batched_q2;
 
     fn msl_for(dt: DType) -> String {
-        let mut k = mt_sdpa_decode_batched_q2::kernel_ir_for(dt);
+        let mut k = ffai_sdpa_decode_batched_q2::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_sdpa_decode_batched_q2 codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_sdpa_decode_batched_q2 codegen succeeds")
     }
 
     #[test]
@@ -1313,7 +1313,7 @@ mod tests {
             let src = msl_for(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_sdpa_decode_batched_q2"),
+                src.contains("kernel void ffai_sdpa_decode_batched_q2"),
                 "MSL for {dt:?} should declare the kernel function:\n{src}",
             );
         }
@@ -1376,9 +1376,9 @@ mod tests {
     // ── K=4 codegen tests ────────────────────────────────────────────
 
     fn msl_for_q4(dt: DType) -> String {
-        let mut k = super::mt_sdpa_decode_batched_q4::kernel_ir_for(dt);
+        let mut k = super::ffai_sdpa_decode_batched_q4::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_sdpa_decode_batched_q4 codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_sdpa_decode_batched_q4 codegen succeeds")
     }
 
     #[test]
@@ -1387,7 +1387,7 @@ mod tests {
             let src = msl_for_q4(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_sdpa_decode_batched_q4"),
+                src.contains("kernel void ffai_sdpa_decode_batched_q4"),
                 "MSL for {dt:?} should declare the kernel function:\n{src}",
             );
         }
@@ -1445,7 +1445,11 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_sdpa_decode_batched_q2, mt_sdpa_decode_batched_q4, mt_sdpa_decode_batched_q8};
+    use super::{
+        ffai_sdpa_decode_batched_q2,
+        ffai_sdpa_decode_batched_q4,
+        ffai_sdpa_decode_batched_q8,
+    };
     use crate::utils::{pack_f32, unpack_f32};
 
     // Dense SDPA for a single Q slot: `[n_q_heads, head_dim]` query,
@@ -1572,19 +1576,19 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_decode_batched_q2(dt: DType) -> TestSetup {
-        batched_setup(mt_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, 1024, dt)
+        batched_setup(ffai_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, 1024, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_decode_batched_q4(dt: DType) -> TestSetup {
-        batched_setup(mt_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, 512, dt)
+        batched_setup(ffai_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, 512, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_decode_batched_q8(dt: DType) -> TestSetup {
         // q8 carries the most per-thread state — dispatch at 256 (8 simdgroups)
         // to stay within the Apple GPU register file (512 still miscomputes).
-        batched_setup(mt_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, 256, dt)
+        batched_setup(ffai_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, 256, dt)
     }
 }
 
@@ -1594,7 +1598,11 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_sdpa_decode_batched_q2, mt_sdpa_decode_batched_q4, mt_sdpa_decode_batched_q8};
+    use super::{
+        ffai_sdpa_decode_batched_q2,
+        ffai_sdpa_decode_batched_q4,
+        ffai_sdpa_decode_batched_q8,
+    };
 
     fn setup(ir: ffai_kernels::core::ir::Kernel, batch_q: usize, dt: DType) -> BenchSetup {
         let (n_q_heads, n_kv_heads, head_dim) = (32usize, 8usize, 128usize);
@@ -1622,16 +1630,16 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_q2(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, dt)
+        setup(ffai_sdpa_decode_batched_q2::kernel_ir_for(dt), 2, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_q4(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, dt)
+        setup(ffai_sdpa_decode_batched_q4::kernel_ir_for(dt), 4, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_q8(dt: DType) -> BenchSetup {
-        setup(mt_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, dt)
+        setup(ffai_sdpa_decode_batched_q8::kernel_ir_for(dt), 8, dt)
     }
 }

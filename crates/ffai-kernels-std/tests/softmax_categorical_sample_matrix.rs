@@ -1,12 +1,12 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Matrix coverage for `ffai::mt_softmax_categorical_sample` —
+//! Matrix coverage for `ffai::ffai_softmax_categorical_sample` —
 //! dtype × vocab × temperature × distribution × uniform-draw, plus
 //! invariant property assertions that catch silent codegen bugs
 //! numeric drift alone can't detect.
 //!
 //! Regression class this guards:
-//! - PR #19's proc-macro refactor silently emptied this kernel's body
+//! - A proc-macro refactor once silently emptied this kernel's body
 //!   (only restored after a separate fix). A pinned 3-test suite is
 //!   easy to satisfy by accident (e.g. via the trivial "always returns
 //!   0" fallback path); a matrix that includes peaked distributions
@@ -61,7 +61,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::sampling::categorical_sample::mt_softmax_categorical_sample;
+use ffai_kernels_std::kernels::sampling::categorical_sample::ffai_softmax_categorical_sample;
 
 // ── CPU oracle (mirrors the kernel's three-pass shape) ────────────────
 
@@ -102,7 +102,7 @@ fn run_sample(ctx: &Context, dt: Dt, logits: &[f32], temperature: f32, uniform: 
     buffers.insert("uniform_in".into(), uniform.to_le_bytes().to_vec());
     buffers.insert("n".into(), (n as u32).to_le_bytes().to_vec());
 
-    let mut kernel = mt_softmax_categorical_sample::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_softmax_categorical_sample::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     // Fixed TPG = 256 per kernel invariant (tg_max + tg_sum both 256-wide,

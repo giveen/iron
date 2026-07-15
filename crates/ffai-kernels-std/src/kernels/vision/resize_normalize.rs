@@ -29,7 +29,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_resize_normalize<T>(
+pub fn ffai_resize_normalize<T>(
     input: Tensor<T>,
     mean: Tensor<f32>,
     std: Tensor<f32>,
@@ -102,7 +102,7 @@ pub fn mt_resize_normalize<T>(
 /// weights (no renormalize). Per-tap branch specialization is exact at
 /// boundaries (cubic1(1)=cubic2(1)=0).
 #[kernel]
-pub fn mt_resize_normalize_bicubic<T>(
+pub fn ffai_resize_normalize_bicubic<T>(
     input: Tensor<T>,
     mean: Tensor<f32>,
     std: Tensor<f32>,
@@ -204,12 +204,12 @@ pub fn mt_resize_normalize_bicubic<T>(
     store(out[(c * th + oy) * tw + ox], normed.cast::<T>());
 }
 
-/// New-syntax correctness for `mt_resize_normalize` vs a CPU bilinear
+/// New-syntax correctness for `ffai_resize_normalize` vs a CPU bilinear
 /// reference. Grid3D, grid `[target_w, target_h, 3]`, tpg `[1,1,1]`.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_resize_normalize, mt_resize_normalize_bicubic};
+    use super::{ffai_resize_normalize, ffai_resize_normalize_bicubic};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: u32) -> Vec<u8> { v.to_le_bytes().to_vec() }
@@ -263,7 +263,7 @@ pub mod kernel_tests {
         let src_f: Vec<f32> = (0..sh * sw * 3).map(|i| ((i % 17) as f32) / 17.0).collect();
         let src = unpack_f32(&pack_f32(&src_f, dt), dt);
         let exp = cpu_ref(&src, sw, sh, tw, th, &mean, &std);
-        TestSetup::new(mt_resize_normalize::kernel_ir_for(dt))
+        TestSetup::new(ffai_resize_normalize::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec(
@@ -348,7 +348,7 @@ pub mod kernel_tests {
         let src_f: Vec<f32> = (0..sh * sw * 3).map(|i| ((i % 23) as f32) / 23.0).collect();
         let src = unpack_f32(&pack_f32(&src_f, dt), dt);
         let exp = cpu_ref_bicubic(&src, sw, sh, tw, th, &mean, &std);
-        TestSetup::new(mt_resize_normalize_bicubic::kernel_ir_for(dt))
+        TestSetup::new(ffai_resize_normalize_bicubic::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec(
@@ -378,7 +378,7 @@ pub mod kernel_tests {
         let src_f: Vec<f32> = (0..sh * sw * 3).map(|i| ((i % 17) as f32) / 17.0).collect();
         let src = unpack_f32(&pack_f32(&src_f, dt), dt);
         let exp = cpu_ref_bicubic(&src, sw, sh, tw, th, &mean, &std);
-        TestSetup::new(mt_resize_normalize_bicubic::kernel_ir_for(dt))
+        TestSetup::new(ffai_resize_normalize_bicubic::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("input", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec(
@@ -401,17 +401,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_resize_normalize` at a representative VL
+/// New-syntax benchmark for `ffai_resize_normalize` at a representative VL
 /// preprocess shape (≈640×480 source → 448×448).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_resize_normalize, mt_resize_normalize_bicubic};
+    use super::{ffai_resize_normalize, ffai_resize_normalize_bicubic};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_resize_normalize(dt: DType) -> BenchSetup {
         let (sw, sh, tw, th) = (640usize, 480usize, 448usize, 448usize);
-        BenchSetup::new(mt_resize_normalize::kernel_ir_for(dt))
+        BenchSetup::new(ffai_resize_normalize::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", sh * sw * 3, dt))
             .buffer(BenchBuffer::random("mean", 3, DType::F32))
@@ -442,7 +442,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_resize_normalize_bicubic(dt: DType) -> BenchSetup {
         let (sw, sh, tw, th) = (640usize, 480usize, 448usize, 448usize);
-        BenchSetup::new(mt_resize_normalize_bicubic::kernel_ir_for(dt))
+        BenchSetup::new(ffai_resize_normalize_bicubic::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("input", sh * sw * 3, dt))
             .buffer(BenchBuffer::random("mean", 3, DType::F32))

@@ -36,7 +36,7 @@ use ffai_kernels::kernel;
 // `for` loop yields identical MSL and survives the proc-macro intact.
 
 #[kernel]
-pub fn mt_argmax<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
+pub fn ffai_argmax<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
     let lid = tid;
     let mut best_val = neg_infinity();
     let mut best_idx = lid - lid;
@@ -85,7 +85,7 @@ pub fn mt_argmax<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
 }
 
 #[kernel]
-pub fn mt_argmin<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
+pub fn ffai_argmin<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
     let lid = tid;
     // argmin seeds with +infinity so any finite value wins.
     let mut best_val = infinity();
@@ -140,7 +140,7 @@ pub fn mt_argmin<T>(inp: Tensor<T>, out: Tensor<u32>, #[constexpr] n: u32) {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_argmax, mt_argmin};
+    use super::{ffai_argmax, ffai_argmin};
     use crate::utils::pack_f32;
 
     fn setup(
@@ -162,13 +162,13 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.5)]
-    fn test_mt_argmax(dt: DType) -> TestSetup {
-        setup(mt_argmax::kernel_ir_for(dt), 1000, 813, 2.0, dt)
+    fn test_ffai_argmax(dt: DType) -> TestSetup {
+        setup(ffai_argmax::kernel_ir_for(dt), 1000, 813, 2.0, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.5)]
-    fn test_mt_argmin(dt: DType) -> TestSetup {
-        setup(mt_argmin::kernel_ir_for(dt), 1000, 271, -2.0, dt)
+    fn test_ffai_argmin(dt: DType) -> TestSetup {
+        setup(ffai_argmin::kernel_ir_for(dt), 1000, 271, -2.0, dt)
     }
 
     /// Tie-break: a plateau of equal extrema must resolve to the SMALLEST
@@ -199,15 +199,15 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32], tol = 0.5)]
-    fn test_mt_argmax_ties_take_smallest(dt: DType) -> TestSetup {
+    fn test_ffai_argmax_ties_take_smallest(dt: DType) -> TestSetup {
         let _ = dt;
-        tie_setup(mt_argmax::kernel_ir_for(DType::F32), 1024, 200, 600, 5.0)
+        tie_setup(ffai_argmax::kernel_ir_for(DType::F32), 1024, 200, 600, 5.0)
     }
 
     #[test_kernel(dtypes = [f32], tol = 0.5)]
-    fn test_mt_argmin_ties_take_smallest(dt: DType) -> TestSetup {
+    fn test_ffai_argmin_ties_take_smallest(dt: DType) -> TestSetup {
         let _ = dt;
-        tie_setup(mt_argmin::kernel_ir_for(DType::F32), 1024, 200, 600, -5.0)
+        tie_setup(ffai_argmin::kernel_ir_for(DType::F32), 1024, 200, 600, -5.0)
     }
 }
 
@@ -216,7 +216,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, core::ir::Kernel, test::*};
 
-    use super::{mt_argmax, mt_argmin};
+    use super::{ffai_argmax, ffai_argmin};
     use crate::utils::{InputDomain, input_buffer, mlx_tname};
 
     const ARG_REDUCE_N: usize = 256 * 1024;
@@ -225,7 +225,7 @@ pub mod kernel_benches {
     const ARG_REDUCE_TOL: f32 = 0.5;
 
     // Attaches the MLX `metal/arg_reduce.metal` `argmax_<tn>` / `argmin_<tn>`
-    // (`arg_reduce_general`) reference. Both MT and MLX emit the winning index as
+    // (`arg_reduce_general`) reference. Both FFAI and MLX emit the winning index as
     // a `u32`, so the output buffer is `DType::U32` and the comparison checks an
     // exact index match.
     //
@@ -252,7 +252,7 @@ pub mod kernel_benches {
                     format!("{mlx_op}_{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/arg_reduce.metal")),
                 )
-                // in[0] shared by name with the MT `inp` above (placeholder).
+                // in[0] shared by name with the FFAI `inp` above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", n, dt))
                 // u32 index output — compared for an exact match.
                 .buffer(BenchBuffer::zeros("out", 1, DType::U32).output())
@@ -267,14 +267,14 @@ pub mod kernel_benches {
                 .buffer(BenchBuffer::from_vec("axis_stride", 1u64.to_le_bytes().to_vec(), DType::U32))
                 // axis_size (size_t, 8 bytes) = N — reduce the whole input.
                 .buffer(BenchBuffer::from_vec("axis_size", (n as u64).to_le_bytes().to_vec(), DType::U32))
-                // One threadgroup of 256 threads, matching MT.
+                // One threadgroup of 256 threads, matching FFAI.
                 .grid(Grid::new_3d(1, 1, 1, [256, 1, 1]))
                 .tol(ARG_REDUCE_TOL),
             )
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_argmax(dt: DType) -> BenchSetup { ab(mt_argmax::kernel_ir_for(dt), dt, "argmax") }
+    fn bench_argmax(dt: DType) -> BenchSetup { ab(ffai_argmax::kernel_ir_for(dt), dt, "argmax") }
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_argmin(dt: DType) -> BenchSetup { ab(mt_argmin::kernel_ir_for(dt), dt, "argmin") }
+    fn bench_argmin(dt: DType) -> BenchSetup { ab(ffai_argmin::kernel_ir_for(dt), dt, "argmin") }
 }

@@ -1,13 +1,13 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! MoE permute / unpermute — `mt_moe_permute` gathers token rows into
-//! expert-sorted order ahead of the grouped expert matmul; `mt_moe_unpermute`
+//! MoE permute / unpermute — `ffai_moe_permute` gathers token rows into
+//! expert-sorted order ahead of the grouped expert matmul; `ffai_moe_unpermute`
 //! scatters the per-expert outputs back to token order with the router-weight
 //! combine. Both keep the MoE dispatch on-device.
 
 use ffai_kernels::kernel;
 
-// ── mt_moe_unpermute ─────────────────────────────────────────────────────
+// ── ffai_moe_unpermute ─────────────────────────────────────────────────────
 //
 // Combine k expert outputs back into the original token order with
 // top-k softmax weights.
@@ -19,7 +19,7 @@ use ffai_kernels::kernel;
 //                                       in expert_outputs (computed by
 //                                       caller's sort step)
 //   top_k_weights   — [B*T, k]          softmax weights from
-//                                       mt_moe_router_topk
+//                                       ffai_moe_router_topk
 //   out             — [B*T, hidden]     weighted sum across k experts
 //
 // Constexpr:
@@ -35,7 +35,7 @@ use ffai_kernels::kernel;
 // column. At hidden=2048, k=8 → ~1k FMAs per token. Bandwidth-bound,
 // not ALU-bound.
 #[kernel]
-pub fn mt_moe_unpermute<T>(
+pub fn ffai_moe_unpermute<T>(
     expert_outputs: Tensor<T>,
     inv_perm: Tensor<u32>,
     top_k_weights: Tensor<T>,
@@ -64,7 +64,7 @@ pub fn mt_moe_unpermute<T>(
     }
 }
 
-// ── mt_moe_permute ───────────────────────────────────────────────────────
+// ── ffai_moe_permute ───────────────────────────────────────────────────────
 //
 // Gather tokens into per-expert contiguous buffers given a pre-computed
 // sort permutation. The expensive sort step (argsort over top-k expert
@@ -96,7 +96,7 @@ pub fn mt_moe_unpermute<T>(
 // Per-permuted-row cost: hidden / 128 = 16 loads + 16 stores (at
 // hidden=2048). Bandwidth-bound — no FMAs, just a vector copy.
 #[kernel]
-pub fn mt_moe_permute<T>(
+pub fn ffai_moe_permute<T>(
     tokens: Tensor<T>,
     sort_token_idx: Tensor<u32>,
     mut permuted: Tensor<T>,
@@ -117,7 +117,7 @@ pub fn mt_moe_permute<T>(
     }
 }
 
-// ── mt_moe_sort_plan ─────────────────────────────────────────────────────
+// ── ffai_moe_sort_plan ─────────────────────────────────────────────────────
 //
 // Build the expert-sorted MoE dispatch plan ON DEVICE from the router's
 // top-k expert ids, so the layer needs no readback / waitUntilCompleted /
@@ -131,7 +131,7 @@ pub fn mt_moe_permute<T>(
 // Each thread scans the full [m_total] id list (u32, L1-resident). No
 // atomics, stable, bit-identical run to run. Grid = [m_total], tpg 256.
 #[kernel]
-pub fn mt_moe_sort_plan(
+pub fn ffai_moe_sort_plan(
     topk_ids: Tensor<u32>,
     mut sorted_experts: Tensor<u32>,
     mut source_tokens: Tensor<u32>,
@@ -163,7 +163,7 @@ pub mod kernel_tests {
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
-    // mt_moe_sort_plan: device-built expert-sorted dispatch plan.
+    // ffai_moe_sort_plan: device-built expert-sorted dispatch plan.
     #[test_kernel(dtypes = [f32], tol = 0.0)]
     fn test_moe_sort_plan(_dt: DType) -> TestSetup {
         let (n_tokens, k) = (6usize, 2usize);
@@ -179,7 +179,7 @@ pub mod kernel_tests {
             st[dst] = (i / k) as u32;
             ip[i] = dst as u32;
         }
-        TestSetup::new(mt_moe_sort_plan::kernel_ir())
+        TestSetup::new(ffai_moe_sort_plan::kernel_ir())
             .input(TestBuffer::from_vec("topk_ids", u32_bytes(&ids), DType::U32))
             .input(TestBuffer::zeros("sorted_experts", m_total, DType::U32))
             .input(TestBuffer::zeros("source_tokens", m_total, DType::U32))
@@ -192,7 +192,7 @@ pub mod kernel_tests {
             .grid_1d(m_total, 256)
     }
 
-    // mt_moe_permute: gather token rows into expert-sorted order.
+    // ffai_moe_permute: gather token rows into expert-sorted order.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_moe_permute(dt: DType) -> TestSetup {
         let (n_tokens, k, hidden) = (4usize, 2usize, 128usize);
@@ -208,7 +208,7 @@ pub mod kernel_tests {
                 expected[p * hidden + h] = tokens[src * hidden + h];
             }
         }
-        TestSetup::new(mt_moe_permute::kernel_ir_for(dt))
+        TestSetup::new(ffai_moe_permute::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("tokens", pack_f32(&tokens_f, dt), dt))
             .input(TestBuffer::from_vec("sort_token_idx", u32_bytes(&sort_token_idx), DType::U32))
@@ -218,7 +218,7 @@ pub mod kernel_tests {
             .grid_3d(n_permuted as u32, 1, 1, [128, 1, 1])
     }
 
-    // mt_moe_unpermute: weighted sum of k expert outputs back to token order.
+    // ffai_moe_unpermute: weighted sum of k expert outputs back to token order.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_moe_unpermute(dt: DType) -> TestSetup {
         let (n_tokens, k, hidden) = (4usize, 2usize, 128usize);
@@ -240,7 +240,7 @@ pub mod kernel_tests {
                 expected[token * hidden + h] = acc;
             }
         }
-        TestSetup::new(mt_moe_unpermute::kernel_ir_for(dt))
+        TestSetup::new(ffai_moe_unpermute::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("expert_outputs", pack_f32(&expert_outputs_f, dt), dt))
             .input(TestBuffer::from_vec("inv_perm", u32_bytes(&inv_perm), DType::U32))
@@ -267,7 +267,7 @@ pub mod kernel_benches {
         let m_total = t * k;
         let ids: Vec<u32> = (0..m_total).map(|i| ((i * 2654435761usize) % 256) as u32).collect();
         let bytes: Vec<u8> = ids.iter().flat_map(|x| x.to_le_bytes()).collect();
-        BenchSetup::new(mt_moe_sort_plan::kernel_ir())
+        BenchSetup::new(ffai_moe_sort_plan::kernel_ir())
             .buffer(BenchBuffer::from_vec("topk_ids", bytes, DType::U32))
             .buffer(BenchBuffer::zeros("sorted_experts", m_total, DType::U32).output())
             .buffer(BenchBuffer::zeros("source_tokens", m_total, DType::U32).output())
@@ -287,7 +287,7 @@ pub mod kernel_benches {
         let sz = dt.size_bytes();
         // Reads `rows` source rows (worst case all distinct) + writes `rows`.
         let bytes = 2 * rows * hidden * sz;
-        BenchSetup::new(mt_moe_permute::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_permute::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("tokens", bt * hidden, dt))
             .buffer(BenchBuffer::zeros("sort_token_idx", rows, DType::U32))
@@ -308,7 +308,7 @@ pub mod kernel_benches {
         let hidden = 2048usize;
         let sz = dt.size_bytes();
         let bytes = k * bt * hidden * sz + bt * k * 4 + bt * k * sz + bt * hidden * sz;
-        BenchSetup::new(mt_moe_unpermute::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_unpermute::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("expert_outputs", k * bt * hidden, dt))
             .buffer(BenchBuffer::zeros("inv_perm", bt * k, DType::U32))

@@ -485,7 +485,7 @@ mod enabled {
                 Ok(samples) if !samples.is_empty() => {
                     let stats = BenchStats::from_samples(samples);
                     // Effective bandwidth from steady-state (min) latency.
-                    let mt_gbps = if stats.min_us > 0.0 {
+                    let ffai_gbps = if stats.min_us > 0.0 {
                         bytes_moved as f64 / (stats.min_us * 1_000.0)
                     } else {
                         0.0
@@ -509,9 +509,9 @@ mod enabled {
                         group: family.to_string(),
                         dtype: dtype_str,
                         shape,
-                        mt_gbps,
+                        ffai_gbps,
                         ref_gbps: None,
-                        mt_pct: None,
+                        ffai_pct: None,
                         correct: true,
                         min_us: stats.min_us,
                         mean_us: stats.mean_us,

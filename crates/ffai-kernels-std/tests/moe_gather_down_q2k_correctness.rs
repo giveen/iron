@@ -15,10 +15,10 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_gather_down_q2k::mt_moe_gather_down_q2k;
+use ffai_kernels_std::kernels::moe::moe_gather_down_q2k::ffai_moe_gather_down_q2k;
 // The Q2_K output-index → (qs byte, 2-bit shift) map is the single shared
 // definition in `kernels::quant::gguf`: the kernel, the quantizer, and this oracle all
-// read it, so the layout can't drift apart (getting it wrong was PR #264).
+// read it, so the layout can't drift apart (getting it wrong was a past bug).
 use ffai_kernels_std::kernels::quant::gguf::q2_k_qpos;
 
 const N_SLOTS: usize = 6;
@@ -111,7 +111,7 @@ fn run_gpu(
     buffers.insert("n_slots".into(), (N_SLOTS as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let mut kernel = mt_moe_gather_down_q2k::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_moe_gather_down_q2k::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [m_out, 1, 1], [32, 1, 1])

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_steel_gemm_splitk_nax` — split-K GEMM via `mpp::tensor_ops::matmul2d`.
+//! `ffai_steel_gemm_splitk_nax` — split-K GEMM via `mpp::tensor_ops::matmul2d`.
 //!
 //! NAX (Apple tensor-core) port of the two-kernel split-K GEMM.
 //! Requires Metal 4 / macOS 26+ and Apple10+ hardware; runtime-gated
@@ -10,14 +10,14 @@
 //! skinny-M / skinny-N matmul with a very large K still saturates the
 //! GPU. It is a **two-kernel** dispatch:
 //!
-//!   1. `mt_steel_gemm_splitk_nax` — each K-split computes a partial
+//!   1. `ffai_steel_gemm_splitk_nax` — each K-split computes a partial
 //!      `[M, N]` product over its slice of K via cooperative `matmul2d`
 //!      and writes it (fp32) to a `[n_splits, M, N]` partials buffer.
-//!   2. `mt_steel_gemm_splitk_accum_nax` — reduces the `n_splits`
+//!   2. `ffai_steel_gemm_splitk_accum_nax` — reduces the `n_splits`
 //!      partial `[M, N]` matrices into the final `[M, N]` output.
 //!
 //! Both kernels are expressed in the `#[kernel]` DSL — no `Op::InlineMsl`.
-//! The split-K kernel is exactly `mt_steel_gemm_fused_nax` with a 3-D
+//! The split-K kernel is exactly `ffai_steel_gemm_fused_nax` with a 3-D
 //! grid: `tgid_z` selects the K-split and the K-loop walks only this
 //! split's `[k_start, k_end)` range. The accumulator is fp32 so the
 //! cross-split sum keeps full precision for f16/bf16 inputs — the
@@ -29,7 +29,7 @@
 //! `bfloat` cooperative tensors), else `T`. Accumulation is fp32; the
 //! partials slab is fp32 regardless of operand dtype.
 //!
-//! ## Geometry (mirrors `mt_steel_gemm_fused_nax`)
+//! ## Geometry (mirrors `ffai_steel_gemm_fused_nax`)
 //!
 //! - **TPG: 128 threads** (4 SG × 32 lanes). Fixed.
 //! - **BM = BN = BK = 32** → 32×32 output tile per TG.
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
 /// `partials[split, :, :]`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_steel_gemm_splitk_nax<T>(
+pub fn ffai_steel_gemm_splitk_nax<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     mut partials: Tensor<f32>,
@@ -147,7 +147,7 @@ pub fn mt_steel_gemm_splitk_nax<T>(
 /// NAX split-K accumulator. One thread per `[M, N]` output element;
 /// sums `n_splits` partial slabs into the final `out` tensor.
 #[kernel]
-pub fn mt_steel_gemm_splitk_accum_nax<T>(
+pub fn ffai_steel_gemm_splitk_accum_nax<T>(
     partials: Tensor<f32>,
     mut out: Tensor<T>,
     #[constexpr] m: u32,
@@ -181,11 +181,11 @@ pub fn mt_steel_gemm_splitk_accum_nax<T>(
 ///
 /// `bytes_moved` counts the dominant streams. Bench-only — correctness
 /// lives in the in-source `#[test_kernel]`s (ported from the legacy
-/// `tests/steel_gemm_splitk_nax_gpu_correctness.rs`, removed in #240).
+/// `tests/steel_gemm_splitk_nax_gpu_correctness.rs`, since removed).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_steel_gemm_splitk_accum_nax, mt_steel_gemm_splitk_nax};
+    use super::{ffai_steel_gemm_splitk_accum_nax, ffai_steel_gemm_splitk_nax};
 
     const M: u32 = 4096;
     const N: u32 = 4096;
@@ -204,7 +204,7 @@ pub mod kernel_benches {
         let sz = dt.size_bytes();
         let f32_sz = DType::F32.size_bytes();
         let bytes = (m * k + k * n) * sz + N_SPLITS as usize * m * n * f32_sz;
-        BenchSetup::new(mt_steel_gemm_splitk_nax::kernel_ir_for(dt))
+        BenchSetup::new(ffai_steel_gemm_splitk_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("a", m * k, dt))
             .buffer(BenchBuffer::random("b", k * n, dt))
@@ -231,7 +231,7 @@ pub mod kernel_benches {
         let sz = dt.size_bytes();
         let f32_sz = DType::F32.size_bytes();
         let bytes = N_SPLITS as usize * m * n * f32_sz + m * n * sz;
-        BenchSetup::new(mt_steel_gemm_splitk_accum_nax::kernel_ir_for(dt))
+        BenchSetup::new(ffai_steel_gemm_splitk_accum_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("partials", N_SPLITS as usize * m * n, DType::F32))
             .buffer(BenchBuffer::zeros("out", m * n, dt).output())
@@ -250,13 +250,13 @@ pub mod kernel_benches {
 
 /// New-syntax correctness tests for the two-kernel NAX split-K steel
 /// GEMM — ports the oracle from the legacy
-/// `tests/steel_gemm_splitk_nax_gpu_correctness.rs` (removed in #240). Each
+/// `tests/steel_gemm_splitk_nax_gpu_correctness.rs` (since removed). Each
 /// pass is pinned
 /// independently (single dispatch per `#[test_kernel]`):
-///   - **pass 1** (`mt_steel_gemm_splitk_nax`) — each `tgid_z` K-split
+///   - **pass 1** (`ffai_steel_gemm_splitk_nax`) — each `tgid_z` K-split
 ///     writes its partial `[M, N]` product (fp32) to `partials[split]`.
 ///     Oracle = per-split partial matmul over `[k_start, k_end)`.
-///   - **pass 2** (`mt_steel_gemm_splitk_accum_nax`) — sums `n_splits`
+///   - **pass 2** (`ffai_steel_gemm_splitk_accum_nax`) — sums `n_splits`
 ///     partial slabs into `[M, N]`. Oracle = straight fp32 sum of seeded
 ///     partials, cast to `T`.
 ///
@@ -270,7 +270,7 @@ pub mod kernel_benches {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_steel_gemm_splitk_accum_nax, mt_steel_gemm_splitk_nax};
+    use super::{ffai_steel_gemm_splitk_accum_nax, ffai_steel_gemm_splitk_nax};
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Per-split partial fp32 reference.
@@ -311,7 +311,7 @@ pub mod kernel_tests {
         let a = unpack_f32(&pack_f32(&a, dt), dt);
         let b = unpack_f32(&pack_f32(&b, dt), dt);
         let expected = naive_splitk_partials(&a, &b, m, k, n, n_splits, k_per_split);
-        TestSetup::new(mt_steel_gemm_splitk_nax::kernel_ir_for(dt))
+        TestSetup::new(ffai_steel_gemm_splitk_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
             .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
@@ -346,7 +346,7 @@ pub mod kernel_tests {
             *e = acc;
         }
         let expected = unpack_f32(&pack_f32(&expected, dt), dt);
-        TestSetup::new(mt_steel_gemm_splitk_accum_nax::kernel_ir_for(dt))
+        TestSetup::new(ffai_steel_gemm_splitk_accum_nax::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("partials", pack_f32(&partials, DType::F32), DType::F32))
             .input(TestBuffer::zeros("out", total, dt))
@@ -371,8 +371,8 @@ mod tests {
     #[test]
     fn splitk_kernel_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_steel_gemm_splitk_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_steel_gemm_splitk_nax");
+            let k = ffai_steel_gemm_splitk_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_steel_gemm_splitk_nax");
             assert_eq!(k.params.len(), 3);
             assert_eq!(k.params[2].name, "partials");
             assert!(k.params[2].is_output);
@@ -391,8 +391,8 @@ mod tests {
     #[test]
     fn accum_kernel_constructs() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_steel_gemm_splitk_accum_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_steel_gemm_splitk_accum_nax");
+            let k = ffai_steel_gemm_splitk_accum_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_steel_gemm_splitk_accum_nax");
             assert_eq!(k.params.len(), 2);
             assert_eq!(k.params[0].name, "partials");
             assert_eq!(k.params[0].dtype, DType::F32);
@@ -409,7 +409,7 @@ mod tests {
     /// bf16 must stage through `half` for matmul2d compatibility.
     #[test]
     fn splitk_bf16_stages_through_half() {
-        let k = mt_steel_gemm_splitk_nax::kernel_ir_for(DType::BF16);
+        let k = ffai_steel_gemm_splitk_nax::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -424,21 +424,21 @@ mod tests {
     #[test]
     fn codegen_emits_mpp_include_and_kernel_decl() {
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
-            let mut k = mt_steel_gemm_splitk_nax::kernel_ir_for(dt);
+            let mut k = ffai_steel_gemm_splitk_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 DType::BF16 => "bf16",
                 _ => unreachable!(),
             };
-            k.name = format!("mt_steel_gemm_splitk_nax_{suffix}");
+            k.name = format!("ffai_steel_gemm_splitk_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
             assert!(
                 msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"),
                 "MPP include missing from generated MSL:\n{msl}"
             );
             assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-            assert!(msl.contains(&format!("kernel void mt_steel_gemm_splitk_nax_{suffix}")));
+            assert!(msl.contains(&format!("kernel void ffai_steel_gemm_splitk_nax_{suffix}")));
             assert!(msl.contains(&format!("threadgroup {t_name} Xs")));
         }
     }
@@ -446,16 +446,18 @@ mod tests {
     #[test]
     fn codegen_emits_accum_kernel_decl() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let mut k = mt_steel_gemm_splitk_accum_nax::kernel_ir_for(dt);
+            let mut k = ffai_steel_gemm_splitk_accum_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 DType::BF16 => "bf16",
                 _ => unreachable!(),
             };
-            k.name = format!("mt_steel_gemm_splitk_accum_nax_{suffix}");
+            k.name = format!("ffai_steel_gemm_splitk_accum_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
-            assert!(msl.contains(&format!("kernel void mt_steel_gemm_splitk_accum_nax_{suffix}")));
+            assert!(
+                msl.contains(&format!("kernel void ffai_steel_gemm_splitk_accum_nax_{suffix}"))
+            );
             assert!(!msl.contains("InlineMsl"));
         }
     }

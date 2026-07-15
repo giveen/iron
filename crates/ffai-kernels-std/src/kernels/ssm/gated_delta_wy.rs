@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Chunked-WY Gated DeltaNet prefill kernel — `mt_gated_delta_wy_chunk`.
+//! Chunked-WY Gated DeltaNet prefill kernel — `ffai_gated_delta_wy_chunk`.
 //!
 //! Spec 028 Phase 2 (naive scalar Metal port). Process the full prefill
 //! T-sequence chunk-by-chunk via the compact Woodbury-Young representation
@@ -38,7 +38,7 @@
 //! has Hv=4 per layer × B; typical inference Hv*B ≥ 32 saturates M5 Max's
 //! ~480 simdgroup slots).
 //!
-//! ## Layouts (match `mt_gated_delta_chunk`)
+//! ## Layouts (match `ffai_gated_delta_chunk`)
 //!
 //!   - `q, k`:    [B, T, Hk, Dk]
 //!   - `v, y`:    [B, T, Hv, Dv]
@@ -59,7 +59,7 @@
 //!
 //! ## Numerical precision
 //!
-//! Matches `mt_gated_delta_chunk`: accumulators in f32, state in f32 too.
+//! Matches `ffai_gated_delta_chunk`: accumulators in f32, state in f32 too.
 //! Triangular solves run in f32; the matmuls inside `(I+L)` and `(I+A)`
 //! grow the condition number with T, so f32 is the floor for stable
 //! recurrences at long context.
@@ -69,7 +69,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gated_delta_wy_chunk<T>(
+pub fn ffai_gated_delta_wy_chunk<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -339,9 +339,9 @@ pub fn mt_gated_delta_wy_chunk<T>(
 }
 
 /// New-syntax correctness for the chunked-WY GDN prefill kernel
-/// (`mt_gated_delta_wy_chunk`). Oracle is the plain `sequential_gdn` per-token
-/// recurrence (the legacy `tests/gated_delta_wy_gpu_correctness.rs`, removed
-/// in #240): the WY Woodbury-Young chunk form must reproduce the sequential
+/// (`ffai_gated_delta_wy_chunk`). Oracle is the plain `sequential_gdn` per-token
+/// recurrence (the legacy `tests/gated_delta_wy_gpu_correctness.rs`, since
+/// removed): the WY Woodbury-Young chunk form must reproduce the sequential
 /// delta-rule output exactly (modulo fp reorder). State per `(b, hv)` slot is
 /// `[Dv, Dk]` flat (`s_base = (hv·dv + dv_idx)·dk` within `n·dv·dk`). `t_len`
 /// must be a multiple of `c`. Inputs are dtype-rounded; k is kscale-normalised
@@ -355,7 +355,7 @@ pub fn mt_gated_delta_wy_chunk<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gated_delta_wy_chunk;
+    use super::ffai_gated_delta_wy_chunk;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Sequential GDN reference (CPU), B=1. Mirrors `sequential_gdn` in the
@@ -437,7 +437,7 @@ pub mod kernel_tests {
         let mut s_seq = sr.clone();
         let y_exp = sequential_gdn(&qr, &kr, &vr, &gr, &br, &mut s_seq, t, hk, hv, dk, dv);
 
-        TestSetup::new(mt_gated_delta_wy_chunk::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_wy_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -460,7 +460,7 @@ pub mod kernel_tests {
 
     // One chunk (T = C = 16), Hk=Hv=1, Dk=32, Dv=16.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_wy_chunk_one_chunk(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_wy_chunk_one_chunk(dt: DType) -> TestSetup {
         setup(16, 1, 1, 32, 16, 16, dt)
     }
 
@@ -469,7 +469,7 @@ pub mod kernel_tests {
     // K-reduction vs the sequential oracle, accumulating fp reorder noise
     // (max|Δ|≈9e-3) — not a bug. f16/bf16 keep the wider per-step tol.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1.5e-2, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_wy_chunk_multi_chunk(dt: DType) -> TestSetup {
+    fn test_ffai_gated_delta_wy_chunk_multi_chunk(dt: DType) -> TestSetup {
         setup(32, 1, 1, 32, 16, 8, dt)
     }
 }
@@ -477,7 +477,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_delta_wy_chunk;
+    use super::ffai_gated_delta_wy_chunk;
 
     // Single-chunk shape (T = C) that fits the scalar TG-memory budget:
     // Dk=32, Dv=16, C=16, Hk=Hv=1. `t_len` must be a multiple of `c`.
@@ -486,7 +486,7 @@ pub mod kernel_benches {
         let (b, t, hk, hv, dk, dv, c) =
             (1usize, 16usize, 1usize, 1usize, 32usize, 16usize, 16usize);
         let n_total = b * hv;
-        BenchSetup::new(mt_gated_delta_wy_chunk::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_wy_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", t * hk * dk, dt))
             .buffer(BenchBuffer::random("k", t * hk * dk, dt))

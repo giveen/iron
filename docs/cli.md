@@ -25,7 +25,7 @@ ffaik bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
 | Flag | Effect |
 |---|---|
 | `-f, --filter <substr>` | only run kernels whose name contains `<substr>` |
-| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `MT%` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `ffaik test`); roughly doubles bench time |
+| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `FFAI %` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `ffaik test`); roughly doubles bench time |
 | `-v` / `-vv` | `-v` adds the roofline (`%BW` / `%FLOP` / arithmetic intensity), occupancy/registers, and a bottleneck verdict (plus the reference latency when `--mlx` is set); `-vv` adds the GPU timing distribution (`p95` / `p99` / `cv%`) |
 | `-o, --json <file>` | also write results as JSON |
 | `--allow-dirty` | run on a dirty working tree (default: refuses, so numbers tie to a clean SHA) |
@@ -34,11 +34,11 @@ ffaik bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
 
 ### Metrics
 
-The default table shows, per kernel/dtype: `MT(µs)` (wall-clock latency, the
+The default table shows, per kernel/dtype: `FFAI(µs)` (wall-clock latency, the
 `min` sample — the metric that makes "which precision is fastest" directly
-readable), `MT` (GB/s bandwidth), `GFLOP/s` (compute throughput, blank for
+readable), `FFAI` (GB/s bandwidth), `GFLOP/s` (compute throughput, blank for
 memory-bound kernels), and `ok` (correctness). With `--mlx` it also fills the
-`Ref` (MLX GB/s) and `MT%` (FFAI-vs-MLX ratio) columns; without it those
+`Ref` (MLX GB/s) and `FFAI %` (FFAI-vs-MLX ratio) columns; without it those
 stay blank.
 
 `-v` adds the roofline view: `%BW` (achieved ÷ the device's peak DRAM bandwidth),
@@ -53,7 +53,7 @@ columns blank rather than failing.
 GFLOP/s, latency, and the roofline figures only appear for kernels that declared
 a FLOP count (`#[bench(flops = …)]` or `BenchSetup::flops`) — matmul, attention,
 and convolution; memory-bound elementwise/reduction kernels leave them blank. The
-JSON (`-o`) is **additive**: it keeps the `ref`/`mt` (GB/s) keys baseline diffing
+JSON (`-o`) is **additive**: it keeps the `ref`/`ffai` (GB/s) keys baseline diffing
 consumes and adds `latency_us`, `gflops`, `pct_peak_bw`, `pct_peak_flops`, and
 `arith_intensity`.
 
@@ -76,7 +76,7 @@ ffaik build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
 | `--sdk <sdk>` | `xcrun` SDK for the Metal toolchain (default: `macosx`) |
 | `-t, --time-passes` | run the pass pipeline 25× per kernel, print per-pass median wall time instead of emitting |
 
-Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `ffaik build --emit all -o /tmp/mt-smoke`.
+Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `ffaik build --emit all -o /tmp/ffai-smoke`.
 
 The output layout matches a SwiftPM `Sources/<Target>/` convention so `--out` can point directly at a target directory:
 

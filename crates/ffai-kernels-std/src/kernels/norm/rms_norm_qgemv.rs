@@ -8,7 +8,7 @@
 //!
 //! Two variants:
 //!
-//! **`mt_rms_norm_qgemv`** — one output row per TG (the original port).
+//! **`ffai_rms_norm_qgemv`** — one output row per TG (the original port).
 //! Reduction-mode: one threadgroup per output row. Phase 1 reduces
 //! `sum(x²)` across the threadgroup → `inv_rms`; phase 2 is a
 //! pack-strided int4 GEMV that feeds on
@@ -16,10 +16,10 @@
 //! the normalized activation never leaves registers. Grid: `[out_dim, 1, 1]`,
 //! TPG ≥ 32.
 //!
-//! **`mt_rms_norm_qgemv_fast`** — 8 output rows per TG, mirroring
-//! `mt_qmv`'s geometry. Phase 1 (SSQ → `inv_rms`) is shared across all
+//! **`ffai_rms_norm_qgemv_fast`** — 8 output rows per TG, mirroring
+//! `ffai_qmv`'s geometry. Phase 1 (SSQ → `inv_rms`) is shared across all
 //! 8 rows — the TG-wide reduce amortizes the RMSNorm over 8 outputs.
-//! Phase 2 uses the `mt_qmv` mask-without-shift trick (X pre-scaled by
+//! Phase 2 uses the `ffai_qmv` mask-without-shift trick (X pre-scaled by
 //! inverse nibble position, weight mask returns nibble × position-power)
 //! plus the algebraic-split accumulator (`s*Σq·normed + b*Σnormed`),
 //! exactly as in MLX `rms_norm_qmm`. Grid: `[out_dim/8, 1, 1]`,
@@ -49,7 +49,7 @@ use ffai_kernels::kernel;
 /// with `inv_rms = rsqrt(mean(x²) + eps)`, weights int4-packed.
 /// One output row per threadgroup (original correctness-first variant).
 #[kernel]
-pub fn mt_rms_norm_qgemv<T>(
+pub fn ffai_rms_norm_qgemv<T>(
     x: Tensor<T>,
     norm_weight: Tensor<T>,
     weight: Tensor<u32>,
@@ -62,7 +62,7 @@ pub fn mt_rms_norm_qgemv<T>(
 ) {
     let row = program_id::<0>();
     // Phase 1: RMSNorm — per-thread partial sum of squares, then cross-kernel
-    // call to mt_rms_inv_scalar for the threadgroup reduce + rsqrt.
+    // call to ffai_rms_inv_scalar for the threadgroup reduce + rsqrt.
     // ssq is a Value arg; eps_buf and in_dim are Tensor args.
     let mut ssq = 0.0f32;
     let n_iters = (in_dim + lsize - 1u32) / lsize;
@@ -73,7 +73,7 @@ pub fn mt_rms_norm_qgemv<T>(
             ssq = ssq + v * v;
         }
     }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
+    let inv_rms = ffai_rms_inv_scalar(ssq, eps_buf, in_dim);
     // Phase 2: pack-strided int4 GEMV over the normalized activation.
     let vals_per_pack = 8u32; // 32 / 4 bits
     let mask = 15u32;
@@ -111,20 +111,20 @@ pub fn mt_rms_norm_qgemv<T>(
 ///
 /// Geometry: tpg = 64 = 2 simdgroups × 32 lanes. `simd_id` selects the
 /// simdgroup (0 or 1); each simdgroup independently computes 4 output rows.
-/// Phase 1 (SSQ for RMSNorm) is shared — `mt_rms_inv_scalar` performs a
+/// Phase 1 (SSQ for RMSNorm) is shared — `ffai_rms_inv_scalar` performs a
 /// TG-wide reduce, so the same `inv_rms` is broadcast to all 8 rows.
-/// Phase 2 reuses `mt_qmv`'s two-pass algebraic split:
+/// Phase 2 reuses `ffai_qmv`'s two-pass algebraic split:
 ///   `acc = scale * q_dot + bias * normed_xs`
 /// where `q_dot = Σ q_i * normed_i` and `normed_xs = Σ normed_i`.
 /// The mask-without-shift trick (X pre-scaled by 1/16, 1/256, 1/4096 at
 /// nibble positions 1, 2, 3 of each half-word; weight mask returns the
 /// nibble × its positional power) eliminates per-nibble shifts — identical
-/// to `mt_qmv`. Block = 16 X × 32 lanes = 512 K elements per outer iter.
+/// to `ffai_qmv`. Block = 16 X × 32 lanes = 512 K elements per outer iter.
 ///
 /// Grid: `[out_dim/8, 1, 1]`. out_dim must be a multiple of 8;
 /// in_dim must be a multiple of 512; group_size must be 64.
 #[kernel]
-pub fn mt_rms_norm_qgemv_fast<T>(
+pub fn ffai_rms_norm_qgemv_fast<T>(
     x: Tensor<T>,
     norm_weight: Tensor<T>,
     weight: Tensor<u32>,
@@ -144,7 +144,7 @@ pub fn mt_rms_norm_qgemv_fast<T>(
     let row2 = row0 + 2u32;
     let row3 = row0 + 3u32;
     // Phase 1: TG-wide SSQ for RMSNorm.
-    // All 64 threads cooperate — `mt_rms_inv_scalar` performs the full
+    // All 64 threads cooperate — `ffai_rms_inv_scalar` performs the full
     // TG reduce + rsqrt + broadcast, identical to the single-row variant.
     let mut ssq = 0.0f32;
     let n_iters = (in_dim + lsize - 1u32) / lsize;
@@ -155,8 +155,8 @@ pub fn mt_rms_norm_qgemv_fast<T>(
             ssq = ssq + v * v;
         }
     }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
-    // Phase 2: 4-row int4 GEMV per simdgroup, mirroring `mt_qmv`.
+    let inv_rms = ffai_rms_inv_scalar(ssq, eps_buf, in_dim);
+    // Phase 2: 4-row int4 GEMV per simdgroup, mirroring `ffai_qmv`.
     // gs_per_row = in_dim / group_size (= in_dim / 64).
     let gs_per_row = in_dim / group_size;
     let packs_per_row = in_dim / 8u32; // 8 int4 values per u32
@@ -177,7 +177,7 @@ pub fn mt_rms_norm_qgemv_fast<T>(
     let lane_pack_off = lane * 2u32;
     // Mask-without-shift constants (inverse nibble position scaling).
     // Eliminates 7 shifts per pack × 2 packs × 4 rows = 56 shifts per block.
-    // Mirrors `mt_qmv` and MLX `qdot` (quantized.h:235-244).
+    // Mirrors `ffai_qmv` and MLX `qdot` (quantized.h:235-244).
     let s_16 = 0.0625f32;
     let s_256 = 0.00390625f32;
     let s_4096 = 0.000244140625f32;
@@ -426,17 +426,17 @@ pub fn mt_rms_norm_qgemv_fast<T>(
     }
 }
 
-// ─── mt_rms_norm_qgemv_int8_fast ───────────────────────────────────────────
+// ─── ffai_rms_norm_qgemv_int8_fast ───────────────────────────────────────────
 //
 // Fused RMSNorm + int8-quantized GEMV — 8-row-per-TG perf variant.
 //
-// Mirrors `mt_rms_norm_qgemv_fast` (int4, 8-row-per-TG, 2 SG × 32 lanes)
+// Mirrors `ffai_rms_norm_qgemv_fast` (int4, 8-row-per-TG, 2 SG × 32 lanes)
 // but replaces the int4 nibble-unpack with int8 byte-extract:
 //   - 4 bytes per u32 (vals_per_pack = 4 vs 8 for int4)
 //   - mask = 0xFF, shifts = 0 / 8 / 16 / 24
 //   - packs_per_row = in_dim / 4; lane covers 4 consecutive K positions per pack
 //
-// Phase 1 (TG-wide SSQ → inv_rms via `mt_rms_inv_scalar`) is identical to
+// Phase 1 (TG-wide SSQ → inv_rms via `ffai_rms_inv_scalar`) is identical to
 // the int4 fast variant — the RMSNorm is independent of the quantization format.
 //
 // Phase 2 uses the same algebraic-split accumulator (`s*q_dot + b*normed_xs`)
@@ -452,10 +452,10 @@ pub fn mt_rms_norm_qgemv_fast<T>(
 
 /// Perf-tuned fused RMSNorm + int8 GEMV — 8 output rows per TG.
 ///
-/// int8 variant of `mt_rms_norm_qgemv_fast`. Byte-extract (4 vals/pack),
+/// int8 variant of `ffai_rms_norm_qgemv_fast`. Byte-extract (4 vals/pack),
 /// algebraic-split accumulator. Grid: `[out_dim/8, 1, 1]`.
 #[kernel]
-pub fn mt_rms_norm_qgemv_int8_fast<T>(
+pub fn ffai_rms_norm_qgemv_int8_fast<T>(
     x: Tensor<T>,
     norm_weight: Tensor<T>,
     weight: Tensor<u32>,
@@ -484,7 +484,7 @@ pub fn mt_rms_norm_qgemv_int8_fast<T>(
             ssq = ssq + v * v;
         }
     }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
+    let inv_rms = ffai_rms_inv_scalar(ssq, eps_buf, in_dim);
     // Phase 2: 4-row int8 GEMV per simdgroup, algebraic-split accumulator.
     // int8: 4 bytes per u32, packs_per_row = in_dim / 4.
     let gs_per_row = in_dim / group_size;
@@ -663,7 +663,7 @@ pub fn mt_rms_norm_qgemv_int8_fast<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_rms_norm_qgemv, mt_rms_norm_qgemv_fast, mt_rms_norm_qgemv_int8_fast};
+    use super::{ffai_rms_norm_qgemv, ffai_rms_norm_qgemv_fast, ffai_rms_norm_qgemv_int8_fast};
     use crate::utils::{pack_f32, unpack_f32};
 
     const EPS: f32 = 1e-5;
@@ -714,7 +714,7 @@ pub mod kernel_tests {
     }
 
     /// Affine per-group int8 quantize of one weight row — 4 bytes per u32,
-    /// the byte-strided layout `mt_rms_norm_qgemv_int8_fast` decodes.
+    /// the byte-strided layout `ffai_rms_norm_qgemv_int8_fast` decodes.
     fn quantize_int8_row(row: &[f32], group_size: usize) -> (Vec<u32>, Vec<f32>, Vec<f32>) {
         let in_dim = row.len();
         let n_groups = in_dim / group_size;
@@ -846,7 +846,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 2e-1)]
     fn test_rms_norm_qgemv(dt: DType) -> TestSetup {
         let (in_dim, gs, out_dim) = (256usize, 64usize, 8usize);
-        setup(mt_rms_norm_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_dim, false).grid_3d(
+        setup(ffai_rms_norm_qgemv::kernel_ir_for(dt), dt, in_dim, gs, out_dim, false).grid_3d(
             out_dim as u32,
             1,
             1,
@@ -858,7 +858,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 2e-1)]
     fn test_rms_norm_qgemv_fast(dt: DType) -> TestSetup {
         let (in_dim, gs, out_dim) = (512usize, 64usize, 16usize);
-        setup(mt_rms_norm_qgemv_fast::kernel_ir_for(dt), dt, in_dim, gs, out_dim, false).grid_3d(
+        setup(ffai_rms_norm_qgemv_fast::kernel_ir_for(dt), dt, in_dim, gs, out_dim, false).grid_3d(
             (out_dim / 8) as u32,
             1,
             1,
@@ -870,7 +870,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 2e-1)]
     fn test_rms_norm_qgemv_int8_fast(dt: DType) -> TestSetup {
         let (in_dim, gs, out_dim) = (512usize, 64usize, 16usize);
-        setup(mt_rms_norm_qgemv_int8_fast::kernel_ir_for(dt), dt, in_dim, gs, out_dim, true)
+        setup(ffai_rms_norm_qgemv_int8_fast::kernel_ir_for(dt), dt, in_dim, gs, out_dim, true)
             .grid_3d((out_dim / 8) as u32, 1, 1, [64, 1, 1])
     }
 }
@@ -881,7 +881,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_rms_norm_qgemv, mt_rms_norm_qgemv_fast, mt_rms_norm_qgemv_int8_fast};
+    use super::{ffai_rms_norm_qgemv, ffai_rms_norm_qgemv_fast, ffai_rms_norm_qgemv_int8_fast};
 
     const EPS: f32 = 1e-5;
 
@@ -913,22 +913,22 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm_qgemv(dt: DType) -> BenchSetup {
         let (in_dim, gs, out_dim) = (4096usize, 64usize, 4096usize);
-        let s = BenchSetup::new(mt_rms_norm_qgemv::kernel_ir_for(dt)).mode(KernelMode::Reduction);
+        let s = BenchSetup::new(ffai_rms_norm_qgemv::kernel_ir_for(dt)).mode(KernelMode::Reduction);
         buffers(s, in_dim, gs, out_dim, dt, 4).grid_3d(out_dim as u32, 1, 1, [128, 1, 1])
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm_qgemv_fast(dt: DType) -> BenchSetup {
         let (in_dim, gs, out_dim) = (4096usize, 64usize, 4096usize);
-        let s =
-            BenchSetup::new(mt_rms_norm_qgemv_fast::kernel_ir_for(dt)).mode(KernelMode::Reduction);
+        let s = BenchSetup::new(ffai_rms_norm_qgemv_fast::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction);
         buffers(s, in_dim, gs, out_dim, dt, 4).grid_3d((out_dim / 8) as u32, 1, 1, [64, 1, 1])
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_rms_norm_qgemv_int8_fast(dt: DType) -> BenchSetup {
         let (in_dim, gs, out_dim) = (4096usize, 64usize, 4096usize);
-        let s = BenchSetup::new(mt_rms_norm_qgemv_int8_fast::kernel_ir_for(dt))
+        let s = BenchSetup::new(ffai_rms_norm_qgemv_int8_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction);
         buffers(s, in_dim, gs, out_dim, dt, 8).grid_3d((out_dim / 8) as u32, 1, 1, [64, 1, 1])
     }

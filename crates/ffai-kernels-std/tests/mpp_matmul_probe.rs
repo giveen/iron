@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! GPU correctness oracle for the MPP `matmul2d` smoke kernel.
 //!
-//! Dispatches `mt_mpp_matmul_probe` (single threadgroup × single simdgroup,
+//! Dispatches `ffai_mpp_matmul_probe` (single threadgroup × single simdgroup,
 //! 16×32 fp16 @ 32×16 fp16 → 16×16 fp32) and validates against a naïve
 //! triple-loop CPU oracle.
 //!

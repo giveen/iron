@@ -17,7 +17,7 @@
 //! downstream top-k + normalize + scale chain consumes whichever it
 //! needs without re-running the scoring math.
 //!
-//! Compared to the sister `mt_moe_router_sigmoid_bias`:
+//! Compared to the sister `ffai_moe_router_sigmoid_bias`:
 //!   - sigmoid+bias: `s = sigmoid(x)`; bounded in (0, 1).
 //!   - sqrtsoftplus: `s = sqrt(log(1 + exp(x)))`; unbounded, larger
 //!     dynamic range — paired with the bias-correction for selection.
@@ -45,7 +45,7 @@ use ffai_kernels::kernel;
 // legacy `bench(...)` shape; declarative `#[bench]` below registers
 // for `ffaik bench`.
 #[kernel]
-pub fn mt_moe_router_sqrtsoftplus(
+pub fn ffai_moe_router_sqrtsoftplus(
     logits: Tensor<f32>,
     bias: Tensor<f32>,
     mut score_unbiased: Tensor<f32>,
@@ -82,7 +82,7 @@ pub fn mt_moe_router_sqrtsoftplus(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_moe_router_sqrtsoftplus;
+    use super::ffai_moe_router_sqrtsoftplus;
     use crate::utils::pack_f32;
 
     /// CPU reference. Mirrors the GPU kernel for tight-tolerance check.
@@ -113,7 +113,7 @@ pub mod kernel_tests {
     fn setup(n_experts: usize) -> TestSetup {
         let dt = DType::F32;
         let (logits, bias, score_unbiased, score_biased) = cpu_reference(n_experts);
-        TestSetup::new(mt_moe_router_sqrtsoftplus::kernel_ir())
+        TestSetup::new(ffai_moe_router_sqrtsoftplus::kernel_ir())
             .input(TestBuffer::from_vec("logits", pack_f32(&logits, dt), dt))
             .input(TestBuffer::from_vec("bias", pack_f32(&bias, dt), dt))
             .input(TestBuffer::zeros("score_unbiased", n_experts, dt))
@@ -139,13 +139,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_router_sqrtsoftplus;
+    use super::ffai_moe_router_sqrtsoftplus;
 
     #[bench(dtypes = [f32])]
     fn bench_router(_dt: DType) -> BenchSetup {
         let dt = DType::F32;
         let n_experts = 288usize;
-        BenchSetup::new(mt_moe_router_sqrtsoftplus::kernel_ir())
+        BenchSetup::new(ffai_moe_router_sqrtsoftplus::kernel_ir())
             .buffer(BenchBuffer::random("logits", n_experts, dt))
             .buffer(BenchBuffer::random("bias", n_experts, dt))
             .buffer(BenchBuffer::zeros("score_unbiased", n_experts, dt).output())

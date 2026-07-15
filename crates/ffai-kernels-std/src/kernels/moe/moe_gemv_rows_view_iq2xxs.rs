@@ -16,7 +16,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gemv_rows_view_iq2xxs<T>(
+pub fn ffai_moe_gemv_rows_view_iq2xxs<T>(
     x: Tensor<T>,
     view_u8: Tensor<u8>,
     grid: Tensor<u8>,
@@ -98,7 +98,7 @@ pub fn mt_moe_gemv_rows_view_iq2xxs<T>(
 /// gemv's ~100 GB/s (the u8 path was ~3.5). If so, pool-elimination is viable.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gemv_rows_view_u16_iq2xxs<T>(
+pub fn ffai_moe_gemv_rows_view_u16_iq2xxs<T>(
     x: Tensor<T>,
     view_u16: Tensor<u16>,
     grid: Tensor<u8>,
@@ -167,7 +167,7 @@ pub fn mt_moe_gemv_rows_view_u16_iq2xxs<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gemv_rows_view_u16_iq2xxs;
+    use super::ffai_moe_gemv_rows_view_u16_iq2xxs;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemv_rows_view_u16_iq2xxs(dt: DType) -> BenchSetup {
@@ -177,7 +177,7 @@ pub mod kernel_benches {
         let k_in = 4096usize;
         let nblk = m_out * (k_in / 256);
         let view_bytes = n_experts * nblk * 66;
-        BenchSetup::new(mt_moe_gemv_rows_view_u16_iq2xxs::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gemv_rows_view_u16_iq2xxs::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m_total * k_in, dt))
             .buffer(BenchBuffer::random("view_u16", view_bytes / 2, DType::U16))
@@ -198,7 +198,7 @@ pub mod kernel_benches {
 pub mod kernel_benches_old {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gemv_rows_view_iq2xxs;
+    use super::ffai_moe_gemv_rows_view_iq2xxs;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemv_rows_view_iq2xxs(dt: DType) -> BenchSetup {
@@ -208,7 +208,7 @@ pub mod kernel_benches_old {
         let k_in = 4096usize;
         let nblk = m_out * (k_in / 256);
         let view_bytes = n_experts * nblk * 66;
-        BenchSetup::new(mt_moe_gemv_rows_view_iq2xxs::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gemv_rows_view_iq2xxs::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m_total * k_in, dt))
             .buffer(BenchBuffer::random("view_u8", view_bytes, DType::U8))

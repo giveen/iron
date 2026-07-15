@@ -3,14 +3,14 @@
 //! Fused gated RMSNorm — `out = rmsNorm(y) · silu(z)`.
 //!
 //! The post-step of a Gated-DeltaNet (GDN) layer. After the GDN
-//! recurrence (`mt_gated_delta_step` / `_chunk`) produces the linear-
+//! recurrence (`ffai_gated_delta_step` / `_chunk`) produces the linear-
 //! attention output `y`, Qwen3.5 / Qwen3.6 apply a *gated* RMSNorm:
 //!
 //! ```text
 //!   out[r, i] = w[i] · y[r, i] · rsqrt(mean(y[r]²) + eps) · silu(z[r, i])
 //! ```
 //!
-//! The distinguishing feature versus the plain `mt_rms_norm` is the
+//! The distinguishing feature versus the plain `ffai_rms_norm` is the
 //! **dtype split**: `y` arrives as **fp32** — the GDN recurrence
 //! accumulates its state in fp32 and emits `y` in fp32 (a bf16 `y`
 //! drifts after a few dozen decode steps, the same reason
@@ -24,7 +24,7 @@
 //! (cast up from `T`); the normalized-and-gated result is rounded to
 //! `T` at the store.
 //!
-//! Algorithm-identical reduction to `mlx/rms_norm.rs`'s `mt_rms_norm`
+//! Algorithm-identical reduction to `mlx/rms_norm.rs`'s `ffai_rms_norm`
 //! — f32 sum-of-squares accumulator, threadgroup-wide `reduce_sum`,
 //! `rsqrt(ssq/n + eps)` scaling — with the fp32 `y` input and the
 //! extra `silu(z)` gate multiply.
@@ -51,7 +51,7 @@ use ffai_kernels::kernel;
 ///
 /// `y` is fp32 (the GDN recurrence output); `z`, `w`, `out` are `T`.
 #[kernel]
-pub fn mt_gated_rmsnorm<T>(
+pub fn ffai_gated_rmsnorm<T>(
     y: Tensor<f32>,
     z: Tensor<T>,
     w: Tensor<T>,
@@ -63,7 +63,7 @@ pub fn mt_gated_rmsnorm<T>(
     let rs = row * n;
     // Each thread owns 4 consecutive elements (N = TPG * 4). OOB lanes
     // re-read row[0..3] (benign — their SSQ contribution is masked to 0)
-    // and skip their stores, mirroring `mt_rms_norm`'s freeze-safe guard.
+    // and skip their stores, mirroring `ffai_rms_norm`'s freeze-safe guard.
     let col = tid * 4u32;
     let in_bounds = col + 3u32 < n;
     let safe_col = select(in_bounds, col, 0u32);
@@ -86,7 +86,7 @@ pub fn mt_gated_rmsnorm<T>(
     let rms = rsqrt(tg_ssq / n + eps);
     if in_bounds {
         // silu(x) = x / (1 + exp(-x)) — inlined in fp32 (same form as
-        // mt_swiglu) to keep the gate precise before the round to T.
+        // ffai_swiglu) to keep the gate precise before the round to T.
         let z0 = load(z[base]).cast::<f32>();
         let z1 = load(z[base + 1u32]).cast::<f32>();
         let z2 = load(z[base + 2u32]).cast::<f32>();
@@ -106,7 +106,7 @@ pub fn mt_gated_rmsnorm<T>(
     }
 }
 
-/// New-syntax correctness for `mt_gated_rmsnorm` (Reduction mode, one
+/// New-syntax correctness for `ffai_gated_rmsnorm` (Reduction mode, one
 /// threadgroup per row, `tpg = n/4` — `n` a multiple of 128, `n ≤ 4096`).
 /// fp32-in / `T`-out split: `y` is always packed f32; `z` / `w` / `out` use
 /// `dt`. Per-row oracle: `out_i = w_i · y_i · rsqrt(mean(y²)+eps) · silu(z_i)`,
@@ -114,7 +114,7 @@ pub fn mt_gated_rmsnorm<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gated_rmsnorm;
+    use super::ffai_gated_rmsnorm;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
@@ -140,7 +140,7 @@ pub mod kernel_tests {
             y.extend_from_slice(&yr);
             z.extend_from_slice(&zr_raw);
         }
-        TestSetup::new(mt_gated_rmsnorm::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_rmsnorm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             // `y` is fp32 regardless of T.
             .input(TestBuffer::from_vec("y", pack_f32(&y, DType::F32), DType::F32))
@@ -154,20 +154,20 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 8e-2])]
-    fn test_mt_gated_rmsnorm(dt: DType) -> TestSetup { setup(4, 512, dt) }
+    fn test_ffai_gated_rmsnorm(dt: DType) -> TestSetup { setup(4, 512, dt) }
 }
 
-/// New-syntax benchmark for `mt_gated_rmsnorm` (fused GDN post-step, fp32 `y`,
+/// New-syntax benchmark for `ffai_gated_rmsnorm` (fused GDN post-step, fp32 `y`,
 /// `T` gate / weight / output, n=4096, tpg=1024 — the Apple TPG cap).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_rmsnorm;
+    use super::ffai_gated_rmsnorm;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gated_rmsnorm(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 4096usize);
-        BenchSetup::new(mt_gated_rmsnorm::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_rmsnorm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             // `y` is always fp32 (the GDN recurrence output).
             .buffer(BenchBuffer::random("y", rows * n, DType::F32))

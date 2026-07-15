@@ -253,7 +253,7 @@ impl TargetProfile {
             // bm64 / MPP family fits under desktop Vulkan's shared-mem
             // cap (32-48 KB typical, vs 80 KB the per-warp shared layout
             // needs).
-            // Gated coopmat path: `MT_VK_COOPMAT=1` flips the MMA
+            // Gated coopmat path: `FFAI_VK_COOPMAT=1` flips the MMA
             // strategy to real `VK_KHR_cooperative_matrix` fragment ops
             // (16×16×16 fp16→fp32) for SimdGroup-scope CoopTile kernels
             // on RDNA4. Default (unset) stays on the bit-exact
@@ -264,12 +264,12 @@ impl TargetProfile {
             // `device/vulkan/mod.rs`). subgroupSize stays pinned at 32 —
             // on RDNA4 wave32 the 16×16 coopmat fragment spans 32 lanes,
             // and the CoopTile staging math assumes 32-lane subgroups.
-            mma: if std::env::var("MT_VK_COOPMAT").map(|v| v == "1").unwrap_or(false) {
+            mma: if std::env::var("FFAI_VK_COOPMAT").map(|v| v == "1").unwrap_or(false) {
                 MmaStrategy::VkCooperativeMatrix
             } else {
                 MmaStrategy::SoftwareLocalC
             },
-            // The Vulkan path already uses linear-order `mt_subgroup_add`
+            // The Vulkan path already uses linear-order `ffai_subgroup_add`
             // unconditionally for f32 subgroup sums (see `spirv/mod.rs`).
             // This flag is here for completeness; the SPIR-V emitter
             // doesn't currently branch on it.
@@ -415,10 +415,10 @@ impl TargetProfile {
             Target::Spirv => match op {
                 Exp => "exp",
                 Exp2 => "exp2",
-                Expm1 => "mt_expm1",
+                Expm1 => "ffai_expm1",
                 Log => "log",
                 Log2 => "log2",
-                Log10 => "mt_log10",
+                Log10 => "ffai_log10",
                 Sqrt => "sqrt",
                 Rsqrt => "inversesqrt",
                 Recip => "1.0/",
@@ -441,8 +441,8 @@ impl TargetProfile {
                 Acosh => "acosh",
                 Atanh => "atanh",
                 // Software approximations live in the GLSL preamble.
-                Erf => "mt_erf",
-                ErfInv => "mt_erfinv",
+                Erf => "ffai_erf",
+                ErfInv => "ffai_erfinv",
             },
         }
     }

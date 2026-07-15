@@ -39,7 +39,7 @@ impl super::MslGenerator {
         if feat.needs_silu {
             wl!(out);
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_silu(T x) {{ return x / (T(1) + exp(-x)); }}");
+            wl!(out, "inline T ffai_silu(T x) {{ return x / (T(1) + exp(-x)); }}");
         }
         if feat.needs_gelu {
             wl!(out);
@@ -61,7 +61,7 @@ impl super::MslGenerator {
             // Confirmed: PyTorch's `gelu(approximate='tanh')` uses
             // the same clamp pattern in its CUDA kernels.
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_gelu(T x) {{");
+            wl!(out, "inline T ffai_gelu(T x) {{");
             wl!(out, "    float xf = float(x);");
             wl!(out, "    const float k = 0.7978845608f;");
             wl!(out, "    float arg = k * (xf + 0.044715f * xf*xf*xf);");
@@ -72,17 +72,17 @@ impl super::MslGenerator {
         if feat.needs_relu {
             wl!(out);
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_relu(T x) {{ return max(T(0), x); }}");
+            wl!(out, "inline T ffai_relu(T x) {{ return max(T(0), x); }}");
         }
         if feat.needs_sigmoid {
             wl!(out);
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_sigmoid(T x) {{ return T(1) / (T(1) + exp(-x)); }}");
+            wl!(out, "inline T ffai_sigmoid(T x) {{ return T(1) / (T(1) + exp(-x)); }}");
         }
         if feat.needs_erf {
             wl!(out);
             // Polynomial approximation matching MLX erf.h (max error < 1 ulp)
-            wl!(out, "inline float mt_erf_impl(float a) {{");
+            wl!(out, "inline float ffai_erf_impl(float a) {{");
             wl!(out, "    float r, s, t, u;");
             wl!(out, "    t = metal::abs(a);");
             wl!(out, "    s = a * a;");
@@ -108,12 +108,12 @@ impl super::MslGenerator {
             wl!(out, "    return r;");
             wl!(out, "}}");
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_erf_impl(T x) {{ return T(mt_erf_impl(float(x))); }}");
+            wl!(out, "inline T ffai_erf_impl(T x) {{ return T(ffai_erf_impl(float(x))); }}");
         }
         if feat.needs_erfinv {
             wl!(out);
             // Inverse error function, ported from MLX erf.h (max error < 2.4 ulp)
-            wl!(out, "inline float mt_erfinv_impl(float a) {{");
+            wl!(out, "inline float ffai_erfinv_impl(float a) {{");
             wl!(out, "    auto t = metal::fma(a, -a, 1.0f);");
             wl!(out, "    t = metal::log(t);");
             wl!(out, "    float p;");
@@ -142,19 +142,19 @@ impl super::MslGenerator {
             wl!(out, "    return a * p;");
             wl!(out, "}}");
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_erfinv_impl(T x) {{ return T(mt_erfinv_impl(float(x))); }}");
+            wl!(out, "inline T ffai_erfinv_impl(T x) {{ return T(ffai_erfinv_impl(float(x))); }}");
         }
         if feat.needs_expm1 {
             wl!(out);
             // Metal stdlib lacks expm1(); implement via Taylor for |x| < 1e-4
             // (avoids catastrophic cancellation) and exp(x)-1 elsewhere.
             wl!(out, "// Metal lacks expm1(); accurate for small x via Taylor series.");
-            wl!(out, "inline float mt_expm1_impl(float x) {{");
+            wl!(out, "inline float ffai_expm1_impl(float x) {{");
             wl!(out, "    if (fabs(x) < 1.0e-4f) return x + 0.5f * x * x;");
             wl!(out, "    return exp(x) - 1.0f;");
             wl!(out, "}}");
             wl!(out, "template<typename T>");
-            wl!(out, "inline T mt_expm1_impl(T x) {{ return T(mt_expm1_impl(float(x))); }}");
+            wl!(out, "inline T ffai_expm1_impl(T x) {{ return T(ffai_expm1_impl(float(x))); }}");
         }
         if feat.needs_simd_product {
             wl!(out);
@@ -162,7 +162,7 @@ impl super::MslGenerator {
             // Apple Silicon always has SIMD width 32, so unroll the butterfly statically.
             wl!(out, "// Manual SIMD-group product reduction (Metal has no simd_product builtin).");
             wl!(out, "// Unrolled butterfly for Apple Silicon's fixed SIMD width of 32.");
-            wl!(out, "inline float __mt_simd_product(float v) {{");
+            wl!(out, "inline float __ffai_simd_product(float v) {{");
             wl!(out, "    v *= simd_shuffle_down(v, 16u);");
             wl!(out, "    v *= simd_shuffle_down(v, 8u);");
             wl!(out, "    v *= simd_shuffle_down(v, 4u);");

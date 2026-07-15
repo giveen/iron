@@ -44,7 +44,11 @@ use ffai_kernels::kernel;
 // a no-`<T>` signature. The new declarative `#[bench]` on
 // `kernel_benches::bench_router` below handles registration directly.
 #[kernel]
-pub fn mt_moe_router_sigmoid_bias(logits: Tensor<f32>, bias: Tensor<f32>, mut scores: Tensor<f32>) {
+pub fn ffai_moe_router_sigmoid_bias(
+    logits: Tensor<f32>,
+    bias: Tensor<f32>,
+    mut scores: Tensor<f32>,
+) {
     let idx = tid;
     let l = load(logits[idx]);
     let b = load(bias[idx]);
@@ -58,7 +62,7 @@ pub fn mt_moe_router_sigmoid_bias(logits: Tensor<f32>, bias: Tensor<f32>, mut sc
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_moe_router_sigmoid_bias;
+    use super::ffai_moe_router_sigmoid_bias;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n_experts: usize) -> TestSetup {
@@ -69,7 +73,7 @@ pub mod kernel_tests {
         let b_dt = unpack_f32(&pack_f32(&bias, dt), dt);
         let expected: Vec<f32> =
             l_dt.iter().zip(&b_dt).map(|(&l, &b)| 1.0_f32 / (1.0 + (-l).exp()) + b).collect();
-        TestSetup::new(mt_moe_router_sigmoid_bias::kernel_ir())
+        TestSetup::new(ffai_moe_router_sigmoid_bias::kernel_ir())
             .input(TestBuffer::from_vec("logits", pack_f32(&logits, dt), dt))
             .input(TestBuffer::from_vec("bias", pack_f32(&bias, dt), dt))
             .input(TestBuffer::zeros("scores", n_experts, dt))
@@ -92,13 +96,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_router_sigmoid_bias;
+    use super::ffai_moe_router_sigmoid_bias;
 
     #[bench(dtypes = [f32])]
     fn bench_router(_dt: DType) -> BenchSetup {
         let dt = DType::F32;
         let n_experts = 288usize;
-        BenchSetup::new(mt_moe_router_sigmoid_bias::kernel_ir())
+        BenchSetup::new(ffai_moe_router_sigmoid_bias::kernel_ir())
             .buffer(BenchBuffer::random("logits", n_experts, dt))
             .buffer(BenchBuffer::random("bias", n_experts, dt))
             .buffer(BenchBuffer::zeros("scores", n_experts, dt).output())

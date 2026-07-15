@@ -6,12 +6,12 @@
 //! Collapses the two back-to-back dispatches that close every GDN layer
 //! into ONE kernel launch:
 //!
-//!   1. `mt_gated_rmsnorm`: per-row RMSNorm with SiLU gate.
+//!   1. `ffai_gated_rmsnorm`: per-row RMSNorm with SiLU gate.
 //!      `inner[r, d] = w[d] * y[r, d] * rsqrt(mean(y[r]^2) + eps) * silu(z[r, d])`
 //!      `y` is fp32 (GDN recurrence accumulates in fp32), `z` / `w` /
 //!      `inner` are model dtype `T`.
 //!
-//!   2. `mt_dequant_gemv_int4` (the GDN out projection):
+//!   2. `ffai_dequant_gemv_int4` (the GDN out projection):
 //!      `out[o] = sum_i (q[o, i] * scale + bias) * inner_flat[i]`
 //!      where `inner_flat[r * Dv + d] = inner[r, d]` and `i in [0, Hv*Dv)`.
 //!
@@ -72,8 +72,8 @@
 //! as the unfused chain:
 //!
 //! ```text
-//!   inner = mt_gated_rmsnorm(y, z, w, eps)        // [Hv, Dv]
-//!   out   = mt_dequant_gemv_int4(inner, Wq, S, B)  // [out_dim]
+//!   inner = ffai_gated_rmsnorm(y, z, w, eps)        // [Hv, Dv]
+//!   out   = ffai_dequant_gemv_int4(inner, Wq, S, B)  // [out_dim]
 //! ```
 //!
 //! Pinned by the in-source `#[test_kernel]`s.
@@ -88,7 +88,7 @@ use ffai_kernels::kernel;
 /// TPG = 64. See module doc for invariants.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_gated_rms_norm_qgemv_int4_fast<T>(
+pub fn ffai_gated_rms_norm_qgemv_int4_fast<T>(
     y: Tensor<f32>,
     z: Tensor<T>,
     norm_weight: Tensor<T>,
@@ -144,7 +144,7 @@ pub fn mt_gated_rms_norm_qgemv_int4_fast<T>(
             let zv = load(z[idx]).cast::<f32>();
             let wv = load(norm_weight[d]).cast::<f32>();
             // silu(z) = z / (1 + exp(-z)), inline fp32 - same form as
-            // `mt_gated_rmsnorm` / `moe_down_swiglu_accum`.
+            // `ffai_gated_rmsnorm` / `moe_down_swiglu_accum`.
             let gate = zv / (1.0f32 + exp(0.0f32 - zv));
             let inner = yv * inv_rms * wv * gate;
             threadgroup_store("tg_inner", idx, inner);
@@ -155,7 +155,7 @@ pub fn mt_gated_rms_norm_qgemv_int4_fast<T>(
 
     // ── Phase 2: 8-row int4 GEMV against `tg_inner` ────────────────────
     //
-    // Mirrors `mt_rms_norm_qgemv_fast` Phase 2 verbatim, except the
+    // Mirrors `ffai_rms_norm_qgemv_fast` Phase 2 verbatim, except the
     // 16-element X stripe per lane is loaded from `tg_inner` (fp32) in
     // place of the on-the-fly `x[xi] * norm_weight[xi] * inv_rms` fuse.
     //
@@ -232,7 +232,7 @@ pub fn mt_gated_rms_norm_qgemv_int4_fast<T>(
         let g = xb / group_size;
         let pack_off = _b / 8u32 + lane_pack_off;
         // 4 rows × identical work, looped — mirrors `dequant_gemv_int4_fast`
-        // and the `stack_alloc + range` pattern from TheTom/ffai-kernels#1.
+        // and the `stack_alloc + range` pattern.
         for _r in range(0u32, 4u32, 1u32) {
             let row = base_row + _r;
             let w_base = row * packs_per_row;
@@ -324,7 +324,7 @@ mod oracle {
 
     /// CPU oracle: per-row gated RMSNorm (`silu(z)` gate) → int4 GEMV.
     /// Mirrors the legacy `tests/gated_rms_norm_qgemv_int4_gpu_correctness.rs::naive`
-    /// (removed in #240).
+    /// (since removed).
     #[allow(clippy::too_many_arguments)]
     pub fn naive(
         y: &[f32],
@@ -381,7 +381,7 @@ pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
     use super::{
-        mt_gated_rms_norm_qgemv_int4_fast,
+        ffai_gated_rms_norm_qgemv_int4_fast,
         oracle::{naive, quantize_int4_row, round, source, u32_bytes},
     };
     use crate::utils::pack_f32;
@@ -425,7 +425,7 @@ pub mod kernel_tests {
             eps,
         );
 
-        TestSetup::new(mt_gated_rms_norm_qgemv_int4_fast::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_rms_norm_qgemv_int4_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("y", pack_f32(&y, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("z", pack_f32(&z, dt), dt))
@@ -449,13 +449,13 @@ pub mod kernel_tests {
     fn test_gated_rms_norm_qgemv_int4_fast(dt: DType) -> TestSetup { setup(4, 128, 512, 64, dt) }
 }
 
-/// New-syntax benchmark for `mt_gated_rms_norm_qgemv_int4_fast` at the
+/// New-syntax benchmark for `ffai_gated_rms_norm_qgemv_int4_fast` at the
 /// Qwen3.6-A3B production shape (hv=16, dv=128, in_dim=2048, out_dim=2048).
 /// MLX-less reduction kernel (`class=GenericEmpty`), so `Ref(GB/s)` blank.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gated_rms_norm_qgemv_int4_fast;
+    use super::ffai_gated_rms_norm_qgemv_int4_fast;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gated_rms_norm_qgemv_int4_fast(dt: DType) -> BenchSetup {
@@ -463,7 +463,7 @@ pub mod kernel_benches {
         let in_dim = hv * dv;
         let u32_per_row = in_dim / 8;
         let n_groups = in_dim / group_size;
-        BenchSetup::new(mt_gated_rms_norm_qgemv_int4_fast::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_rms_norm_qgemv_int4_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("y", in_dim, DType::F32))
             .buffer(BenchBuffer::random("z", in_dim, dt))

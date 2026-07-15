@@ -21,7 +21,7 @@ math), not Metal specifics.
 NVIDIA GPUs are the natural second target because, unlike the ANE (see
 `ANE_BACKEND_SPEC.md`), they are **directly programmable with custom kernels**
 (CUDA C++ / PTX). The same per-kernel DSL model applies 1:1. And the precision
-work in PR #2 lands us in a strong position: the **`mx*` / `mxint*` formats use
+work lands us in a strong position: the **`mx*` / `mxint*` formats use
 E8M0 microscaling with block 32 — exactly what NVIDIA Blackwell's 5th-gen tensor
 cores consume in hardware** (`tcgen05` scaled-MMA for MXFP4/6/8, NVFP4, MXINT8).
 The quant codec/format layer is pure host Rust and already backend-independent.
@@ -111,7 +111,7 @@ that makes the reduction and lane-shuffle kernels port cleanly.
   mirroring the Metal reduction/MMA kernels.
 - **Hardware block-scaling (Blackwell, sm_100+):** `mxfp4`/`mxfp8`/`nvfp4` and
   `mxint8`/`mxint4` map onto the **scaled tensor-core MMA** (`tcgen05.mma` with
-  E8M0/E4M3 scale-factor operands). The E8M0/block-32 layout chosen in PR #2 is
+  E8M0/E4M3 scale-factor operands). The chosen E8M0/block-32 layout is
   the native Blackwell microscaling layout — the packed codes + scale buffers can
   feed the hardware path with little/no repacking. This is the single biggest
   reason the precision work transfers.
@@ -221,5 +221,5 @@ is **not** custom-kernel-programmable and forces a graph/compiler model.
 - **CUTLASS** — a candidate for the MMA / cooperative-matmul reimplementation
   (§6) and the Blackwell scaled-MMA path for the `mx*`/`mxint*` formats.
 - **NVIDIA Blackwell microscaling** (MXFP4/6/8, NVFP4, MXINT8 via `tcgen05`
-  scaled-MMA, E8M0/E4M3 scale operands) — the hardware target the PR-#2 block-scaled
+  scaled-MMA, E8M0/E4M3 scale operands) — the hardware target the block-scaled
   formats map onto (§4.3).

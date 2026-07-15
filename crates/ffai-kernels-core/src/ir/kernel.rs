@@ -406,7 +406,7 @@ mod tests {
     fn display_format_shows_kernel_structure() {
         use super::KernelMode;
 
-        let mut k = Kernel::new("mt_vadd");
+        let mut k = Kernel::new("ffai_vadd");
         k.mode = KernelMode::Elementwise;
         k.params.push(Param {
             name: "a".into(),
@@ -460,7 +460,7 @@ mod tests {
         });
 
         let output = format!("{k}");
-        assert!(output.contains("kernel mt_vadd"), "should show kernel name: {output}");
+        assert!(output.contains("kernel ffai_vadd"), "should show kernel name: {output}");
         assert!(output.contains("mode=Elementwise"), "should show mode: {output}");
         assert!(output.contains("v0    = ProgramId(axis=0)"), "should show ProgramId: {output}");
         assert!(output.contains("BinOp(Add, v1, v2)"), "should show BinOp: {output}");

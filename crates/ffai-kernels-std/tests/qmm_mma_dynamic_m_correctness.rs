@@ -8,7 +8,7 @@
 //! once per layer-projection per chunk instead of `T` times.
 //!
 //! The driver pads `T → m_padded = ceil(T/32) * 32`, dispatches
-//! `mt_qmm_mma` with grid `[N/32, m_padded/32, 1]`, then slices
+//! `ffai_qmm_mma` with grid `[N/32, m_padded/32, 1]`, then slices
 //! the first `T` rows of the output. Padded rows of X are zero so
 //! the masked tail contributes nothing to the valid outputs (and is
 //! discarded by the caller anyway).
@@ -37,7 +37,7 @@ use ffai_kernels_std::kernels::gemm::quantized_mma_dynamic_m as dyn_m;
 
 // ── Triple-loop CPU oracle — bit-identical algorithm to ──────────────────
 //    `cpu_qmm_reference` in the legacy `tests/qmm_gpu_correctness.rs`
-//    (removed in #240). Replicated for test-file isolation per
+//    (since removed). Replicated for test-file isolation per
 //    integration-test convention in this crate.
 
 #[allow(clippy::too_many_arguments)]
@@ -81,7 +81,7 @@ fn cpu_qmm_reference(
 // ── Host-side dispatcher that exercises the dynamic-M path. ───────────────
 //
 // Pads X (zero-fill) to m_padded = ceil(T/32)*32, dispatches
-// `mt_qmm_mma` with grid `[N/32, m_padded/32, 1]`, then slices the
+// `ffai_qmm_mma` with grid `[N/32, m_padded/32, 1]`, then slices the
 // first `T * N` element-bytes of the output.
 
 #[allow(clippy::too_many_arguments)]
@@ -153,7 +153,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 
 // ── Deterministic q4 weights — same per-pack pattern as the other ────────
 //    qmm correctness tests (`qmm_mpp_correctness.rs`, and the legacy
-//    `tests/qmm_gpu_correctness.rs` removed in #240).
+//    `tests/qmm_gpu_correctness.rs`, since removed).
 
 fn build_quant_inputs(
     m: usize,
@@ -428,7 +428,7 @@ fn dynamic_m_bf16_t4096_production() {
 //
 // Exactly one BM tile, no padding, fp32 (no dtype rounding error).
 // Sanity check that the simple case matches the standalone
-// `mt_qmm_mma` path.
+// `ffai_qmm_mma` path.
 // ═════════════════════════════════════════════════════════════════════════
 
 #[test]

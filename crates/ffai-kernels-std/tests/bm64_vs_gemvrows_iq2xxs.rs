@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Direct comparison: mt_moe_bgemm_iq2xxs_bm64 vs mt_moe_gemv_rows_iq2xxs
+//! Direct comparison: ffai_moe_bgemm_iq2xxs_bm64 vs ffai_moe_gemv_rows_iq2xxs
 //! on IDENTICAL pool/x/indices. Both claim to compute gateP[row,m] =
 //! W[expert(row),m,:]·x[row,:]; the prefill shows them disagreeing. This
 //! reproduces it in isolation. cosine should be ~1.0.
@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::{
-    moe_bgemm_iq2xxs_bm64::mt_moe_bgemm_iq2xxs_bm64,
-    moe_gemv_rows_iq2xxs::mt_moe_gemv_rows_iq2xxs,
+    moe_bgemm_iq2xxs_bm64::ffai_moe_bgemm_iq2xxs_bm64,
+    moe_gemv_rows_iq2xxs::ffai_moe_gemv_rows_iq2xxs,
 };
 
 fn xorshift(s: &mut u32) -> u32 {
@@ -67,7 +67,7 @@ fn bm64_matches_gemvrows() {
     b.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
     b.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
     b.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
-    let mut kb = mt_moe_bgemm_iq2xxs_bm64::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kb = ffai_moe_bgemm_iq2xxs_bm64::kernel_ir_for(Dt::F32.to_dtype());
     kb.mode = KernelMode::Reduction;
     let rb = ctx
         .dispatch_with_grid(&kb, &b, &BTreeMap::new(), [n_out / 64, t_rows.div_ceil(64), 1], [
@@ -88,7 +88,7 @@ fn bm64_matches_gemvrows() {
     g.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     g.insert("m_out".into(), (n_out as u32).to_le_bytes().to_vec());
     g.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
-    let mut kg = mt_moe_gemv_rows_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kg = ffai_moe_gemv_rows_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
     kg.mode = KernelMode::Reduction;
     let rg =
         ctx.dispatch_with_grid(&kg, &g, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1]).unwrap();

@@ -41,7 +41,7 @@ use ffai_kernels::kernel;
 /// bench harness can wire a side-by-side reference (see the MLX
 /// `instantiate_gemm_shapes_helper` list in `steel_gemm_fused.metal`).
 ///
-/// Produces: `mt_steel_gemm_64x64x16_2x2`, `_32x32x16_2x2`, `_64x64x16_1x2`,
+/// Produces: `ffai_steel_gemm_64x64x16_2x2`, `_32x32x16_2x2`, `_64x64x16_1x2`,
 /// `_32x64x16_1x2`, `_64x64x16_4x2`, `_64x32x16_1x2`, `_32x32x16_1x2`.
 #[kernel(variants(
     BM = [64u32, 32u32, 64u32, 32u32, 64u32, 64u32, 32u32],
@@ -50,7 +50,7 @@ use ffai_kernels::kernel;
     WN = [2u32,  2u32,  2u32,  2u32,  2u32,  2u32,  2u32],
     suffix = "{BM}x{BN}x16_{WM}x{WN}"
 ))]
-pub fn mt_steel_gemm<T>(
+pub fn ffai_steel_gemm<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     out: Tensor<T>,
@@ -201,37 +201,37 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_64x64x16_2x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        fb(ffai_steel_gemm_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_32x32x16_2x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        fb(ffai_steel_gemm_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_64x64x16_1x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_64x64x16_1x2::kernel_ir_for(dt), 64, 64, 64, dt)
+        fb(ffai_steel_gemm_64x64x16_1x2::kernel_ir_for(dt), 64, 64, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_32x64x16_1x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_32x64x16_1x2::kernel_ir_for(dt), 32, 64, 64, dt)
+        fb(ffai_steel_gemm_32x64x16_1x2::kernel_ir_for(dt), 32, 64, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_64x64x16_4x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_64x64x16_4x2::kernel_ir_for(dt), 64, 64, 256, dt)
+        fb(ffai_steel_gemm_64x64x16_4x2::kernel_ir_for(dt), 64, 64, 256, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_64x32x16_1x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_64x32x16_1x2::kernel_ir_for(dt), 64, 32, 64, dt)
+        fb(ffai_steel_gemm_64x32x16_1x2::kernel_ir_for(dt), 64, 32, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fused_32x32x16_1x2(dt: DType) -> BenchSetup {
-        fb(mt_steel_gemm_32x32x16_1x2::kernel_ir_for(dt), 32, 32, 64, dt)
+        fb(ffai_steel_gemm_32x32x16_1x2::kernel_ir_for(dt), 32, 32, 64, dt)
     }
 }
 
 /// New-syntax correctness tests for the fused steel GEMM — ports the
 /// `nn` (non-transposed) oracle from the legacy
-/// `tests/steel_gemm_gpu_correctness.rs` (removed in #240). The kernel
+/// `tests/steel_gemm_gpu_correctness.rs` (since removed). The kernel
 /// computes a plain
 /// row-major `C = A · B` (`A:[M,K]`, `B:[K,N]`, `C:[M,N]`); the oracle
 /// is a straight triple-loop fp32 matmul over dtype-rounded inputs.
@@ -290,18 +290,18 @@ pub mod kernel_tests {
     // tol per dtype: f32 5e-3, f16 5e-2, bf16 2e-1 (K=48 matmul magnitudes).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fused_64x64x16_2x2(dt: DType) -> TestSetup {
-        fused_setup(mt_steel_gemm_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        fused_setup(ffai_steel_gemm_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fused_32x32x16_2x2(dt: DType) -> TestSetup {
-        fused_setup(mt_steel_gemm_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        fused_setup(ffai_steel_gemm_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fused_64x64x16_1x2(dt: DType) -> TestSetup {
-        fused_setup(mt_steel_gemm_64x64x16_1x2::kernel_ir_for(dt), 64, 64, 64, dt)
+        fused_setup(ffai_steel_gemm_64x64x16_1x2::kernel_ir_for(dt), 64, 64, 64, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fused_32x64x16_1x2(dt: DType) -> TestSetup {
-        fused_setup(mt_steel_gemm_32x64x16_1x2::kernel_ir_for(dt), 32, 64, 64, dt)
+        fused_setup(ffai_steel_gemm_32x64x16_1x2::kernel_ir_for(dt), 32, 64, 64, dt)
     }
 }

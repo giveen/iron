@@ -124,7 +124,7 @@ impl PassRegistry {
     /// left in the block after the pass removes/redirects its last
     /// consumer) invokes
     /// `dead_value_elim::eliminate_dead_values(kernel)` at the end of
-    /// its own `run()` — see #209/1.  Pre-#209/1 a separate
+    /// its own `run()`.  Previously a separate
     /// `dead_value_elim` slot ran last in the pipeline to sweep up
     /// every pass's accumulated debris; with the per-pass
     /// postcondition in place, that slot is redundant and removed.

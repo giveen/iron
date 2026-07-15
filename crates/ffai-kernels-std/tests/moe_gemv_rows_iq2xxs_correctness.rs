@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_moe_gemv_rows_iq2xxs` — the fast
+//! GPU correctness for `ffai::ffai_moe_gemv_rows_iq2xxs` — the fast
 //! gemv-over-rows prefill MoE kernel (replaces the slow coop-tile bgemm).
 //! Oracle: per-row IQ2_XXS dequant gemv with PER-ROW x and per-row expert.
 //! Same dequant as the proven gather_gemv; only x is row-indexed. Cos ≥ 0.99.
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::moe::moe_gemv_rows_iq2xxs::mt_moe_gemv_rows_iq2xxs;
+use ffai_kernels_std::kernels::moe::moe_gemv_rows_iq2xxs::ffai_moe_gemv_rows_iq2xxs;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -94,7 +94,7 @@ fn gemv_rows_iq2xxs_matches_oracle() {
     buffers.insert("m_total".into(), (m_total as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut k = mt_moe_gemv_rows_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
+    let mut k = ffai_moe_gemv_rows_iq2xxs::kernel_ir_for(Dt::F32.to_dtype());
     k.mode = KernelMode::Reduction;
     let r = ctx
         .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [m_out, m_total, 1], [32, 1, 1])

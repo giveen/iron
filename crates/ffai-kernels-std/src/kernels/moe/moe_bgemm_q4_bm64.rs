@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! HIGH-THROUGHPUT amortized MoE Q4 grouped BGEMM — bm64 tiling (64×64×32,
 //! 4 simdgroups) with the bench's signed-4-bit dequant. The Q4 twin of
-//! `mt_moe_bgemm_q2k_bm64`: processes a 64-row M-tile whose rows are
+//! `ffai_moe_bgemm_q2k_bm64`: processes a 64-row M-tile whose rows are
 //! PRE-SORTED by expert id (`indices[row]`), finds contiguous same-expert
 //! sub-runs, and runs one MMA GEMM per sub-run against that expert's weights.
 //! This replaces the per-token MoE gather loop (which was 72% of prefill time
@@ -24,7 +24,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_bgemm_q4_bm64<T>(
+pub fn ffai_moe_bgemm_q4_bm64<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     scales: Tensor<f16>,
@@ -159,7 +159,7 @@ pub fn mt_moe_bgemm_q4_bm64<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_moe_bgemm_q4_bm64;
+    use super::ffai_moe_bgemm_q4_bm64;
     use crate::utils::pack_f32;
 
     fn quantize_q4(w: &[f32], m: usize, k: usize) -> (Vec<u32>, Vec<f32>) {
@@ -231,7 +231,7 @@ pub mod kernel_tests {
         let qs_bytes: Vec<u8> = qs.iter().flat_map(|x| x.to_le_bytes()).collect();
         let idx_bytes: Vec<u8> = idx.iter().flat_map(|x| x.to_le_bytes()).collect();
         let _ = bpr;
-        TestSetup::new(mt_moe_bgemm_q4_bm64::kernel_ir_for(dt))
+        TestSetup::new(ffai_moe_bgemm_q4_bm64::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&xv, dt), dt))
             .input(TestBuffer::from_vec("qs", qs_bytes, DType::U32))

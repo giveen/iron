@@ -12,7 +12,7 @@
 //!
 //! ```text
 //! {"type":"start","runner_version":"0.1","command":"bench","total":42}
-//! {"type":"bench","op":"unary/exp","dtype":"f32","mt_gbps":1234.5,...}
+//! {"type":"bench","op":"unary/exp","dtype":"f32","ffai_gbps":1234.5,...}
 //! {"type":"done","ok":true,"bench_passed":42,"bench_failed":0,...}
 //! ```
 //!
@@ -215,13 +215,13 @@ pub struct BenchResult {
     pub shape: String,
     /// Throughput in GB/s for the FFAI Kernels kernel.
     #[serde(default)]
-    pub mt_gbps: f64,
+    pub ffai_gbps: f64,
     /// Throughput in GB/s for the reference kernel, if one was configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_gbps: Option<f64>,
     /// FFAI Kernels speed relative to reference (%), if reference exists.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mt_pct: Option<f64>,
+    pub ffai_pct: Option<f64>,
     /// Whether the kernel produced correct results.
     #[serde(default)]
     pub correct: bool,
@@ -271,9 +271,9 @@ pub struct BuildResult {
 // ---------------------------------------------------------------------------
 
 /// Op group of a kernel name — the path component before `/`, else the name
-/// with any `mt_` prefix and dtype suffix stripped:
+/// with any `ffai_` prefix and dtype suffix stripped:
 /// - `"ffai/gemv"` → `"ffai"`
-/// - `"mt_softmax_f32"` → `"softmax"`
+/// - `"ffai_softmax_f32"` → `"softmax"`
 /// - `"softmax"` → `"softmax"`
 ///
 /// Shared by the CLI's filter flags and the runner's pre-dispatch filtering
@@ -283,7 +283,7 @@ pub fn op_group(name: &str) -> &str {
     if let Some(pos) = name.find('/') {
         return &name[..pos];
     }
-    let name = name.strip_prefix("mt_").unwrap_or(name);
+    let name = name.strip_prefix("ffai_").unwrap_or(name);
     name.strip_suffix("_f32")
         .or_else(|| name.strip_suffix("_f16"))
         .or_else(|| name.strip_suffix("_bf16"))
@@ -320,10 +320,10 @@ mod tests {
     #[test]
     fn op_group_extraction() {
         assert_eq!(op_group("ffai/gemv"), "ffai");
-        assert_eq!(op_group("mt_softmax_f32"), "softmax");
-        assert_eq!(op_group("mt_softmax_bf16"), "softmax");
+        assert_eq!(op_group("ffai_softmax_f32"), "softmax");
+        assert_eq!(op_group("ffai_softmax_bf16"), "softmax");
         assert_eq!(op_group("softmax"), "softmax");
-        assert_eq!(op_group("mt_vector_add_f16"), "vector_add");
+        assert_eq!(op_group("ffai_vector_add_f16"), "vector_add");
     }
 
     #[test]
@@ -333,9 +333,9 @@ mod tests {
             group: String::new(),
             dtype: "f16".into(),
             shape: "N=1M f16".into(),
-            mt_gbps: 1234.5,
+            ffai_gbps: 1234.5,
             ref_gbps: Some(1189.2),
-            mt_pct: Some(103.8),
+            ffai_pct: Some(103.8),
             correct: true,
             min_us: 12.3,
             mean_us: 12.8,
@@ -346,7 +346,7 @@ mod tests {
         match parsed {
             ProtocolMessage::BenchResult(b) => {
                 assert_eq!(b.name, "unary/exp");
-                assert!((b.mt_gbps - 1234.5).abs() < 0.01);
+                assert!((b.ffai_gbps - 1234.5).abs() < 0.01);
                 assert!((b.ref_gbps.unwrap() - 1189.2).abs() < 0.01);
                 assert!(b.profile.is_none());
             },
@@ -361,9 +361,9 @@ mod tests {
             group: String::new(),
             dtype: "f32".into(),
             shape: "N=1M f32".into(),
-            mt_gbps: 900.0,
+            ffai_gbps: 900.0,
             ref_gbps: None,
-            mt_pct: None,
+            ffai_pct: None,
             correct: true,
             min_us: 5.0,
             mean_us: 5.2,
@@ -453,7 +453,7 @@ mod tests {
         let msg = ProtocolMessage::Inspect {
             name: "unary/exp".into(),
             kind: InspectKind::Msl,
-            content: "kernel void mt_exp(...) {}".into(),
+            content: "kernel void ffai_exp(...) {}".into(),
         };
         let json = msg.to_json_line();
         let parsed = ProtocolMessage::from_json_line(&json).unwrap();
@@ -461,7 +461,7 @@ mod tests {
             ProtocolMessage::Inspect { name, kind, content } => {
                 assert_eq!(name, "unary/exp");
                 assert_eq!(kind, InspectKind::Msl);
-                assert!(content.contains("mt_exp"));
+                assert!(content.contains("ffai_exp"));
             },
             _ => panic!("expected Inspect"),
         }

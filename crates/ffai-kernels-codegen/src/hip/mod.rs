@@ -21,7 +21,7 @@
 //! that took 4164/4164 corpus passes to establish: a numerics fix lands once
 //! and both vendors inherit it.
 //!
-//! TODO(follow-up, post-#274/#275): the shared layer still *lives in* the
+//! TODO(follow-up): the shared layer still *lives in* the
 //! `cuda` module and the lowering is textual, which makes CUDA read as the
 //! first-class target. The structural fix is to extract the op-walker into a
 //! vendor-neutral `gpu_cpp` emitter module that `CudaGenerator` and

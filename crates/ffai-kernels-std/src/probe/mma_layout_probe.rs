@@ -20,7 +20,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_mma_probe_a_identity_b_gemm(out: Tensor<f32>) {
+pub fn ffai_mma_probe_a_identity_b_gemm(out: Tensor<f32>) {
     let lane = simd_lane;
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
@@ -59,7 +59,7 @@ pub fn mt_mma_probe_a_identity_b_gemm(out: Tensor<f32>) {
 }
 
 #[kernel]
-pub fn mt_mma_probe_a_identity_b_identity(out: Tensor<f32>) {
+pub fn ffai_mma_probe_a_identity_b_identity(out: Tensor<f32>) {
     let lane = simd_lane;
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);

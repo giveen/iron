@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_fp_qmm_nax` — fp4 (E2M1) quantized matmul via `mpp::tensor_ops::matmul2d`.
+//! `ffai_fp_qmm_nax` — fp4 (E2M1) quantized matmul via `mpp::tensor_ops::matmul2d`.
 //!
 //! NAX (Apple tensor-core) port of the fp4 quantized matmul from MLX
 //! `metal/kernels/fp_quantized_nax.metal`. Gated behind the `nax` Cargo
@@ -10,7 +10,7 @@
 //! Expressed entirely in the `#[kernel]` DSL via the `coop_tile_*`
 //! intrinsics — no `Op::InlineMsl`.
 //!
-//! Fp4 counterpart of `mt_qmm_nax`. Mirrors the same coop-load /
+//! Fp4 counterpart of `ffai_qmm_nax`. Mirrors the same coop-load /
 //! coop-dequant / `matmul2d` pattern — packed weights are dequantized
 //! into threadgroup memory once per K-block, then per-simdgroup
 //! `matmul2d` runs against the fp `T` X-tile — but swaps the int4
@@ -59,7 +59,7 @@ use ffai_kernels::kernel;
 ///   `x [m, k]` (T), `out [m, n]` (T).
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_fp_qmm_nax<T>(
+pub fn ffai_fp_qmm_nax<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     x: Tensor<T>,
@@ -173,8 +173,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_fp_qmm_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_fp_qmm_nax");
+            let k = ffai_fp_qmm_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_fp_qmm_nax");
             assert_eq!(k.params.len(), 4);
             assert_eq!(k.params[0].name, "w");
             assert_eq!(k.params[0].dtype, DType::U32);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_fp_qmm_nax::kernel_ir_for(DType::BF16);
+        let k = ffai_fp_qmm_nax::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -209,55 +209,55 @@ mod tests {
     #[test]
     fn codegen_emits_mpp_include_and_kernel_decl() {
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
-            let mut k = mt_fp_qmm_nax::kernel_ir_for(dt);
+            let mut k = ffai_fp_qmm_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 DType::BF16 => "bf16",
                 _ => unreachable!(),
             };
-            k.name = format!("mt_fp_qmm_nax_{suffix}");
+            k.name = format!("ffai_fp_qmm_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
             assert!(
                 msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"),
                 "MPP include missing:\n{msl}"
             );
             assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-            assert!(msl.contains(&format!("kernel void mt_fp_qmm_nax_{suffix}")));
+            assert!(msl.contains(&format!("kernel void ffai_fp_qmm_nax_{suffix}")));
             assert!(msl.contains(&format!("threadgroup {t_name} Xs")));
         }
     }
 }
 
-/// New-syntax correctness + benchmark for `mt_fp_qmm_nax` — the MPP
+/// New-syntax correctness + benchmark for `ffai_fp_qmm_nax` — the MPP
 /// (matmul2d) fp4 E2M1 matmul. Same scale-only E2M1 dequant as
-/// `mt_fp4_qmm_mma`, so this reuses that file's shared oracle / bench builder.
+/// `ffai_fp4_qmm_mma`, so this reuses that file's shared oracle / bench builder.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_fp_qmm_nax;
+    use super::ffai_fp_qmm_nax;
     use crate::kernels::gemm::fp_quantized_mma::kernel_tests::fp_setup;
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp_qmm_nax(dt: DType) -> TestSetup {
-        fp_setup(mt_fp_qmm_nax::kernel_ir_for(dt), 32, 32, 128, 4, dt)
+        fp_setup(ffai_fp_qmm_nax::kernel_ir_for(dt), 32, 32, 128, 4, dt)
     }
     // Multi-tile (64×64) — cross-threadgroup tile indexing over the MPP path.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-2, 5e-2])]
     fn test_fp_qmm_nax_multi_tile(dt: DType) -> TestSetup {
-        fp_setup(mt_fp_qmm_nax::kernel_ir_for(dt), 64, 64, 128, 4, dt)
+        fp_setup(ffai_fp_qmm_nax::kernel_ir_for(dt), 64, 64, 128, 4, dt)
     }
 }
 
-/// New-syntax benchmark for `mt_fp_qmm_nax`.
+/// New-syntax benchmark for `ffai_fp_qmm_nax`.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_fp_qmm_nax;
+    use super::ffai_fp_qmm_nax;
     use crate::kernels::gemm::fp_quantized_mma::kernel_benches::fpb;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp_qmm_nax(dt: DType) -> BenchSetup {
-        fpb(mt_fp_qmm_nax::kernel_ir_for(dt), 32, 4096, 4096, 4, dt)
+        fpb(ffai_fp_qmm_nax::kernel_ir_for(dt), 32, 4096, 4096, 4, dt)
     }
 }

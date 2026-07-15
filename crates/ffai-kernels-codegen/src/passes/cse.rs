@@ -395,7 +395,7 @@ mod tests {
             ValueId::new(3),
         );
         // Stores for BOTH BinOps so each is anchored against the
-        // per-pass DCE postcondition (#209/1).  Pre-#209/1 only `v3`
+        // per-pass DCE postcondition.  Previously only `v3`
         // (Mul) was anchored; `v2` (Add) had no consumer, so adding
         // the DCE call to CsePass would have removed it on the way
         // out — masking the "different BinOps don't collapse" check

@@ -11,14 +11,14 @@ use ffai_kernels::core::{dtype::DType, ir::Kernel};
 /// family. Returns the kernel IR ready to dispatch.
 ///
 /// Heuristic:
-/// - bf16 + Apple gen-8 (M2): use `mt_sdpa_prefill_mma_bf16` — single-Q
+/// - bf16 + Apple gen-8 (M2): use `ffai_sdpa_prefill_mma_bf16` — single-Q
 ///   dd-loop variant; reduces simdgroup-matrix frag count 22 → 7, freeing
 ///   register-file room for M2's emulated bf16-MMA path. +14pts vs the
 ///   16-Q-preload sibling at bf16 on M2.
-/// - bf16 + Apple gen-9+ (M3+): use `mt_sdpa_prefill_mma` — both variants
+/// - bf16 + Apple gen-9+ (M3+): use `ffai_sdpa_prefill_mma` — both variants
 ///   tie on bf16 on M5 (native bf16 MMA, no emulation tax), but the
 ///   sibling wins f32/f16 by 1pt on idle so we stick with it.
-/// - f32 / f16 (any family): use `mt_sdpa_prefill_mma`.
+/// - f32 / f16 (any family): use `ffai_sdpa_prefill_mma`.
 ///
 /// `family` should be the `Context::chip_family()` value (`None` means
 /// "unknown / non-Apple-Silicon target" — fall back to the sibling kernel
@@ -70,9 +70,9 @@ use ffai_kernels::core::{dtype::DType, ir::Kernel};
 pub fn sdpa_prefill_mma_for(dtype: DType, family: Option<u32>) -> Kernel {
     let is_pre_m3_bf16 = dtype == DType::BF16 && matches!(family, Some(f) if f <= 8);
     let mut k = if is_pre_m3_bf16 {
-        steel_attention_mma_bf16::mt_sdpa_prefill_mma_bf16::kernel_ir_for(dtype)
+        steel_attention_mma_bf16::ffai_sdpa_prefill_mma_bf16::kernel_ir_for(dtype)
     } else {
-        steel_attention_mma::mt_sdpa_prefill_mma::kernel_ir_for(dtype)
+        steel_attention_mma::ffai_sdpa_prefill_mma::kernel_ir_for(dtype)
     };
     // Opt in to the MFA-style f32→bf16 reinterpret cast. The MMA
     // kernels accumulate in f32 throughout and emit a single
@@ -92,13 +92,13 @@ mod tests {
     #[test]
     fn auto_select_picks_bf16_variant_for_m2_bf16() {
         let k = sdpa_prefill_mma_for(DType::BF16, Some(8));
-        assert_eq!(k.name, "mt_sdpa_prefill_mma_bf16");
+        assert_eq!(k.name, "ffai_sdpa_prefill_mma_bf16");
     }
 
     #[test]
     fn auto_select_picks_sibling_for_m5_bf16() {
         let k = sdpa_prefill_mma_for(DType::BF16, Some(10));
-        assert_eq!(k.name, "mt_sdpa_prefill_mma");
+        assert_eq!(k.name, "ffai_sdpa_prefill_mma");
     }
 
     #[test]
@@ -106,7 +106,7 @@ mod tests {
         for family in [None, Some(7), Some(8), Some(9), Some(10)] {
             for dt in [DType::F32, DType::F16] {
                 let k = sdpa_prefill_mma_for(dt, family);
-                assert_eq!(k.name, "mt_sdpa_prefill_mma", "dt={dt:?} family={family:?}");
+                assert_eq!(k.name, "ffai_sdpa_prefill_mma", "dt={dt:?} family={family:?}");
             }
         }
     }
@@ -135,6 +135,6 @@ mod tests {
         // Non-Apple-Silicon hosts (or unidentified GPUs) get the sibling
         // kernel — broadest perf profile across all dtypes.
         let k = sdpa_prefill_mma_for(DType::BF16, None);
-        assert_eq!(k.name, "mt_sdpa_prefill_mma");
+        assert_eq!(k.name, "ffai_sdpa_prefill_mma");
     }
 }

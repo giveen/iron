@@ -6,11 +6,11 @@
 //! with the convolution family; its fused sibling is
 //! `conv1d_causal_step_silu_cast_many`.
 //!
-//! - `mt_conv1d_causal_step` — one thread per channel, streaming decode:
+//! - `ffai_conv1d_causal_step` — one thread per channel, streaming decode:
 //!   `y[d] = bias[d] + w[K-1][d]·x[d] + Σ_{k<K-1} w[k][d]·state[k][d]`, then
 //!   shifts `state` in place (drop `state[0]`, append `x`). Each channel is
 //!   owned by one thread, so the read-then-write shift is barrier-free.
-//! - `mt_conv1d_causal_prefill` — all S prompt tokens in one dispatch from zero
+//! - `ffai_conv1d_causal_prefill` — all S prompt tokens in one dispatch from zero
 //!   initial state, one thread per `(token, channel)`, with SiLU applied inline
 //!   (saves a second dispatch). Out-of-bounds taps read 0.
 //!
@@ -19,7 +19,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_conv1d_causal_step<T>(
+pub fn ffai_conv1d_causal_step<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     b: Tensor<T>,
@@ -66,7 +66,7 @@ pub fn mt_conv1d_causal_step<T>(
 }
 
 #[kernel]
-pub fn mt_conv1d_causal_prefill(
+pub fn ffai_conv1d_causal_prefill(
     xbc_in: Tensor<f32>, // [s * conv_dim] flat row-major
     w: Tensor<f32>,      // [kc * conv_dim] reorganized same as decode step
     bias: Tensor<f32>,   // [conv_dim]
@@ -102,7 +102,7 @@ pub fn mt_conv1d_causal_prefill(
 /// the GPU. `keep = (kc-2)*conv_dim`; indices clamped so both select branches
 /// are in-bounds.
 #[kernel]
-pub fn mt_conv_roll<T>(
+pub fn ffai_conv_roll<T>(
     old: Tensor<T>,
     xbc: Tensor<T>,
     mut newst: Tensor<T>,
@@ -122,7 +122,7 @@ pub fn mt_conv_roll<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_conv1d_causal_prefill, mt_conv1d_causal_step};
+    use super::{ffai_conv1d_causal_prefill, ffai_conv1d_causal_step};
     use crate::utils::pack_f32;
 
     /// CPU oracle: `y[d] = b[d] + w[K-1][d]·x[d] + Σ_{k<K-1} w[k][d]·state[k][d]`,
@@ -166,7 +166,7 @@ pub mod kernel_tests {
 
         let (y_exp, state_exp) = conv1d_oracle(&x, &w, &b, &state_in, n_channels, kernel_size);
 
-        TestSetup::new(mt_conv1d_causal_step::kernel_ir_for(dt))
+        TestSetup::new(ffai_conv1d_causal_step::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
@@ -216,7 +216,7 @@ pub mod kernel_tests {
             (0..kc * conv_dim).map(|i| 0.1 + ((i as f32) * 0.019).cos() * 0.2).collect();
         let bias: Vec<f32> = (0..conv_dim).map(|i| (i as f32) * 0.001 - 0.05).collect();
         let y_exp = conv1d_causal_prefill_oracle(&xbc, &w, &bias, s, conv_dim, kc);
-        TestSetup::new(mt_conv1d_causal_prefill::kernel_ir_for())
+        TestSetup::new(ffai_conv1d_causal_prefill::kernel_ir_for())
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("xbc_in", pack_f32(&xbc, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
@@ -235,13 +235,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_conv1d_causal_step;
+    use super::ffai_conv1d_causal_step;
 
     // Mamba 2 short-conv at a realistic channel count, K=4. One thread/channel.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_conv1d_causal_step(dt: DType) -> BenchSetup {
         let (n_channels, kernel_size) = (1536usize, 4usize);
-        BenchSetup::new(mt_conv1d_causal_step::kernel_ir_for(dt))
+        BenchSetup::new(ffai_conv1d_causal_step::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("x", n_channels, dt))
             .buffer(BenchBuffer::random("w", kernel_size * n_channels, dt))

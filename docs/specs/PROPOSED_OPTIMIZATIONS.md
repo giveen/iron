@@ -15,9 +15,9 @@ would need to change before it could land.
 
 **Status**: **Already implemented** — no action required.
 
-**Targets**: `mt_qmv`, `mt_qmm{,_bm2,_bm4}`, `mt_qmv_int8_fast`,
-`mt_qmm_int8_fast{,_bm2,_bm4}`, `mt_qmm_mma`, `mt_qmm_mma_m16`,
-`mt_qmm_mma_int8`, `mt_qmm_mma_m16_int8`.
+**Targets**: `ffai_qmv`, `ffai_qmm{,_bm2,_bm4}`, `ffai_qmv_int8_fast`,
+`ffai_qmm_int8_fast{,_bm2,_bm4}`, `ffai_qmm_mma`, `ffai_qmm_mma_m16`,
+`ffai_qmm_mma_int8`, `ffai_qmm_mma_m16_int8`.
 
 **Finding**: The `VectorizePass` in
 `crates/ffai-kernels-codegen/src/passes/vectorize.rs` already detects
@@ -31,8 +31,8 @@ All X-load sites in the GEMV/GEMM kernels are structured as consecutive
 scalar `Load` calls at `base + 0 .. base + N` — explicitly sequenced to
 be contiguous in the IR so the vectorize pass fuses them.  The kernel
 comments confirm this (e.g. `"16 X loads — consecutive in IR for
-vectorize fusion (4× float4)"` in `mt_qmv`; `"8 contiguous device
-loads → 2× vec4 after vectorize pass"` in `mt_qmm_mma`).
+vectorize fusion (4× float4)"` in `ffai_qmv`; `"8 contiguous device
+loads → 2× vec4 after vectorize pass"` in `ffai_qmm_mma`).
 
 **Verification**: Confirmed by inspecting the VectorizePass source, the
 MSL emitter, and the kernel DSL code — no gap.
@@ -45,8 +45,8 @@ MSL emitter, and the kernel DSL code — no gap.
 loads; benefit unconfirmed; implementation adds complexity without clear
 profiling evidence.
 
-**Targets**: `mt_qmv`, `mt_qmm{,_bm2,_bm4}`, `mt_qmv_int8_fast`,
-`mt_qmm_int8_fast{,_bm2,_bm4}`.
+**Targets**: `ffai_qmv`, `ffai_qmm{,_bm2,_bm4}`, `ffai_qmv_int8_fast`,
+`ffai_qmm_int8_fast{,_bm2,_bm4}`.
 
 **Background**: The DSL exposes `simd_broadcast(value, lane)` →
 `simd_broadcast(v, lane)` in Metal Shading Language (see
@@ -55,14 +55,14 @@ primitive exists and is used in the AURA codebook kernels.
 
 **Where lanes share scale/bias addresses**:
 
-*int4 kernels* (`mt_qmv`, `mt_qmm*`): K-block = 512 elements.  Each
+*int4 kernels* (`ffai_qmv`, `ffai_qmm*`): K-block = 512 elements.  Each
 lane owns 16 X values; group_size = 64.  Lanes 0–3 share group `g = 0`
 for the first K-block, lanes 4–7 share group `g = 1`, etc.  Every 4
 consecutive lanes read the same `scales[sb_base + g]` and
 `biases[sb_base + g]` — 4 redundant device loads per 4-lane group, ×4
 output rows = 32 redundant loads per K-block outer-iteration.
 
-*int8 kernels* (`mt_qmv_int8_fast`, `mt_qmm_int8_fast*`): K-block =
+*int8 kernels* (`ffai_qmv_int8_fast`, `ffai_qmm_int8_fast*`): K-block =
 128.  Each lane owns 4 X values; group_size = 64.  Lanes 0–15 share
 group `g = _b / 64`, lanes 16–31 share group `g + 1`.  16 redundant
 loads per K-block per output row.
@@ -103,7 +103,7 @@ let bi0 = simd_broadcast(bi0_raw, base_lane);
    argument in the `broadcast` cost model (currently the VectorizePass
    and SchedulePass have no knowledge of `simd_broadcast` dependencies).
 
-**Prerequisite work**: Profile `mt_qmv_int8_fast` with Metal GPU counter
+**Prerequisite work**: Profile `ffai_qmv_int8_fast` with Metal GPU counter
 `LOAD_CACHE_MISS_RATE` to confirm same-address loads are not already
 coalesced by hardware.  If they are not (i.e. older non-M-series
 hardware or future non-Apple targets), add a `FastPath` flag to the
@@ -119,7 +119,7 @@ hardware or future non-Apple targets), add a `FastPath` flag to the
 `UnaryOpKind` variants + codegen + precision characterization.
 
 **Targets**: `mel_spectrogram` (sin/cos inner DFT, log filterbank),
-`mt_softmax` (exp in both passes), `mt_logsumexp` (exp in loop, log at
+`ffai_softmax` (exp in both passes), `ffai_logsumexp` (exp in loop, log at
 store), `vocoder_istft` (sin/cos inner iDFT).
 
 **Current emission**: `UnaryOpKind::{Exp,Log,Sin,Cos}` in
@@ -142,11 +142,11 @@ samples per frequency bin.  The `angle` range is `[-2π, 0]`; inputs are
 well-defined reals — fast math edge cases don't apply.  Expected speedup:
 ~1.5–1.8× on the DFT inner loop (the dominant cost).
 
-For `mt_softmax`: `exp(v_i - max_i)` — arguments are always ≤ 0
+For `ffai_softmax`: `exp(v_i - max_i)` — arguments are always ≤ 0
 (subtracted maximum), so the output is always in `(0, 1]`.  Fast exp is
 safe here.  Expected speedup: ~1.4× on the reduction pass.
 
-For `mt_logsumexp`: Same `exp` path as softmax (arguments ≤ 0), plus a
+For `ffai_logsumexp`: Same `exp` path as softmax (arguments ≤ 0), plus a
 final `log(gs)` where `gs > 0` is always true.  Safe.
 
 For `vocoder_istft`: `cos(angle)` and `sin(angle)` inner loop — same
@@ -201,14 +201,14 @@ kernels accumulate across ≥ 64 elements under quantization noise;
 switching to T-precision accumulators would degrade accuracy below the
 0.999 cosine threshold.
 
-**Targets examined**: `mt_qmv`, `mt_qmm{,_bm2,_bm4}`,
-`mt_qmv_int8_fast`, `mt_qmm_int8_fast{,_bm2,_bm4}`, `mel_spectrogram`,
-`mt_softmax`, `mt_logsumexp`, `vocoder_istft`.
+**Targets examined**: `ffai_qmv`, `ffai_qmm{,_bm2,_bm4}`,
+`ffai_qmv_int8_fast`, `ffai_qmm_int8_fast{,_bm2,_bm4}`, `mel_spectrogram`,
+`ffai_softmax`, `ffai_logsumexp`, `vocoder_istft`.
 
 **Analysis**:
 
 *Quantized GEMV/GEMM kernels*: Every accumulator is `f32` by design.
-The comment in `mt_qmv` is explicit: "accumulators stay in f32
+The comment in `ffai_qmv` is explicit: "accumulators stay in f32
 regardless of T".  The reason is that int4 quantization introduces up to
 `q_err = 15/(2^4) × scale = 0.93 × scale` per element; with 64 elements
 per group and scale ≈ 1/16, accumulated error without f32 headroom
@@ -220,7 +220,7 @@ over 400 samples.  Running sum of floats at f16 precision would
 accumulate ≈ 0.001 × √400 ≈ 0.02 absolute error — audible in the
 output spectrogram.  f32 accumulation is required.
 
-*`mt_softmax`, `mt_logsumexp`*: Online softmax requires both a max
+*`ffai_softmax`, `ffai_logsumexp`*: Online softmax requires both a max
 accumulator and a sum accumulator.  The numerical stability of the online
 algorithm depends on the precision of `exp(v - m)` where `v` and `m` may
 differ by many units.  f16 would lose the mantissa bits needed to recover
@@ -245,10 +245,10 @@ violate (b).
 exist; implementing it without codegen changes would require hand-unrolling
 the K-loop which defeats DSL portability.
 
-**Targets**: `mt_qmm_mma`, `mt_qmm_mma_m16`, `mt_qmm_mma_int8`,
-`mt_qmm_mma_m16_int8`, `mt_qmm_mma_mpp` (via `quantized_mpp.rs`),
-`mt_qmm_nax`, `mt_qmm_nax_int8`, `mt_moe_gather_qmm_mma_int4`,
-`mt_moe_gather_qmm_mma_int8` and the `_bm{8,16,64}_mpp` MoE variants.
+**Targets**: `ffai_qmm_mma`, `ffai_qmm_mma_m16`, `ffai_qmm_mma_int8`,
+`ffai_qmm_mma_m16_int8`, `ffai_qmm_mma_mpp` (via `quantized_mpp.rs`),
+`ffai_qmm_nax`, `ffai_qmm_nax_int8`, `ffai_moe_gather_qmm_mma_int4`,
+`ffai_moe_gather_qmm_mma_int8` and the `_bm{8,16,64}_mpp` MoE variants.
 
 **Pattern**: Apple's hand-tuned `mma_qmm` Metal shaders (and typical
 CUTLASS-style GPU kernels) overlap loading the next K-block into
@@ -296,7 +296,7 @@ software pipelining requires either:
    without codegen changes but roughly doubles the kernel source length
    and is fragile across K shapes.
 
-**Expected benefit**: On M3 Pro with `mt_qmm_mma` (K=4096, N=4096, M=32),
+**Expected benefit**: On M3 Pro with `ffai_qmm_mma` (K=4096, N=4096, M=32),
 an Apple hand-tuned pipelined MMA kernel typically runs 15–25% faster
 than the non-pipelined equivalent (Apple's own `steel_gemm` docs reference
 this range for their pipelined GEMM over the non-pipelined baseline).

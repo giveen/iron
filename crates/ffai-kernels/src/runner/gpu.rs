@@ -306,7 +306,7 @@ impl GpuRunner {
         {
             const SLC_FLUSH_MSL: &str = concat!(
                 "#include <metal_stdlib>\nusing namespace metal;\n",
-                "kernel void _mt_slc_flush(",
+                "kernel void _ffai_slc_flush(",
                 "device uint* buf [[buffer(0)]],",
                 "uint gid [[thread_position_in_grid]]",
                 ") { buf[gid] = buf[gid] + gid; }"
@@ -315,7 +315,7 @@ impl GpuRunner {
 
             let (name, inner) = MacosRunner::new()?;
             let slc_pso = inner
-                .compile(SLC_FLUSH_MSL, "_mt_slc_flush")
+                .compile(SLC_FLUSH_MSL, "_ffai_slc_flush")
                 .map_err(|e| format!("SLC flush compile: {e}"))?;
             let slc_kernel = CompiledKernel { inner: slc_pso };
             let slc_buf = GpuBuffer { size_bytes: SLC_BYTES, inner: inner.alloc_zeros(SLC_BYTES) };

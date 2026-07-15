@@ -9,7 +9,7 @@
 //! `ffai/` split.
 //!
 //! The quantized files keep their format-distinguished names for now; the
-//! format-axis fold (plan §7) — collapsing the per-format `mt_<fmt>_qmm`
+//! format-axis fold (plan §7) — collapsing the per-format `ffai_<fmt>_qmm`
 //! matrices into format-parameterised kernels — is deferred.
 
 // Dense GEMM / GEMV.

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Decode-form scaled dot-product attention — `mt_sdpa_vector` family.
+//! Decode-form scaled dot-product attention — `ffai_sdpa_vector` family.
 //!
 //! Faithful port of MLX `sdpa_vector<T, D, V=D>` template. One threadgroup
 //! per Q head, 1024 threads = `BN × BD = 32 simdgroups × 32 lanes`. Each
@@ -11,11 +11,11 @@
 //!
 //! | Kernel                    | head_dim | elems/lane | phases |
 //! |---------------------------|----------|------------|--------|
-//! | `mt_sdpa_vector_d64`      | 64       | 2          | 2      |
-//! | `mt_sdpa_vector_d96`      | 96       | 3          | 3      |
-//! | `mt_sdpa_vector` (d=128)  | 128      | 4          | 4      |
-//! | `mt_sdpa_vector_d192`     | 192      | 6          | 6      |
-//! | `mt_sdpa_vector_d256`     | 256      | 8          | 8      |
+//! | `ffai_sdpa_vector_d64`      | 64       | 2          | 2      |
+//! | `ffai_sdpa_vector_d96`      | 96       | 3          | 3      |
+//! | `ffai_sdpa_vector` (d=128)  | 128      | 4          | 4      |
+//! | `ffai_sdpa_vector_d192`     | 192      | 6          | 6      |
+//! | `ffai_sdpa_vector_d256`     | 256      | 8          | 8      |
 //!
 //! All variants use TPG=1024 (32 SG × 32 lanes). The cross-simdgroup output
 //! reduction reuses a single 1024-slot `tg_out` buffer, cycling once per
@@ -28,14 +28,14 @@
 //! `ffaik bench` head-to-head, so additions that diverge from MLX's
 //! `sdpa_vector` template live in `ffai/`. Bandwidth fixes that apply
 //! to both should be ported across — see the `tg_out` occupancy fix
-//! in PR #43 for the precedent.
+//! for the precedent.
 
 use ffai_kernels::kernel;
 
 // ── d=128 baseline (original, benchmarked against MLX) ──────────────────────
 
 #[kernel]
-pub fn mt_sdpa_vector<T>(
+pub fn ffai_sdpa_vector<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -54,7 +54,7 @@ pub fn mt_sdpa_vector<T>(
     // buffer reused 4× in the reduction loop below. Matches MLX's layout:
     // 4 KB tg memory total. On M2 (32 KB tg/SM) that's 7 concurrent TGs/SM
     // vs the 2 we got from the old 16 KB / 4-array layout — the missing
-    // occupancy factor that capped bf16 at 62% MT despite vectorized loads.
+    // occupancy factor that capped bf16 at 62% FFAI despite vectorized loads.
     threadgroup_alloc("tg_max", 32);
     threadgroup_alloc("tg_sum", 32);
     threadgroup_alloc("tg_out", 1024);
@@ -76,7 +76,7 @@ pub fn mt_sdpa_vector<T>(
     // Pre-computing the 4 KV indices and issuing the 4 loads as a single run
     // (no BinOp/Cast interleaved) is what lets the vectorize pass collapse
     // them into one bfloat4 / half4 / float4 load — same shape as
-    // `mt_sdpa_decode_2pass_pass1`. Inline'd loads + casts broke the run before.
+    // `ffai_sdpa_decode_2pass_pass1`. Inline'd loads + casts broke the run before.
     for t in range(sg, n_kv, ns) {
         let kv0 = kv_base + t * head_dim + d0;
         let kv1 = kv0 + 1u32;
@@ -178,7 +178,7 @@ pub fn mt_sdpa_vector<T>(
 /// GQA decode SDPA, head_dim=64. Each lane owns 2 elements (`64/32`).
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 #[kernel]
-pub fn mt_sdpa_vector_d64<T>(
+pub fn ffai_sdpa_vector_d64<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -264,7 +264,7 @@ pub fn mt_sdpa_vector_d64<T>(
 /// GQA decode SDPA, head_dim=96. Each lane owns 3 elements (`96/32`).
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 #[kernel]
-pub fn mt_sdpa_vector_d96<T>(
+pub fn ffai_sdpa_vector_d96<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -363,10 +363,10 @@ pub fn mt_sdpa_vector_d96<T>(
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 ///
 /// 6 live K accumulators + 6 V accumulators per lane. Register pressure is
-/// higher than d=128 but below the d=256 bound that `mt_sdpa_decode_d256`
+/// higher than d=128 but below the d=256 bound that `ffai_sdpa_decode_d256`
 /// confirmed fits in 1024 threads/TG (8 accumulators).
 #[kernel]
-pub fn mt_sdpa_vector_d192<T>(
+pub fn ffai_sdpa_vector_d192<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -492,12 +492,12 @@ pub fn mt_sdpa_vector_d192<T>(
 /// GQA decode SDPA, head_dim=256. Each lane owns 8 elements (`256/32`).
 /// Generic `T ∈ {f32, f16, bf16}`. TPG=1024; grid=[n_q_heads,1,1].
 ///
-/// 8 live K accumulators + 8 V accumulators per lane. `mt_sdpa_decode_d256`
+/// 8 live K accumulators + 8 V accumulators per lane. `ffai_sdpa_decode_d256`
 /// confirmed that 8-element/lane fits within the pipeline cap at 1024
 /// threads/TG. Output reduction uses 8 sequential phases over the same
 /// 1024-slot `tg_out` buffer (same ~4 KB TG footprint as d=128).
 #[kernel]
-pub fn mt_sdpa_vector_d256<T>(
+pub fn ffai_sdpa_vector_d256<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -644,22 +644,22 @@ pub fn mt_sdpa_vector_d256<T>(
 }
 
 /// New-syntax correctness + benchmarks for the decode-step attention vector
-/// kernels (`mt_sdpa_vector` at head_dim 128 plus the d64/d96/d192/d256
+/// kernels (`ffai_sdpa_vector` at head_dim 128 plus the d64/d96/d192/d256
 /// variants). Oracle: a straight triple-loop `O = softmax(Q·Kᵀ·scale)·V` per
 /// Q head with GQA via `kv_head = q_head / gqa_factor` (the same reference the
-/// legacy `tests/sdpa_vector_gpu_correctness.rs` (removed in #240) pins). The
+/// legacy `tests/sdpa_vector_gpu_correctness.rs` (since removed) pins). The
 /// CPU oracle is reused by
-/// `scaled_dot_product_attention`'s `mt_sdpa`. Inputs are dtype-rounded so the
+/// `scaled_dot_product_attention`'s `ffai_sdpa`. Inputs are dtype-rounded so the
 /// oracle sees what the kernel loads after the f32 cast.
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
     use super::{
-        mt_sdpa_vector,
-        mt_sdpa_vector_d64,
-        mt_sdpa_vector_d96,
-        mt_sdpa_vector_d192,
-        mt_sdpa_vector_d256,
+        ffai_sdpa_vector,
+        ffai_sdpa_vector_d64,
+        ffai_sdpa_vector_d96,
+        ffai_sdpa_vector_d192,
+        ffai_sdpa_vector_d256,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -742,23 +742,23 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_vector(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_vector::kernel_ir_for(dt), 128, 64, 8, 2, dt)
+        sdpa_setup(ffai_sdpa_vector::kernel_ir_for(dt), 128, 64, 8, 2, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_vector_d64(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_vector_d64::kernel_ir_for(dt), 64, 64, 8, 2, dt)
+        sdpa_setup(ffai_sdpa_vector_d64::kernel_ir_for(dt), 64, 64, 8, 2, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_vector_d96(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_vector_d96::kernel_ir_for(dt), 96, 64, 8, 2, dt)
+        sdpa_setup(ffai_sdpa_vector_d96::kernel_ir_for(dt), 96, 64, 8, 2, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_vector_d192(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_vector_d192::kernel_ir_for(dt), 192, 64, 8, 2, dt)
+        sdpa_setup(ffai_sdpa_vector_d192::kernel_ir_for(dt), 192, 64, 8, 2, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 2e-3, 1e-2])]
     fn test_sdpa_vector_d256(dt: DType) -> TestSetup {
-        sdpa_setup(mt_sdpa_vector_d256::kernel_ir_for(dt), 256, 64, 8, 2, dt)
+        sdpa_setup(ffai_sdpa_vector_d256::kernel_ir_for(dt), 256, 64, 8, 2, dt)
     }
 }
 
@@ -768,11 +768,11 @@ pub mod kernel_benches {
     use ffai_kernels::{bench, core::ir::Kernel, test::*};
 
     use super::{
-        mt_sdpa_vector,
-        mt_sdpa_vector_d64,
-        mt_sdpa_vector_d96,
-        mt_sdpa_vector_d192,
-        mt_sdpa_vector_d256,
+        ffai_sdpa_vector,
+        ffai_sdpa_vector_d64,
+        ffai_sdpa_vector_d96,
+        ffai_sdpa_vector_d192,
+        ffai_sdpa_vector_d256,
     };
 
     fn sb(kernel: Kernel, head_dim: usize, dt: DType) -> BenchSetup {
@@ -803,21 +803,23 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_sdpa_vector(dt: DType) -> BenchSetup { sb(mt_sdpa_vector::kernel_ir_for(dt), 128, dt) }
+    fn bench_sdpa_vector(dt: DType) -> BenchSetup {
+        sb(ffai_sdpa_vector::kernel_ir_for(dt), 128, dt)
+    }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_vector_d64(dt: DType) -> BenchSetup {
-        sb(mt_sdpa_vector_d64::kernel_ir_for(dt), 64, dt)
+        sb(ffai_sdpa_vector_d64::kernel_ir_for(dt), 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_vector_d96(dt: DType) -> BenchSetup {
-        sb(mt_sdpa_vector_d96::kernel_ir_for(dt), 96, dt)
+        sb(ffai_sdpa_vector_d96::kernel_ir_for(dt), 96, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_vector_d192(dt: DType) -> BenchSetup {
-        sb(mt_sdpa_vector_d192::kernel_ir_for(dt), 192, dt)
+        sb(ffai_sdpa_vector_d192::kernel_ir_for(dt), 192, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_vector_d256(dt: DType) -> BenchSetup {
-        sb(mt_sdpa_vector_d256::kernel_ir_for(dt), 256, dt)
+        sb(ffai_sdpa_vector_d256::kernel_ir_for(dt), 256, dt)
     }
 }

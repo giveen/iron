@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill MoE Q2_K GEMV-over-rows (down projection) — the Q2_K twin of
-//! mt_moe_gemv_rows_iq2xxs. Replaces the slow coop-tile bgemm
+//! ffai_moe_gemv_rows_iq2xxs. Replaces the slow coop-tile bgemm
 //! (gather_bgemm_q2k_mpp ~10 GB/s) with the fast decode-style direct
 //! simd_sum dot-product applied to a whole batch of M=(token,expert) rows
 //! in ONE dispatch. Reads the resident split pool (qs u32 / scales u8 /
@@ -15,7 +15,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gemv_rows_q2k<T>(
+pub fn ffai_moe_gemv_rows_q2k<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     scales: Tensor<u8>,
@@ -80,7 +80,7 @@ pub fn mt_moe_gemv_rows_q2k<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gemv_rows_q2k;
+    use super::ffai_moe_gemv_rows_q2k;
 
     // M=256 rows, production down dims (m_out=4096 hidden, k_in=2048 intermediate).
     #[bench(dtypes = [f32, f16, bf16])]
@@ -90,7 +90,7 @@ pub mod kernel_benches {
         let m_out = 4096usize;
         let k_in = 2048usize;
         let nblk = m_out * (k_in / 256);
-        BenchSetup::new(mt_moe_gemv_rows_q2k::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gemv_rows_q2k::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m_total * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_experts * nblk * 16, DType::U32))

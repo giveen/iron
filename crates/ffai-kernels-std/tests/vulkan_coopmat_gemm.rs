@@ -3,10 +3,10 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Vulkan/RDNA4 correctness + throughput for the gated `VK_KHR_cooperative_matrix`
-//! GEMM codegen path (`MT_VK_COOPMAT=1`).
+//! GEMM codegen path (`FFAI_VK_COOPMAT=1`).
 //!
-//! Drives the real `mt_gemm_q8_mpp` 64×64×32 SimdGroup CoopTile kernel
-//! through `VulkanDevice::run_kernel`. The device honors `MT_VK_COOPMAT`
+//! Drives the real `ffai_gemm_q8_mpp` 64×64×32 SimdGroup CoopTile kernel
+//! through `VulkanDevice::run_kernel`. The device honors `FFAI_VK_COOPMAT`
 //! at create time; the SPIR-V emitter emits coopMatLoad/MulAdd/Store for
 //! the CoopTile ops. Oracle: triple-loop Q8_0 dequant GEMM (same recipe
 //! as the Metal `gemm_q8_mpp_correctness` test). Run BOTH with and without
@@ -14,13 +14,13 @@
 //!
 //!   # scalar:   cargo test -p ffai-kernels-std --features vulkan --release \
 //!                  --test vulkan_coopmat_gemm -- --nocapture
-//!   # coopmat:  MT_VK_COOPMAT=1 (same line)
+//!   # coopmat:  FFAI_VK_COOPMAT=1 (same line)
 #![cfg(feature = "vulkan")]
 
 use std::{collections::BTreeMap, time::Instant};
 
 use ffai_kernels::{VulkanDevice, core::dtype::DType};
-use ffai_kernels_std::kernels::gemm::gemm_q8_mpp::mt_gemm_q8_mpp;
+use ffai_kernels_std::kernels::gemm::gemm_q8_mpp::ffai_gemm_q8_mpp;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -39,8 +39,8 @@ fn coopmat_gemm_q8_mpp_correct_and_fast() {
         eprintln!("no Vulkan device — skipping");
         return;
     };
-    let coopmat_on = std::env::var("MT_VK_COOPMAT").map(|v| v == "1").unwrap_or(false);
-    eprintln!("=== coopmat_gemm_q8_mpp: MT_VK_COOPMAT={} ===", coopmat_on as u8);
+    let coopmat_on = std::env::var("FFAI_VK_COOPMAT").map(|v| v == "1").unwrap_or(false);
+    eprintln!("=== coopmat_gemm_q8_mpp: FFAI_VK_COOPMAT={} ===", coopmat_on as u8);
 
     // q_a-like prefill shape (matches the bench): in=4096, out=1024, 256 tokens.
     let n_rows = 256usize;
@@ -81,7 +81,7 @@ fn coopmat_gemm_q8_mpp_correct_and_fast() {
     // Kernel IR (f16 instantiation → coop_stage(f16)=f16 staging).
     // The kernel reads tgid_x/tgid_y + simd_group/simd_lane → Reduction
     // mode (matches the bench's `.mode(KernelMode::Reduction)`).
-    let mut kernel = mt_gemm_q8_mpp::kernel_ir_for(DType::F16);
+    let mut kernel = ffai_gemm_q8_mpp::kernel_ir_for(DType::F16);
     kernel.mode = ffai_kernels::core::ir::KernelMode::Reduction;
 
     // Pack buffers. x as f16, qs/d as-is, out zeroed f16.
@@ -135,13 +135,13 @@ fn coopmat_gemm_q8_mpp_correct_and_fast() {
     //     f16-output ULP (both accumulate in f32). Persist the scalar
     //     output, then compare the coopmat run against it. This is the
     //     real correctness gate for the coopmat codegen.
-    let ref_path = std::env::temp_dir().join("mt_coopmat_scalar_ref.bin");
+    let ref_path = std::env::temp_dir().join("ffai_coopmat_scalar_ref.bin");
     if !coopmat_on {
         std::fs::write(&ref_path, got_bytes).expect("write scalar ref");
         eprintln!("  scalar reference written to {}", ref_path.display());
     } else {
         let ref_bytes = std::fs::read(&ref_path)
-            .expect("scalar reference missing — run once WITHOUT MT_VK_COOPMAT first");
+            .expect("scalar reference missing — run once WITHOUT FFAI_VK_COOPMAT first");
         let refv: Vec<f32> = ref_bytes
             .chunks_exact(2)
             .map(|b| half::f16::from_bits(u16::from_le_bytes(b.try_into().unwrap())).to_f32())

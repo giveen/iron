@@ -18,7 +18,7 @@
 //!
 //! Mirrors the CPU selection in `forwardFfnSubblock` (top-K by biased,
 //! weights from unbiased, sum-to-1). Structure adapted from
-//! `mt_moe_router_topk` (masked argmax passes, one simdgroup/row).
+//! `ffai_moe_router_topk` (masked argmax passes, one simdgroup/row).
 //!
 //! Dispatch: `[n_rows, 1, 1] × [32, 1, 1]` (pins tpg=32; one simdgroup
 //! per token row — decode is n_rows=1).
@@ -26,7 +26,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_moe_router_topk_biased<T>(
+pub fn ffai_moe_router_topk_biased<T>(
     score_biased: Tensor<T>,
     score_unbiased: Tensor<T>,
     mut indices_out: Tensor<u32>,
@@ -88,7 +88,7 @@ pub fn mt_moe_router_topk_biased<T>(
 /// remap raw routed expert ids into resident-pool packed slot ids on the
 /// GPU (so the gather dispatch's `expert_ids` never touches the CPU).
 #[kernel]
-pub fn mt_remap_u32(
+pub fn ffai_remap_u32(
     table: Tensor<u32>,
     idx: Tensor<u32>,
     mut out: Tensor<u32>,
@@ -104,13 +104,13 @@ pub fn mt_remap_u32(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_moe_router_topk_biased, mt_remap_u32};
+    use super::{ffai_moe_router_topk_biased, ffai_remap_u32};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_router_topk_biased(dt: DType) -> BenchSetup {
         let n_experts = 256usize;
         let k = 6usize;
-        BenchSetup::new(mt_moe_router_topk_biased::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_router_topk_biased::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("score_biased", n_experts, dt))
             .buffer(BenchBuffer::random("score_unbiased", n_experts, dt))
@@ -125,7 +125,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32])]
     fn bench_remap_u32(_dt: DType) -> BenchSetup {
         let n = 6usize;
-        BenchSetup::new(mt_remap_u32::kernel_ir())
+        BenchSetup::new(ffai_remap_u32::kernel_ir())
             .buffer(BenchBuffer::zeros("table", 256, DType::U32))
             .buffer(BenchBuffer::zeros("idx", n, DType::U32))
             .buffer(BenchBuffer::zeros("out", n, DType::U32).output())

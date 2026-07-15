@@ -8,7 +8,7 @@
 
 use ffai_kernels::kernel;
 
-// ── mt_moe_gather_qmm_int4 ────────────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4 ────────────────────────────────────────────────
 //
 // Grouped quantized matmul for MoE. Matches MLX's `gatherQuantizedMM`
 // (called by SwitchLinear → SwitchGLU → Qwen35SparseMoeBlock):
@@ -62,7 +62,7 @@ use ffai_kernels::kernel;
 //
 // Mirrors the per-thread pattern in `dequant_gemv_int4`.
 #[kernel]
-pub fn mt_moe_gather_qmm_int4<T>(
+pub fn ffai_moe_gather_qmm_int4<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -139,28 +139,28 @@ pub fn mt_moe_gather_qmm_int4<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_b{3,5,6,8} — wider-precision gather matmul ──────────
+// ── ffai_moe_gather_qmm_b{3,5,6,8} — wider-precision gather matmul ──────────
 //
-// `mt_moe_gather_qmm_int4` above is int4-only (MLX's MoE quantization
+// `ffai_moe_gather_qmm_int4` above is int4-only (MLX's MoE quantization
 // default). This macro generates the same grouped-gather quantized
 // matmul for the remaining MLX bit-widths — int3 / int5 / int6 / int8 —
 // so a MoE block quantized at any width has a single-dispatch GPU path.
 //
-// The body is identical to `mt_moe_gather_qmm_int4` except for the
+// The body is identical to `ffai_moe_gather_qmm_int4` except for the
 // weight-code extraction: pow2 widths (8) are pack-aligned (`32/bits`
 // codes per u32, simple shift+mask), odd widths (3/5/6) use the
 // two-word bit-stream extract (a code may straddle a u32 boundary) —
-// the same split as `dequant_gemv.rs` / the `mt_qmv_b*` family. The
+// the same split as `dequant_gemv.rs` / the `ffai_qmv_b*` family. The
 // per-output-element routing, CSR `expert_offsets` walk, group-indexed
 // scale/bias, and `simd_sum` reduction are unchanged.
 //
-// `mt_moe_gather_qmv_b*` aliases register the same kernels under a
+// `ffai_moe_gather_qmv_b*` aliases register the same kernels under a
 // `gather_qmv` subop — MLX names the M=1 / single-token decode form
 // `gather_qmv`; the per-row-routed body serves both (qmv is the
 // `T == n_experts-row-count` case of qmm).
 //
 // Layouts / constexpr / DISPATCH INVARIANTS — identical to
-// `mt_moe_gather_qmm_int4`; see its doc block. `k_in` must be a
+// `ffai_moe_gather_qmm_int4`; see its doc block. `k_in` must be a
 // multiple of 32; for pow2 widths it must also be a multiple of
 // `32/bits`; `group_size` must divide `k_in`.
 
@@ -169,7 +169,7 @@ pub fn mt_moe_gather_qmm_int4<T>(
 /// Each u32 holds `32/8 = 4` codes; `vals_per_pack = 4`, `mask = 0xFF`.
 /// Grid: `[m_out, T_rows, 1]`, TG: `[32, 1, 1]` (one simdgroup per row).
 #[kernel]
-pub fn mt_moe_gather_qmm_b8<T>(
+pub fn ffai_moe_gather_qmm_b8<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -230,12 +230,12 @@ pub fn mt_moe_gather_qmm_b8<T>(
 
 /// Grouped-gather quantized matmul — odd bit-widths (3, 5, 6).
 ///
-/// Produces kernels: `mt_moe_gather_qmm_b3`, `_b5`, `_b6`.
+/// Produces kernels: `ffai_moe_gather_qmm_b3`, `_b5`, `_b6`.
 /// Uses a straddle-aware two-word bit-stream read because odd widths do not
 /// pack-align — each code may span a u32 word boundary.
 /// Grid: `[m_out, T_rows, 1]`, TG: `[32, 1, 1]` (one simdgroup per row).
 #[kernel(variants(BITS = [3, 5, 6], suffix = "b{BITS}"))]
-pub fn mt_moe_gather_qmm<T>(
+pub fn ffai_moe_gather_qmm<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -304,9 +304,9 @@ pub fn mt_moe_gather_qmm<T>(
         store(out[row * m_out + m], total.cast::<T>());
     }
 }
-// ── mt_moe_gather_qmm_int4_m8 ────────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4_m8 ────────────────────────────────────────────
 //
-// Same recurrence as `mt_moe_gather_qmm_int4`, but each TG produces 8
+// Same recurrence as `ffai_moe_gather_qmm_int4`, but each TG produces 8
 // adjacent `m_out` cells per row. Three wins over the m=1 variant:
 //
 //   1. 8× fewer TGs → 8× less dispatch + scheduler overhead. At
@@ -332,7 +332,7 @@ pub fn mt_moe_gather_qmm<T>(
 //   - s/b: 8 × (k_in / group_size) × 2 floats
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_int4_m8<T>(
+pub fn ffai_moe_gather_qmm_int4_m8<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -587,9 +587,9 @@ pub fn mt_moe_gather_qmm_int4_m8<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_int4_m16 ────────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4_m16 ────────────────────────────────────────────
 //
-// Same pattern as `mt_moe_gather_qmm_int4_m8`, extended to 16
+// Same pattern as `ffai_moe_gather_qmm_int4_m8`, extended to 16
 // adjacent `m_out` cells per row. 16× fewer TGs → 16× less dispatch +
 // scheduler overhead, and `x[row, k]` reads serve 16 dot products.
 //
@@ -598,7 +598,7 @@ pub fn mt_moe_gather_qmm_int4_m8<T>(
 //   TG   = [32, 1, 1]
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_int4_m16<T>(
+pub fn ffai_moe_gather_qmm_int4_m16<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -1050,9 +1050,9 @@ pub fn mt_moe_gather_qmm_int4_m16<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_int4_m32 ────────────────────────────────────────────
+// ── ffai_moe_gather_qmm_int4_m32 ────────────────────────────────────────────
 //
-// Same pattern as `mt_moe_gather_qmm_int4_m8`, extended to 32
+// Same pattern as `ffai_moe_gather_qmm_int4_m8`, extended to 32
 // adjacent `m_out` cells per row. 32× fewer TGs → 32× less dispatch +
 // scheduler overhead, and `x[row, k]` reads serve 32 dot products.
 //
@@ -1061,7 +1061,7 @@ pub fn mt_moe_gather_qmm_int4_m16<T>(
 //   TG   = [32, 1, 1]
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_int4_m32<T>(
+pub fn ffai_moe_gather_qmm_int4_m32<T>(
     x: Tensor<T>,
     weight_packed: Tensor<u32>,
     scales: Tensor<T>,
@@ -1913,7 +1913,7 @@ pub fn mt_moe_gather_qmm_int4_m32<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_mma_int4 ────────────────────────────────────────────
+// ── ffai_moe_gather_qmm_mma_int4 ────────────────────────────────────────────
 //
 // Tiled-MMA grouped quantized matmul. Mirrors MLX's
 // `affine_gather_qmm_rhs_nt` (BM=16, BN=32, BK=32, WM=1, WN=2) — the
@@ -1949,12 +1949,12 @@ pub fn mt_moe_gather_qmm_int4_m32<T>(
 //   - group_size must divide K
 //   - bits = 4 only
 //
-// We use 4 SGs (vs MLX's 2) because the existing mt_qmm_mma proves the
+// We use 4 SGs (vs MLX's 2) because the existing ffai_qmm_mma proves the
 // 4-SG 2×2 warp grid hits ~95% of MLX throughput on the same 8×8 frag
 // path. MoE inherits that geometry.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma_int4<T>(
+pub fn ffai_moe_gather_qmm_mma_int4<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -1970,7 +1970,7 @@ pub fn mt_moe_gather_qmm_mma_int4<T>(
     let m_tile = tgid_y;
     let lane = simd_lane;
     let sg = simd_group_id();
-    // 4 SGs in 2×2 warp grid (matches mt_qmm_mma).
+    // 4 SGs in 2×2 warp grid (matches ffai_qmm_mma).
     let sm = sg / 2u32;
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
@@ -1980,7 +1980,7 @@ pub fn mt_moe_gather_qmm_mma_int4<T>(
     let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
     let fn1 = fn0 + 1u32;
     // TG memory: X tile [BM=32 × BK=32] and dequant W tile [BN=32 × BK=32].
-    // Skew = +4 on BK for bank-conflict avoidance (see mt_qmm_mma).
+    // Skew = +4 on BK for bank-conflict avoidance (see ffai_qmm_mma).
     threadgroup_alloc("xs", 1152, T);
     threadgroup_alloc("ws", 1152, T);
     // 4 output frags per SG (16×16 sub-tile inside the 32×32 output tile).
@@ -2236,9 +2236,9 @@ pub fn mt_moe_gather_qmm_mma_int4<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_mma_b{3,5,6,8} — wider-precision MMA gather matmul ──
+// ── ffai_moe_gather_qmm_mma_b{3,5,6,8} — wider-precision MMA gather matmul ──
 //
-// Bit-width-generalized siblings of `mt_moe_gather_qmm_mma_int4`. Same
+// Bit-width-generalized siblings of `ffai_moe_gather_qmm_mma_int4`. Same
 // tiled-MMA geometry (BM=BN=BK=32, 4 SGs, 2×2 warp grid, per-TG expert
 // sub-runs) and identical signature — the *only* difference is the
 // weight coop-dequant: instead of the int4-specific 8-nibble unpack, the
@@ -2253,8 +2253,8 @@ pub fn mt_moe_gather_qmm_mma_int4<T>(
 
 /// Tiled-MMA grouped-gather quantized matmul — variable bit-widths (3, 5, 6, 8).
 ///
-/// Produces kernels: `mt_moe_gather_qmm_mma_b3`, `_b5`, `_b6`, `_b8`.
-/// Same BM=BN=BK=32, 4-SG, 2×2 warp-grid geometry as `mt_moe_gather_qmm_mma_int4`.
+/// Produces kernels: `ffai_moe_gather_qmm_mma_b3`, `_b5`, `_b6`, `_b8`.
+/// Same BM=BN=BK=32, 4-SG, 2×2 warp-grid geometry as `ffai_moe_gather_qmm_mma_int4`.
 /// The only per-variant difference is the weight dequant: a straddle-aware
 /// bit-stream read that supports any `BITS ≤ 16` (pow-of-2 widths simply
 /// never straddle, i.e. `spill == 0`).
@@ -2263,7 +2263,7 @@ pub fn mt_moe_gather_qmm_mma_int4<T>(
 /// `group_size` must divide `k_in`; `pack_in_row*8` must be group-aligned.
 #[kernel(variants(BITS = [3, 5, 6, 8], suffix = "b{BITS}"))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma<T>(
+pub fn ffai_moe_gather_qmm_mma<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -2530,10 +2530,10 @@ pub fn mt_moe_gather_qmm_mma<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_mma_int4_bm16 ────────────────────────────────────────
+// ── ffai_moe_gather_qmm_mma_int4_bm16 ────────────────────────────────────────
 //
 // Half-height MMA grouped quantized matmul — BM=16 variant of
-// `mt_moe_gather_qmm_mma_int4`. Matches MLX's `affine_gather_qmm_rhs_nt`
+// `ffai_moe_gather_qmm_mma_int4`. Matches MLX's `affine_gather_qmm_rhs_nt`
 // at WM=1 WN=2 (2 SGs, 64 tpg).
 //
 // Rationale: at Qwen3.6-A3B prefill T=1024 × 128 experts, rows_per_expert
@@ -2550,7 +2550,7 @@ pub fn mt_moe_gather_qmm_mma<T>(
 // Inputs / outputs match the BM=32 sibling — same signature.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma_int4_bm16<T>(
+pub fn ffai_moe_gather_qmm_mma_int4_bm16<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -2592,7 +2592,7 @@ pub fn mt_moe_gather_qmm_mma_int4_bm16<T>(
     let b_f0 = simdgroup_alloc::<T, 8, 8>();
     let b_f1 = simdgroup_alloc::<T, 8, 8>();
     // Coop-load lane assignments — X tile is 16×32 = 512 elements,
-    // 64 lanes × 8 strides each (= matches mt_qmm_mma_m16).
+    // 64 lanes × 8 strides each (= matches ffai_qmm_mma_m16).
     // W tile is 32×32 = 1024 elements / 8 nibbles per pack = 128 packs,
     // 64 lanes × 2 packs each.
     let w_row_in_tg = lane_in_tg / 4u32;
@@ -2904,10 +2904,10 @@ pub fn mt_moe_gather_qmm_mma_int4_bm16<T>(
     }
 }
 
-// ── mt_moe_gather_qmm_mma_int8 — pack-aligned int8 MoE MMA BGEMM ────────
+// ── ffai_moe_gather_qmm_mma_int8 — pack-aligned int8 MoE MMA BGEMM ────────
 //
 // Simdgroup-matrix MoE BGEMM for int8-quantized weights. Same tiled-MMA
-// geometry as `mt_moe_gather_qmm_mma_int4` (BM=BN=BK=32, 4 SGs, 2×2 warp
+// geometry as `ffai_moe_gather_qmm_mma_int4` (BM=BN=BK=32, 4 SGs, 2×2 warp
 // grid, per-TG expert sub-runs) — the only difference is the W coop-dequant:
 //
 //   int4: 128 lanes × 1 pack/lane  × 8 nibbles/pack = 1024 dequant elems
@@ -2924,7 +2924,7 @@ pub fn mt_moe_gather_qmm_mma_int4_bm16<T>(
 // Correctness: the in-source `#[test_kernel]`s.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma_int8<T>(
+pub fn ffai_moe_gather_qmm_mma_int8<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -3228,13 +3228,13 @@ pub fn mt_moe_gather_qmm_mma_int8<T>(
 /// New-syntax correctness tests for the MoE grouped-gather quantized matmul
 /// family. Only the int4 scalar variants have a clean
 /// dequant-then-grouped-matmul oracle keyed by per-row expert routing
-/// (`mt_moe_gather_qmm_int4` + the `m8` multi-cell sibling). The wider
+/// (`ffai_moe_gather_qmm_int4` + the `m8` multi-cell sibling). The wider
 /// bit-width variants are covered by the legacy bit-width tests, and the MMA
 /// variants are validated against the scalar m1 path via cosine in the legacy
 /// GPU tests — both are bench-only here.
 ///
 /// Oracle (mirrors the legacy `tests/moe_gather_qmm_gpu_correctness.rs`,
-/// removed in #240): resolve each row's expert via the CSR `expert_offsets`
+/// since removed): resolve each row's expert via the CSR `expert_offsets`
 /// array (first `e` where `row < expert_offsets[e+1]`), dequant that expert's
 /// int4 weight row (8 nibbles per u32, per-group scale/bias), and dot against
 /// the row's input.
@@ -3382,13 +3382,13 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_int4(dt: DType) -> TestSetup {
-        int4_setup(mt_moe_gather_qmm_int4::kernel_ir_for(dt), 8, dt)
+        int4_setup(ffai_moe_gather_qmm_int4::kernel_ir_for(dt), 8, dt)
     }
 
     // m8: grid_x = m_out / 8 = 8 / 8 = 1 TG of 8 m-cells per x row.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_int4_m8(dt: DType) -> TestSetup {
-        int4_setup(mt_moe_gather_qmm_int4_m8::kernel_ir_for(dt), 1, dt)
+        int4_setup(ffai_moe_gather_qmm_int4_m8::kernel_ir_for(dt), 1, dt)
     }
 
     // ── Wider-precision scalar gather qmm (b3/b5/b6/b8) ───────────────────
@@ -3503,7 +3503,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1],
                   variants(BITS = [3, 5, 6, 8], suffix = "b{BITS}"))]
     fn test_moe_gather_qmm(dt: DType) -> TestSetup {
-        gather_qmm_bits_setup(mt_moe_gather_qmm_bBITS::kernel_ir_for(dt), BITS, dt)
+        gather_qmm_bits_setup(ffai_moe_gather_qmm_bBITS::kernel_ir_for(dt), BITS, dt)
     }
 
     // ── MMA-tiled gather qmm (int4 / int8) ────────────────────────────────
@@ -3605,17 +3605,17 @@ pub mod kernel_tests {
     // int4: BM=32 → 4 SGs (tpg 128). bm16: BM=16 → 2 SGs (tpg 64).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4(dt: DType) -> TestSetup {
-        mma_setup(mt_moe_gather_qmm_mma_int4::kernel_ir_for(dt), 4, 32, 128, dt)
+        mma_setup(ffai_moe_gather_qmm_mma_int4::kernel_ir_for(dt), 4, 32, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm16(dt: DType) -> TestSetup {
-        mma_setup(mt_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt), 4, 16, 64, dt)
+        mma_setup(ffai_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt), 4, 16, 64, dt)
     }
     // int8 (codes 0..255): the scale is range-normalised in mma_setup so the
     // output stays O(1) like int4, keeping the same tight tolerance.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int8(dt: DType) -> TestSetup {
-        mma_setup(mt_moe_gather_qmm_mma_int8::kernel_ir_for(dt), 8, 32, 128, dt)
+        mma_setup(ffai_moe_gather_qmm_mma_int8::kernel_ir_for(dt), 8, 32, 128, dt)
     }
 }
 
@@ -3675,24 +3675,44 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_int4(dt: DType) -> BenchSetup {
-        csr_bench(mt_moe_gather_qmm_int4::kernel_ir_for(dt), 4, 1, 64, 2048, 256, 128, 64, dt)
+        csr_bench(ffai_moe_gather_qmm_int4::kernel_ir_for(dt), 4, 1, 64, 2048, 256, 128, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_int4_m8(dt: DType) -> BenchSetup {
-        csr_bench(mt_moe_gather_qmm_int4_m8::kernel_ir_for(dt), 4, 8, 64, 2048, 256, 128, 64, dt)
+        csr_bench(ffai_moe_gather_qmm_int4_m8::kernel_ir_for(dt), 4, 8, 64, 2048, 256, 128, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_int4_m16(dt: DType) -> BenchSetup {
-        csr_bench(mt_moe_gather_qmm_int4_m16::kernel_ir_for(dt), 4, 16, 64, 2048, 256, 128, 64, dt)
+        csr_bench(
+            ffai_moe_gather_qmm_int4_m16::kernel_ir_for(dt),
+            4,
+            16,
+            64,
+            2048,
+            256,
+            128,
+            64,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_int4_m32(dt: DType) -> BenchSetup {
-        csr_bench(mt_moe_gather_qmm_int4_m32::kernel_ir_for(dt), 4, 32, 64, 2048, 256, 128, 64, dt)
+        csr_bench(
+            ffai_moe_gather_qmm_int4_m32::kernel_ir_for(dt),
+            4,
+            32,
+            64,
+            2048,
+            256,
+            128,
+            64,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [3, 5, 6, 8], suffix = "b{BITS}"))]
     fn bench_moe_gather_qmm(dt: DType) -> BenchSetup {
-        csr_bench(mt_moe_gather_qmm_bBITS::kernel_ir_for(dt), BITS, 1, 64, 2048, 256, 128, 64, dt)
+        csr_bench(ffai_moe_gather_qmm_bBITS::kernel_ir_for(dt), BITS, 1, 64, 2048, 256, 128, 64, dt)
     }
 
     // ── Tiled-MMA family (per-row `indices`, no CSR offsets) ──────────────
@@ -3746,7 +3766,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4(dt: DType) -> BenchSetup {
         mma_bench(
-            mt_moe_gather_qmm_mma_int4::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int4::kernel_ir_for(dt),
             4,
             32,
             32,
@@ -3763,7 +3783,7 @@ pub mod kernel_benches {
             variants(BITS = [3, 5, 6, 8], suffix = "b{BITS}"))]
     fn bench_moe_gather_qmm_mma(dt: DType) -> BenchSetup {
         mma_bench(
-            mt_moe_gather_qmm_mma_bBITS::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_bBITS::kernel_ir_for(dt),
             BITS,
             32,
             32,
@@ -3779,7 +3799,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int8(dt: DType) -> BenchSetup {
         mma_bench(
-            mt_moe_gather_qmm_mma_int8::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int8::kernel_ir_for(dt),
             8,
             32,
             32,
@@ -3796,7 +3816,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4_bm16(dt: DType) -> BenchSetup {
         mma_bench(
-            mt_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt),
             4,
             32,
             16,

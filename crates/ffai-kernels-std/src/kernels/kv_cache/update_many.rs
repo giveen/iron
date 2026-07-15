@@ -9,7 +9,7 @@
 //! `kv_cache_update` once per token (T dispatches × N attention layers,
 //! ×2 for the K+V pair); this kernel collapses that to ONE dispatch per
 //! (layer, K-or-V buffer). Same dispatch-saving pattern as
-//! `mt_rope_banded` — see that file's docstring for the broader
+//! `ffai_rope_banded` — see that file's docstring for the broader
 //! prefill-time motivation.
 //!
 //! Layout:
@@ -45,7 +45,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_kv_cache_update_many<T>(
+pub fn ffai_kv_cache_update_many<T>(
     src: Tensor<T>,
     positions: Tensor<u32>,
     out: Tensor<T>,
@@ -62,7 +62,7 @@ pub fn mt_kv_cache_update_many<T>(
     let in_row = idx - r * n_kv_heads_x_head_dim;
     let h = in_row / head_dim;
     let d = in_row - h * head_dim;
-    // Per-row position lookup — same shape as `mt_rope_banded`.
+    // Per-row position lookup — same shape as `ffai_rope_banded`.
     let position = load(positions[r]);
     // Cache layout: [n_kv_heads, max_seq, head_dim]. Each row r writes
     // into out[h, positions[r], d] for its own h and d.
@@ -73,7 +73,7 @@ pub fn mt_kv_cache_update_many<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_kv_cache_update_many;
+    use super::ffai_kv_cache_update_many;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -101,7 +101,7 @@ pub mod kernel_tests {
             }
         }
         let total = n_tokens * n_kv_heads * head_dim;
-        TestSetup::new(mt_kv_cache_update_many::kernel_ir_for(dt))
+        TestSetup::new(ffai_kv_cache_update_many::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::from_vec("positions", u32_bytes(&positions), DType::U32))
@@ -114,12 +114,12 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_kv_cache_update_many` — a Qwen-class prefill
+/// New-syntax benchmark for `ffai_kv_cache_update_many` — a Qwen-class prefill
 /// batch appended in one dispatch (Grid3D, one thread per source element).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_kv_cache_update_many;
+    use super::ffai_kv_cache_update_many;
 
     fn u32_bytes(v: impl Iterator<Item = u32>) -> Vec<u8> {
         v.flat_map(|x| x.to_le_bytes()).collect()
@@ -129,7 +129,7 @@ pub mod kernel_benches {
     fn bench_kv_cache_update_many(dt: DType) -> BenchSetup {
         let (n_tokens, n_kv_heads, head_dim, max_seq) = (512usize, 8usize, 128usize, 4096usize);
         let total = n_tokens * n_kv_heads * head_dim;
-        BenchSetup::new(mt_kv_cache_update_many::kernel_ir_for(dt))
+        BenchSetup::new(ffai_kv_cache_update_many::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::random("src", total, dt))
             .buffer(BenchBuffer::from_vec(

@@ -1,4 +1,8 @@
-# Individual Contributors
+# Acknowledgements
+
+As with all open source, FFAI Kernel's stands on the work of others, we want to formally acknowledge that work here.
+
+## Individual Contributors
 
 If you wish to be acknowledged for your contributions, please list your name
 with a short description of your contribution(s) below. For example:
@@ -19,9 +23,33 @@ FFAI Kernels started out as a collaboration on the [MetalTile](https://github.co
 
 In addition, we would like to acknowledge [@Ambisphaeric](https://github.com/Ambisphaeric) for their initial PM efforts, testing, bench running and some kernel tuning efforts while the project was called MetalTile.
 
-Give them both a follow!
+Finally we would like to acknowledge the efforts of the following people that we have seen make incredible contributions to pushing open source AI forward:
 
-### Third-Party Software
+- [@spiritbuun](https://github.com/spiritbuun)
+- [@bstnxbt](https://github.com/bstnxbt)
+- [@Blaizzy](https://github.com/Blaizzy)
+- [@lucasnewman](https://github.com/lucasnewman)
+- [@beshkenadze](https://github.com/beshkenadze)
+
+Give them all a follow!
+
+## Prior Art
+When we were targeting Metal, FFAI Kernels' benchmark suite and kernel library initially stood on the shoulders of the MLX ecosystem. As we now support multiple GPU platform targets, multiple models and have done further bug fixes, performance tuning, and optimizations it has diverged significantly. Nevertheless, a portion of the `ffai-kernels-std` kernels are ports, re-implementations or improvements of kernels from the following projects:
+
+- [**ekryski/mlx**](https://github.com/ekryski/mlx) (`alpha`) — primary source for reference implementation of optimized kernels, including FFAI extensions: gated-delta, SSM replay, AURA codec.
+- [**ekryski/mlx-audio-swift**](https://github.com/ekryski/mlx-audio-swift) (`alpha`) — primary source for reference implementation of optimized kernels for audio models.
+- [**ekryski/mlx-swift-lm**](https://github.com/ekryski/mlx-swift-lm) (`alpha`) — primary source for reference implementation of optimized kernels for speculative decoding, batch decoding, prefill caching.
+- [**TheTom/turboquant_plus**](https://github.com/TheTom/turboquant_plus) - implementation ideas and benchmarking for turboquant KV compression kernels, long context performance improvements and general llama.cpp model performance comparisons.
+- [**bstnxbt/dflash-mlx**](https://github.com/bstnxbt/dflash-mlx) - implementation ideas and benchmarking reference for draft model speculative decoding techniques.
+- [**ml-explore/mlx**](https://github.com/ml-explore/mlx) — primary source for mainstream kernels for benchmarking against
+- [**ml-explore/mlx-lm**](https://github.com/ml-explore/mlx-lm) — reference for GatedDeltaNet step semantics and benchmarking against vlm kernels.
+- [**Blaizzy/mlx-audio-swift**](https://github.com/Blaizzy/mlx-audio-swift) — reference for benchmarking against audio kernels.
+
+We are grateful to the MLX team at Apple and the broader MLX community for their work in pushing local AI on Apple Silicon forward.
+
+After starting on this project we became aware of [cuda-oxide](https://github.com/NVlabs/cuda-oxide) from NVIDIA's labs. While similar in concept, we started with Metal output and quickly surpassed the breadth and depth of kernels implemented in cuda-oxide. After having higher performance kernels than MLX on Apple Silicon across various model architectures and workloads, we modified the DSL to support CUDA, AMD and VULKAN shader code surpassing what was available in any other project at the time. In addition, we feel, humbly, that our implementation is simpler and has less moving parts. Regardless, we wanted to acknowledge prior art we became aware of and would also like to thank NVIDIA for all they have done to push the AI frontier forward.
+
+## Third-Party Software
 
 FFAI Kernels leverages several third-party libraries. Their repositories and licenses are listed below.
 

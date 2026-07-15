@@ -33,7 +33,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_logits_min_p_mask<T>(
+pub fn ffai_logits_min_p_mask<T>(
     inp: Tensor<T>,
     out: Tensor<T>,
     #[constexpr] n: u32,
@@ -59,7 +59,7 @@ pub fn mt_logits_min_p_mask<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_logits_min_p_mask;
+    use super::ffai_logits_min_p_mask;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// CPU oracle: per row, keep `v` iff `exp(v − row_max) ≥ min_p`.
@@ -85,7 +85,7 @@ pub mod kernel_tests {
         let logits: Vec<f32> = (0..n * rows).map(|i| (i % 53) as f32 * 0.2 - 5.0).collect();
         let rounded = unpack_f32(&pack_f32(&logits, dt), dt);
         let expected = cpu_min_p_mask(&rounded, n, rows, min_p);
-        TestSetup::new(mt_logits_min_p_mask::kernel_ir_for(dt))
+        TestSetup::new(ffai_logits_min_p_mask::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("inp", pack_f32(&logits, dt), dt))
             .input(TestBuffer::zeros("out", n * rows, dt))
@@ -96,17 +96,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_logits_min_p_mask` at Qwen3 vocab scale
+/// New-syntax benchmark for `ffai_logits_min_p_mask` at Qwen3 vocab scale
 /// (Reduction, one TG per row).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_logits_min_p_mask;
+    use super::ffai_logits_min_p_mask;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_logits_min_p_mask(dt: DType) -> BenchSetup {
         let (n, rows) = (152_064usize, 2usize);
-        BenchSetup::new(mt_logits_min_p_mask::kernel_ir_for(dt))
+        BenchSetup::new(ffai_logits_min_p_mask::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("inp", n * rows, dt))
             .buffer(BenchBuffer::zeros("out", n * rows, dt).output())

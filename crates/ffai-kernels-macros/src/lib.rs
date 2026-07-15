@@ -89,7 +89,7 @@ pub fn strided(_attr: TokenStream, item: TokenStream) -> TokenStream { item }
 ///
 /// ```ignore
 /// #[kernel]
-/// pub fn mt_exp<T>(a: Tensor<T>, out: Tensor<T>) { … }
+/// pub fn ffai_exp<T>(a: Tensor<T>, out: Tensor<T>) { … }
 /// ```
 #[proc_macro_attribute]
 pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream { kernel::expand(attr, item) }
@@ -102,7 +102,7 @@ pub fn kernel(attr: TokenStream, item: TokenStream) -> TokenStream { kernel::exp
 ///
 /// ```ignore
 /// #[bench(name = "unary/exp", dtypes = [f32, f16, bf16])]
-/// fn bench_mt_exp(s: &BenchSetup) -> BenchBuffer { … }
+/// fn bench_ffai_exp(s: &BenchSetup) -> BenchBuffer { … }
 /// ```
 #[proc_macro_attribute]
 pub fn bench(attr: TokenStream, item: TokenStream) -> TokenStream { bench::expand(attr, item) }
@@ -115,7 +115,7 @@ pub fn bench(attr: TokenStream, item: TokenStream) -> TokenStream { bench::expan
 ///
 /// ```ignore
 /// #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-4)]
-/// fn test_mt_exp(s: &TestSetup) -> TestBuffer { … }
+/// fn test_ffai_exp(s: &TestSetup) -> TestBuffer { … }
 /// ```
 #[proc_macro_attribute]
 pub fn test_kernel(attr: TokenStream, item: TokenStream) -> TokenStream { test::expand(attr, item) }

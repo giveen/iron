@@ -1,9 +1,9 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness oracle for `mt_qmm_mma_mpp_int8` — the int8
+//! GPU correctness oracle for `ffai_qmm_mma_mpp_int8` — the int8
 //! quantized matmul backed by `mpp::tensor_ops::matmul2d` (MPP path).
 //!
-//! Dispatches `mt_qmm_mma_mpp_int8_{f32,f16,bf16}` over a small set
+//! Dispatches `ffai_qmm_mma_mpp_int8_{f32,f16,bf16}` over a small set
 //! of shapes and validates against a CPU triple-loop oracle.
 //!
 //! ## Key differences from the int4 test (`qmm_mpp_correctness.rs`)
@@ -31,7 +31,7 @@ use ffai_kernels::{
     Context,
     core::{dtype::DType, ir::KernelMode},
 };
-use ffai_kernels_std::kernels::gemm::quantized_mpp_int8::mt_qmm_mma_mpp_int8;
+use ffai_kernels_std::kernels::gemm::quantized_mpp_int8::ffai_qmm_mma_mpp_int8;
 
 /// MPP `tensor_ops::matmul2d` requires Apple10 (gen-17) + macOS 26.2+.
 /// Returns `None` when the device can't run MPP so the caller can skip.
@@ -104,9 +104,9 @@ fn run_qmm_mma_mpp_int8(
     gs_per_row: usize,
     out_bytes_per_elem: usize,
 ) -> Vec<u8> {
-    assert!(m.is_multiple_of(32), "mt_qmm_mma_mpp_int8 requires m %% 32 == 0");
-    assert!(n.is_multiple_of(32), "mt_qmm_mma_mpp_int8 requires n %% 32 == 0");
-    assert!(k.is_multiple_of(32), "mt_qmm_mma_mpp_int8 requires k %% 32 == 0");
+    assert!(m.is_multiple_of(32), "ffai_qmm_mma_mpp_int8 requires m %% 32 == 0");
+    assert!(n.is_multiple_of(32), "ffai_qmm_mma_mpp_int8 requires n %% 32 == 0");
+    assert!(k.is_multiple_of(32), "ffai_qmm_mma_mpp_int8 requires k %% 32 == 0");
 
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     buffers.insert("w".into(), w.iter().flat_map(|v| v.to_le_bytes()).collect());
@@ -118,12 +118,12 @@ fn run_qmm_mma_mpp_int8(
     buffers.insert("n".into(), (n as u32).to_le_bytes().to_vec());
     buffers.insert("gs_per_row".into(), (gs_per_row as u32).to_le_bytes().to_vec());
 
-    let mut kernel = mt_qmm_mma_mpp_int8::kernel_ir_for(dtype);
+    let mut kernel = ffai_qmm_mma_mpp_int8::kernel_ir_for(dtype);
     kernel.mode = KernelMode::Reduction;
 
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [n / 32, m / 32, 1], [128, 1, 1])
-        .expect("dispatch mt_qmm_mma_mpp_int8");
+        .expect("dispatch ffai_qmm_mma_mpp_int8");
 
     result.outputs.get("out").expect("`out` buffer in dispatch result").clone()
 }
@@ -185,7 +185,7 @@ fn build_int8_quant_inputs(
 // ── Shape 1: smallest valid tile, f32 (M=32, N=32, K=64, gs=32) ────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_small() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_f32_small() {
     let m = 32usize;
     let n = 32usize;
     let k = 64usize;
@@ -236,7 +236,7 @@ fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_small() {
 // ── Shape 2: multi-K-block f32 (M=32, N=32, K=512) ─────────────────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_k() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_k() {
     let m = 32usize;
     let n = 32usize;
     let k = 512usize;
@@ -273,7 +273,7 @@ fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_k() {
 // ── Shape 3: multi-tile f32 (M=64, N=64, K=128) ─────────────────────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_tile() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_tile() {
     let m = 64usize;
     let n = 64usize;
     let k = 128usize;
@@ -310,7 +310,7 @@ fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f32_multi_tile() {
 // ── Shape 4: f16 small ───────────────────────────────────────────────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f16_small() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_f16_small() {
     let m = 32usize;
     let n = 32usize;
     let k = 64usize;
@@ -356,7 +356,7 @@ fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f16_small() {
 // ── Shape 5: f16 multi-tile ──────────────────────────────────────────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f16_multi_tile() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_f16_multi_tile() {
     let m = 64usize;
     let n = 64usize;
     let k = 128usize;
@@ -400,7 +400,7 @@ fn mt_qmm_mma_mpp_int8_matches_cpu_reference_f16_multi_tile() {
 // ── Shape 6: bf16 small (lower tolerance) ───────────────────────────────────
 
 #[test]
-fn mt_qmm_mma_mpp_int8_matches_cpu_reference_bf16_small() {
+fn ffai_qmm_mma_mpp_int8_matches_cpu_reference_bf16_small() {
     let m = 32usize;
     let n = 32usize;
     let k = 64usize;

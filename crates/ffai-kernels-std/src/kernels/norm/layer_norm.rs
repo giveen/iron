@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_layer_norm<T>(
+pub fn ffai_layer_norm<T>(
     x: Tensor<T>,
     w: Tensor<T>,
     b: Tensor<T>,
@@ -66,13 +66,13 @@ pub fn mt_layer_norm<T>(
     }
 }
 
-/// New-syntax correctness for `mt_layer_norm` (Reduction mode, one threadgroup
+/// New-syntax correctness for `ffai_layer_norm` (Reduction mode, one threadgroup
 /// per row, `tpg = n/4`). Per-row oracle on dtype-rounded inputs:
 /// `out_i = (x_i - mean) / sqrt(var + eps) * w_i + b_i`.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_layer_norm;
+    use super::ffai_layer_norm;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
@@ -95,7 +95,7 @@ pub mod kernel_tests {
             }
             x.extend_from_slice(&row);
         }
-        TestSetup::new(mt_layer_norm::kernel_ir_for(dt))
+        TestSetup::new(ffai_layer_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, dt), dt))
@@ -108,33 +108,33 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
-    fn test_mt_layer_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
+    fn test_ffai_layer_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
 }
 
-/// New-syntax benchmark for `mt_layer_norm` (vs MLX `metal/layer_norm.metal`).
+/// New-syntax benchmark for `ffai_layer_norm` (vs MLX `metal/layer_norm.metal`).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_layer_norm;
+    use super::ffai_layer_norm;
     use crate::utils::{InputDomain, dtype_tol, input_buffer, mlx_tname};
 
     // MLX `layer_norm_looped*` buffer order: `x`[[buffer(0)]], `w`[[buffer(1)]],
     // `b`[[buffer(2)]], `out`[[buffer(3)]], `eps`(float)[[buffer(4)]],
     // `axis_size`(uint)[[buffer(5)]], `w_stride`(uint)[[buffer(6)]],
     // `b_stride`(uint)[[buffer(7)]]. x/w/b/eps_buf are shared by name with the
-    // MT inputs; w_stride=b_stride=1 (contiguous per-channel weight/bias, the
-    // legacy `U32V(1)` args). `eps` reuses the MT `eps_buf` (1e-5, F32) so both
+    // FFAI inputs; w_stride=b_stride=1 (contiguous per-channel weight/bias, the
+    // legacy `U32V(1)` args). `eps` reuses the FFAI `eps_buf` (1e-5, F32) so both
     // sides normalise identically.
     //
     // MLX dispatch geometry: one threadgroup per row (grid=[rows,1,1]) at
-    // tpg=1024 (= n/4 = MT tpg for n=4096; legacy RowNorm `mlx_tpg: 1024`).
+    // tpg=1024 (= n/4 = FFAI tpg for n=4096; legacy RowNorm `mlx_tpg: 1024`).
     // `layer_norm_looped` zero-inits its threadgroup array explicitly, so the
     // larger tpg is safe here (unlike softmax/logsumexp).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_layer_norm(dt: DType) -> BenchSetup {
         let (rows, n) = (4096usize, 4096usize);
         let tn = mlx_tname(dt);
-        BenchSetup::new(mt_layer_norm::kernel_ir_for(dt))
+        BenchSetup::new(ffai_layer_norm::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(input_buffer("x", rows * n, dt, InputDomain::Signed))
             .buffer(input_buffer("w", n, dt, InputDomain::Positive))
@@ -149,7 +149,7 @@ pub mod kernel_benches {
                     format!("layer_norm_looped{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/layer_norm.metal")),
                 )
-                // x/w/b/eps_buf shared by name with the MT inputs (placeholders).
+                // x/w/b/eps_buf shared by name with the FFAI inputs (placeholders).
                 .buffer(BenchBuffer::zeros("x", rows * n, dt))
                 .buffer(BenchBuffer::zeros("w", n, dt))
                 .buffer(BenchBuffer::zeros("b", n, dt))

@@ -14,7 +14,7 @@ use ffai_kernels::kernel;
 /// ~52% DRAM bandwidth, but a [top_k*inter, hid] batch runs at ~90%. `out` is
 /// `[top_k*inter]`. grid = top_k*inter threadgroups.
 #[kernel]
-pub fn mt_moe_gather_q4_relu2<T>(
+pub fn ffai_moe_gather_q4_relu2<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f16>,
     x: Tensor<T>,
@@ -68,7 +68,7 @@ pub fn mt_moe_gather_q4_relu2<T>(
 /// `[top_k*inter]` up-relu² output; `qs` is the contiguous `[n_exp*hid, inter]`.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_q4_down_accum<T>(
+pub fn ffai_moe_gather_q4_down_accum<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
     x: Tensor<T>,
@@ -116,7 +116,7 @@ pub fn mt_moe_gather_q4_down_accum<T>(
 /// x_slot`, one big `[top_k*hid]` GEMV (grid top_k*hid ⇒ high occupancy, vs the
 /// fused-accum variant's grid[hid] which serialized top_k experts at ~50% bw).
 #[kernel]
-pub fn mt_moe_gather_q4_down<T>(
+pub fn ffai_moe_gather_q4_down<T>(
     qs: Tensor<u32>,
     d_f32: Tensor<f16>,
     x: Tensor<T>,
@@ -166,7 +166,7 @@ pub fn mt_moe_gather_q4_down<T>(
 /// Router-weighted sum of the per-expert down outputs into `acc`:
 /// `acc[h] += Σ_slot wts[slot]·downs[slot*hid + h]`. Cheap (grid hid).
 #[kernel]
-pub fn mt_moe_weighted_sum<T>(
+pub fn ffai_moe_weighted_sum<T>(
     downs: Tensor<T>,
     wts: Tensor<f32>,
     mut acc: Tensor<T>,

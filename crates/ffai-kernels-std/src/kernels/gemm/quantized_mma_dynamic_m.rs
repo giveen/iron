@@ -3,9 +3,9 @@
 //! Dynamic-M qmm path — host-side driver for batched-T quantized matmul.
 //!
 //! Closes the bandwidth-bound prefill gap in FFAI. The existing
-//! `mt_qmm_mma`, `mt_qmm_mma_m16`, `mt_qmm_bm4`, `mt_qmm_bm2`, `mt_qmm`
-//! kernels each handle a *fixed* M class — `mt_qmm_mma` requires `M % 32 == 0`,
-//! `mt_qmm_mma_m16` is hard-wired to `M = 16`, etc. The model-level
+//! `ffai_qmm_mma`, `ffai_qmm_mma_m16`, `ffai_qmm_bm4`, `ffai_qmm_bm2`, `ffai_qmm`
+//! kernels each handle a *fixed* M class — `ffai_qmm_mma` requires `M % 32 == 0`,
+//! `ffai_qmm_mma_m16` is hard-wired to `M = 16`, etc. The model-level
 //! prefill entry point (`Qwen35Model.forwardMany`) has a logical
 //! token count `T` that is arbitrary (T=1 decode, T=37 ragged
 //! chunk, T=4096 production prefill cell). Without a path that
@@ -14,7 +14,7 @@
 //! token — bandwidth-bound, 70× slower than MLX at T=32K.
 //!
 //! This module provides the host-side dispatcher that pads `T` to
-//! the next multiple of 32 and routes to `mt_qmm_mma` for the full
+//! the next multiple of 32 and routes to `ffai_qmm_mma` for the full
 //! BM=BN=BK=32 simdgroup-matrix tile. The kernel itself is unchanged
 //! (one dispatch reads each int4 weight tile once and produces
 //! `m_padded × N` outputs). The caller discards the trailing
@@ -22,17 +22,17 @@
 //! zeros makes the masked rows valid (zero contribution to the
 //! valid outputs) and the trailing rows numerically defined.
 //!
-//! Routing: `mt_qmm_mma` over `mt_qmm_mma_mpp`. The MPP variant only
+//! Routing: `ffai_qmm_mma` over `ffai_qmm_mma_mpp`. The MPP variant only
 //! ships fp32 / fp16 (see `quantized_mpp.rs` — the InlineMSL is
 //! per-dtype templated and asserts `F32 | F16`). Production prefill
-//! for Qwen3.6-A3B runs bf16, so we use the DSL-generic `mt_qmm_mma`
+//! for Qwen3.6-A3B runs bf16, so we use the DSL-generic `ffai_qmm_mma`
 //! that supports `F32 | F16 | BF16` via `#[kernel]` generics. The
 //! `dispatch_padded_grid` helper is dtype-agnostic.
 //!
 //! ## Composition with FFAI's `Ops.dequantGemm`
 //!
 //! The Swift-side `Ops.dequantGemm(x, w, scales, biases, ...)` calls
-//! `mt_qmm_for(dtype, m)` today — which only handles fixed-class M.
+//! `ffai_qmm_for(dtype, m)` today — which only handles fixed-class M.
 //! After this lands, `Ops.dequantGemm` can call into the dynamic-M
 //! path by:
 //!   1. Padding `x` to `m_padded` rows (`(T + 31) / 32 * 32`).
@@ -40,19 +40,19 @@
 //!   3. Slicing the first `T` rows of the output.
 //!
 //! No changes to the kernel binaries or the per-dtype emit are
-//! needed — `mt_qmm_mma` is already in the kernel pack at every
+//! needed — `ffai_qmm_mma` is already in the kernel pack at every
 //! shipped dtype.
 
 use ffai_kernels::core::{dtype::DType, ir::Kernel};
 
-use crate::kernels::gemm::quantized::{mt_qmm_mma, patch_qmm_mma_dtype_aware_skew};
+use crate::kernels::gemm::quantized::{ffai_qmm_mma, patch_qmm_mma_dtype_aware_skew};
 
-/// Tile geometry mirrors `mt_qmm_mma`. Exposed for callers sizing
+/// Tile geometry mirrors `ffai_qmm_mma`. Exposed for callers sizing
 /// the dispatch grid + the M-padding step.
 pub const BM_TILE: u32 = 32;
 pub const BN_TILE: u32 = 32;
 pub const BK_TILE: u32 = 32;
-/// Threads per group — 4 SG × 32 lanes — matches `mt_qmm_mma`.
+/// Threads per group — 4 SG × 32 lanes — matches `ffai_qmm_mma`.
 pub const TPG: u32 = 128;
 
 /// Round `t` up to the next multiple of [`BM_TILE`] (32). The
@@ -88,12 +88,12 @@ pub fn pad_x_rows_bytes(x_bytes: &[u8], t: usize, k: usize, bytes_per_elem: usiz
 }
 
 /// Build the kernel IR for the dynamic-M path. Returns
-/// `mt_qmm_mma::kernel_ir_for(dtype)` with the dtype-aware TG skew
-/// patch applied (matches the path in `mt_qmm_for` for `M % 32 == 0`).
+/// `ffai_qmm_mma::kernel_ir_for(dtype)` with the dtype-aware TG skew
+/// patch applied (matches the path in `ffai_qmm_for` for `M % 32 == 0`).
 /// The caller dispatches with grid `[N / 32, m_padded / 32, 1]`
 /// and `tpg = 128`.
 pub fn kernel_ir_for(dtype: DType) -> Kernel {
-    let mut k = mt_qmm_mma::kernel_ir_for(dtype);
+    let mut k = ffai_qmm_mma::kernel_ir_for(dtype);
     patch_qmm_mma_dtype_aware_skew(&mut k, dtype);
     k.mode = ffai_kernels::core::ir::KernelMode::Reduction;
     k
@@ -149,10 +149,14 @@ mod tests {
     }
 
     #[test]
-    fn kernel_ir_for_returns_mt_qmm_mma_per_dtype() {
+    fn kernel_ir_for_returns_ffai_qmm_mma_per_dtype() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
             let k = kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_qmm_mma", "dynamic-M routes to mt_qmm_mma for dtype {:?}", dt);
+            assert_eq!(
+                k.name, "ffai_qmm_mma",
+                "dynamic-M routes to ffai_qmm_mma for dtype {:?}",
+                dt
+            );
             assert_eq!(k.mode, ffai_kernels::core::ir::KernelMode::Reduction);
         }
     }

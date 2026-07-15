@@ -11,7 +11,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_axpy_scalar_inplace<T>(src: Tensor<T>, mut accum: Tensor<T>, #[constexpr] scalar: f32) {
+pub fn ffai_axpy_scalar_inplace<T>(src: Tensor<T>, mut accum: Tensor<T>, #[constexpr] scalar: f32) {
     let i = tid;
     let s = load(src[i]).cast::<f32>();
     let a = load(accum[i]).cast::<f32>();
@@ -21,7 +21,7 @@ pub fn mt_axpy_scalar_inplace<T>(src: Tensor<T>, mut accum: Tensor<T>, #[constex
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_axpy_scalar_inplace;
+    use super::ffai_axpy_scalar_inplace;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(n: usize, dt: DType) -> TestSetup {
@@ -32,7 +32,7 @@ pub mod kernel_tests {
         let accum_dt = unpack_f32(&pack_f32(&accum_in, dt), dt);
         let expected: Vec<f32> =
             accum_dt.iter().zip(&src_dt).map(|(a, s)| a + scalar * s).collect();
-        TestSetup::new(mt_axpy_scalar_inplace::kernel_ir_for(dt))
+        TestSetup::new(ffai_axpy_scalar_inplace::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("src", pack_f32(&src, dt), dt))
             .input(TestBuffer::from_vec("accum", pack_f32(&accum_in, dt), dt))
             .constexpr("scalar", scalar)
@@ -47,12 +47,12 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_axpy_scalar_inplace;
+    use super::ffai_axpy_scalar_inplace;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_axpy_scalar(dt: DType) -> BenchSetup {
         let n = 4096usize;
-        BenchSetup::new(mt_axpy_scalar_inplace::kernel_ir_for(dt))
+        BenchSetup::new(ffai_axpy_scalar_inplace::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("src", n, dt))
             .buffer(BenchBuffer::random("accum", n, dt).output())
             .constexpr("scalar", 0.5f32)

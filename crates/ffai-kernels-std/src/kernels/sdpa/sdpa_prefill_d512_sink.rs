@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Multi-query causal sliding-window SDPA for head_dim=512 with attention
-//! sink — the PREFILL counterpart of `mt_sdpa_decode_d512_sink`. Each
+//! sink — the PREFILL counterpart of `ffai_sdpa_decode_d512_sink`. Each
 //! (q_head, q_pos) threadgroup runs the same flash online-softmax over the
 //! KV cache, but bounded causally: query at absolute position
 //! `p = kv_base + q_pos` attends KV `[max(0, p+1-window) .. p]`. For the
@@ -15,7 +15,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_sdpa_prefill_d512_sink<T>(
+pub fn ffai_sdpa_prefill_d512_sink<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -280,7 +280,7 @@ pub fn mt_sdpa_prefill_d512_sink<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_prefill_d512_sink;
+    use super::ffai_sdpa_prefill_d512_sink;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_prefill_d512_sink(dt: DType) -> BenchSetup {
@@ -288,7 +288,7 @@ pub mod kernel_benches {
         let n_q = 64usize;
         let n_query = 256usize;
         let kv = 256usize;
-        BenchSetup::new(mt_sdpa_prefill_d512_sink::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_prefill_d512_sink::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q * hd, dt))
             .buffer(BenchBuffer::random("k", kv * hd, dt))

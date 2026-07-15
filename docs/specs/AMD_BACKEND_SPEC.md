@@ -26,7 +26,7 @@ intrinsics) are near-identical between the two. So:
 > largely **a `TargetProfile` (HIP dialect + wavefront width + matrix-core
 > strategy) on the shared C++ emitter, plus a HIP runtime `Device` impl.**
 
-And the PR-#2 precision payoff repeats: **AMD CDNA4 (Instinct MI350/MI355X, 2025)
+And the precision payoff repeats: **AMD CDNA4 (Instinct MI350/MI355X, 2025)
 has hardware OCP-microscaling tensor cores (MXFP4 / MXFP6 / MXFP8)** — so the
 `mx*` / `mxint*` E8M0-block-32 formats map onto AMD matrix cores just as they do
 onto NVIDIA Blackwell. The format work transfers to a *third* hardware target.
@@ -178,6 +178,6 @@ NVIDIA + AMD hardware.
   matrix-core (§4.2) and cooperative-kernel (§6) paths; **rocBLAS**, **rocPRIM**.
 - **AMD matrix cores** — MFMA (CDNA, `__builtin_amdgcn_mfma_*`), WMMA (RDNA3+,
   `__builtin_amdgcn_wmma_*`); MI300/gfx942 FP8, **MI350/gfx950 (CDNA4) OCP MXFP
-  microscaling** — the hardware target the PR-#2 block-scaled formats map onto
+  microscaling** — the hardware target the block-scaled formats map onto
   (§4.3), the AMD analog of NVIDIA Blackwell.
 - `CUDA_BACKEND_SPEC.md` — the shared backend-seam design this spec is a delta on.

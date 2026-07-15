@@ -317,9 +317,9 @@ mod tests {
         used_vid: ValueId,
     ) -> Block {
         // Append a Store that consumes `used_vid` so the per-pass DCE
-        // postcondition (#209/1) doesn't sweep the ops we want to
+        // postcondition doesn't sweep the ops we want to
         // inspect.  Stores have side effects and are never eliminated;
-        // a BinOp ref-op was used pre-#209/1 but is itself DCE-eligible
+        // a BinOp ref-op was previously used but is itself DCE-eligible
         // (its result has no consumer), so cascade-removal would strip
         // the whole chain.  Using a Store anchors `used_vid` against
         // the kernel's `out` param.

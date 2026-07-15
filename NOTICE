@@ -1,5 +1,5 @@
 FFAI Kernels
-Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom).
 
 This product includes software originally developed as part of the MetalTile
 project (https://github.com/0xClandestine/metaltile), from which FFAI Kernels
@@ -12,8 +12,8 @@ Initial MetalTile / FFAI Kernels contributors:
   Tom Turney (@TheTom)
 
 Portions Copyright 2026 0xClandestine (clandestine.eth) - original author of the
-`#[kernel]` proc-macro DSL, body parser, IR, and MSL codegen + optimization
-passes that FFAI Kernels evolved from.
+`#[kernel]` and `#[bench]` proc-macro DSL, as well as the initial CLI interface, 
+body parser, IR and MSL codegen that FFAI Kernels evolved from.
 
 Portions Copyright 2026 Ambisphaeric - CI hygiene, testing, benchmarking, and
 kernel tuning contributions.

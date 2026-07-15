@@ -34,7 +34,7 @@ pub fn dtype_label(dt: DType) -> &'static str {
 
 // ── Correctness ───────────────────────────────────────────────────────────────
 
-/// Result of a numerical equivalence check between the reference and MT kernels.
+/// Result of a numerical equivalence check between the reference and FFAI kernels.
 #[derive(Debug, Clone, Copy)]
 pub struct EquivResult {
     pub n_checked: usize,
@@ -59,15 +59,15 @@ pub const DEFAULT_MIN_COSINE_SIM: f32 = 0.999;
 
 pub fn check_equiv_with(
     ref_vals: &[f32],
-    mt_vals: &[f32],
+    ffai_vals: &[f32],
     tolerance: EquivTolerance,
 ) -> EquivResult {
-    let n = ref_vals.len().min(mt_vals.len());
+    let n = ref_vals.len().min(ffai_vals.len());
     let mut max_err = 0.0f32;
     let mut dot = 0.0f64;
     let mut ref_norm_sq = 0.0f64;
-    let mut mt_norm_sq = 0.0f64;
-    for (&r, &m) in ref_vals[..n].iter().zip(&mt_vals[..n]) {
+    let mut ffai_norm_sq = 0.0f64;
+    for (&r, &m) in ref_vals[..n].iter().zip(&ffai_vals[..n]) {
         let err = (r - m).abs();
         if err > max_err {
             max_err = err;
@@ -76,18 +76,18 @@ pub fn check_equiv_with(
         let m = m as f64;
         dot += r * m;
         ref_norm_sq += r * r;
-        mt_norm_sq += m * m;
+        ffai_norm_sq += m * m;
     }
-    let cosine_sim = match (ref_norm_sq > 0.0, mt_norm_sq > 0.0) {
+    let cosine_sim = match (ref_norm_sq > 0.0, ffai_norm_sq > 0.0) {
         (false, false) => 1.0,
         (false, true) | (true, false) => 0.0,
         (true, true) => {
-            let denom = ref_norm_sq.sqrt() * mt_norm_sq.sqrt();
+            let denom = ref_norm_sq.sqrt() * ffai_norm_sq.sqrt();
             (dot / denom) as f32
         },
     }
     .clamp(-1.0, 1.0);
-    let same_len = ref_vals.len() == mt_vals.len();
+    let same_len = ref_vals.len() == ffai_vals.len();
     EquivResult {
         n_checked: n,
         max_abs_err: max_err,
@@ -100,8 +100,8 @@ pub fn check_equiv_with(
     }
 }
 
-pub fn check_equiv(ref_vals: &[f32], mt_vals: &[f32], max_abs_err: f32) -> EquivResult {
-    check_equiv_with(ref_vals, mt_vals, EquivTolerance::new(max_abs_err, DEFAULT_MIN_COSINE_SIM))
+pub fn check_equiv(ref_vals: &[f32], ffai_vals: &[f32], max_abs_err: f32) -> EquivResult {
+    check_equiv_with(ref_vals, ffai_vals, EquivTolerance::new(max_abs_err, DEFAULT_MIN_COSINE_SIM))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,7 +129,7 @@ pub struct DerivedMetrics {
 
 #[derive(Debug, Clone, Default)]
 pub struct OpResultExtras {
-    pub mt_timing: Option<BenchStats>,
+    pub ffai_timing: Option<BenchStats>,
     pub ref_timing: Option<BenchStats>,
     pub metrics: Option<DerivedMetrics>,
 }
@@ -157,10 +157,10 @@ impl OpBench {
         &self,
         shape: impl Into<String>,
         ref_perf: Option<f64>,
-        mt_perf: Option<f64>,
+        ffai_perf: Option<f64>,
         equiv: Option<EquivResult>,
     ) -> OpResult {
-        self.result_sub(None::<&str>, shape, ref_perf, mt_perf, equiv)
+        self.result_sub(None::<&str>, shape, ref_perf, ffai_perf, equiv)
     }
 
     pub fn result_sub(
@@ -168,10 +168,10 @@ impl OpBench {
         subop: Option<impl Into<String>>,
         shape: impl Into<String>,
         ref_perf: Option<f64>,
-        mt_perf: Option<f64>,
+        ffai_perf: Option<f64>,
         equiv: Option<EquivResult>,
     ) -> OpResult {
-        self.result_sub_timed(subop, shape, ref_perf, mt_perf, equiv, None, None)
+        self.result_sub_timed(subop, shape, ref_perf, ffai_perf, equiv, None, None)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -180,13 +180,13 @@ impl OpBench {
         subop: Option<impl Into<String>>,
         shape: impl Into<String>,
         ref_perf: Option<f64>,
-        mt_perf: Option<f64>,
+        ffai_perf: Option<f64>,
         equiv: Option<EquivResult>,
-        mt_timing: Option<BenchStats>,
+        ffai_timing: Option<BenchStats>,
         ref_timing: Option<BenchStats>,
     ) -> OpResult {
-        self.result_with_extras(subop, shape, ref_perf, mt_perf, equiv, OpResultExtras {
-            mt_timing,
+        self.result_with_extras(subop, shape, ref_perf, ffai_perf, equiv, OpResultExtras {
+            ffai_timing,
             ref_timing,
             metrics: None,
         })
@@ -197,12 +197,12 @@ impl OpBench {
         subop: Option<impl Into<String>>,
         shape: impl Into<String>,
         ref_perf: Option<f64>,
-        mt_perf: Option<f64>,
+        ffai_perf: Option<f64>,
         equiv: Option<EquivResult>,
         extras: OpResultExtras,
     ) -> OpResult {
         let shape = shape.into();
-        if mt_perf.is_some() && equiv.is_none() {
+        if ffai_perf.is_some() && equiv.is_none() {
             panic!("implemented benchmark '{}' [{}] is missing correctness", self.op, shape);
         }
         let result = OpResult {
@@ -211,9 +211,9 @@ impl OpBench {
             shape,
             metric: self.metric,
             ref_perf,
-            mt_perf,
+            ffai_perf,
             equiv,
-            mt_timing: extras.mt_timing,
+            ffai_timing: extras.ffai_timing,
             ref_timing: extras.ref_timing,
             metrics: extras.metrics,
             legacy: self.legacy,
@@ -226,10 +226,10 @@ impl OpBench {
         &self,
         shape: impl Into<String>,
         ref_perf: Option<f64>,
-        mt_perf: f64,
+        ffai_perf: f64,
         equiv: EquivResult,
     ) -> OpResult {
-        self.result(shape, ref_perf, Some(mt_perf), Some(equiv))
+        self.result(shape, ref_perf, Some(ffai_perf), Some(equiv))
     }
 
     pub fn nyi(&self, shape: impl Into<String>, ref_perf: Option<f64>) -> OpResult {
@@ -243,9 +243,9 @@ pub struct OpResult {
     shape: String,
     metric: &'static str,
     ref_perf: Option<f64>,
-    mt_perf: Option<f64>,
+    ffai_perf: Option<f64>,
     equiv: Option<EquivResult>,
-    pub mt_timing: Option<BenchStats>,
+    pub ffai_timing: Option<BenchStats>,
     pub ref_timing: Option<BenchStats>,
     metrics: Option<DerivedMetrics>,
     legacy: bool,
@@ -267,11 +267,11 @@ impl OpResult {
     pub fn shape(&self) -> &str { &self.shape }
     pub fn metric(&self) -> &'static str { self.metric }
     pub fn ref_perf(&self) -> Option<f64> { self.ref_perf }
-    pub fn mt_perf(&self) -> Option<f64> { self.mt_perf }
+    pub fn ffai_perf(&self) -> Option<f64> { self.ffai_perf }
     pub fn equiv(&self) -> Option<&EquivResult> { self.equiv.as_ref() }
 
-    pub fn mt_us(&self) -> Option<f64> {
-        self.mt_timing.as_ref().filter(|t| t.is_valid()).map(|t| t.min_us)
+    pub fn ffai_us(&self) -> Option<f64> {
+        self.ffai_timing.as_ref().filter(|t| t.is_valid()).map(|t| t.min_us)
     }
 
     pub fn ref_us(&self) -> Option<f64> {
@@ -281,14 +281,14 @@ impl OpResult {
     pub fn metrics(&self) -> Option<&DerivedMetrics> { self.metrics.as_ref() }
 
     pub fn pct(&self) -> Option<f64> {
-        match (self.ref_perf, self.mt_perf) {
+        match (self.ref_perf, self.ffai_perf) {
             (Some(r), Some(m)) if r > 0.0 => Some(m / r * 100.0),
             _ => None,
         }
     }
 
     pub fn correctness_status(&self) -> CorrectnessStatus {
-        match (&self.equiv, self.mt_perf) {
+        match (&self.equiv, self.ffai_perf) {
             (Some(e), _) if e.passed =>
                 CorrectnessStatus::Passed { max_abs_err: e.max_abs_err, cosine_sim: e.cosine_sim },
             (Some(e), _) =>

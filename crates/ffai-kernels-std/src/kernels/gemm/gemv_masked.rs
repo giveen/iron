@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gemv_masked<T>(
+pub fn ffai_gemv_masked<T>(
     mat: Tensor<T>,
     vec: Tensor<T>,
     mask: Tensor<T>,
@@ -25,15 +25,15 @@ pub fn mt_gemv_masked<T>(
     store(out[row], result.cast::<T>());
 }
 
-/// New-syntax correctness for `mt_gemv_masked` (`out[r] = Σ_j mat[r,j]·vec[j]·mask[j]`).
+/// New-syntax correctness for `ffai_gemv_masked` (`out[r] = Σ_j mat[r,j]·vec[j]·mask[j]`).
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_gemv_masked;
+    use super::ffai_gemv_masked;
     use crate::utils::{pack_f32, unpack_f32};
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 1e-1, 1.0])]
-    fn test_mt_gemv_masked(dt: DType) -> TestSetup {
+    fn test_ffai_gemv_masked(dt: DType) -> TestSetup {
         let (m, k) = (16usize, 256usize);
         let mat: Vec<f32> = (0..m * k).map(|i| ((i % 17) as f32 - 8.0) * 0.01).collect();
         let vec: Vec<f32> = (0..k).map(|j| ((j % 13) as f32 - 6.0) * 0.02).collect();
@@ -44,7 +44,7 @@ pub mod kernel_tests {
         let expected: Vec<f32> = (0..m)
             .map(|r| (0..k).map(|j| mat_dt[r * k + j] * vec_dt[j] * mask_dt[j]).sum())
             .collect();
-        TestSetup::new(mt_gemv_masked::kernel_ir_for(dt))
+        TestSetup::new(ffai_gemv_masked::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("mat", pack_f32(&mat, dt), dt))
             .input(TestBuffer::from_vec("vec", pack_f32(&vec, dt), dt))
@@ -56,16 +56,16 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_gemv_masked`.
+/// New-syntax benchmark for `ffai_gemv_masked`.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_gemv_masked;
+    use super::ffai_gemv_masked;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gemv_masked(dt: DType) -> BenchSetup {
         let (m, k) = (4096usize, 4096usize);
-        BenchSetup::new(mt_gemv_masked::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gemv_masked::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("mat", m * k, dt))
             .buffer(BenchBuffer::random("vec", k, dt))

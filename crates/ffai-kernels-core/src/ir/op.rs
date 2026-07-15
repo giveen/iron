@@ -78,7 +78,7 @@ impl UnaryOpKind {
             UnaryOpKind::Floor => format!("floor({arg})"),
             UnaryOpKind::Sin => format!("sin({arg})"),
             UnaryOpKind::Cos => format!("cos({arg})"),
-            UnaryOpKind::Erf => format!("mt_erf_impl({arg})"),
+            UnaryOpKind::Erf => format!("ffai_erf_impl({arg})"),
             UnaryOpKind::Exp2 => format!("exp2({arg})"),
             UnaryOpKind::Log2 => format!("log2({arg})"),
             UnaryOpKind::Sign => format!("sign({arg})"),
@@ -96,9 +96,9 @@ impl UnaryOpKind {
             UnaryOpKind::Acos => format!("acos({arg})"),
             UnaryOpKind::Acosh => format!("acosh({arg})"),
             UnaryOpKind::Atanh => format!("atanh({arg})"),
-            UnaryOpKind::Expm1 => format!("mt_expm1_impl({arg})"),
+            UnaryOpKind::Expm1 => format!("ffai_expm1_impl({arg})"),
             UnaryOpKind::Log10 => format!("log10({arg})"),
-            UnaryOpKind::ErfInv => format!("mt_erfinv_impl({arg})"),
+            UnaryOpKind::ErfInv => format!("ffai_erfinv_impl({arg})"),
         }
     }
 }
@@ -117,11 +117,11 @@ impl ActKind {
     /// MSL helper function name. `Tanh` is a Metal built-in; others need a preamble helper.
     pub fn msl_fn(self) -> &'static str {
         match self {
-            ActKind::Silu => "mt_silu",
-            ActKind::Gelu => "mt_gelu",
-            ActKind::Relu => "mt_relu",
+            ActKind::Silu => "ffai_silu",
+            ActKind::Gelu => "ffai_gelu",
+            ActKind::Relu => "ffai_relu",
             ActKind::Tanh => "tanh",
-            ActKind::Sigmoid => "mt_sigmoid",
+            ActKind::Sigmoid => "ffai_sigmoid",
         }
     }
 
@@ -438,7 +438,7 @@ pub enum Op {
     /// `emit_block.rs` that turned the textual `auto v_add = v_mul +
     /// c;` into `auto v_add = fma(a, b, c);` while leaving the
     /// upstream `Op::Mul` in the IR — the standalone Mul then emitted
-    /// `auto v_mul = a * b;` as a dead variable in MSL.  #207 worked
+    /// `auto v_mul = a * b;` as a dead variable in MSL.  An earlier fix worked
     /// around it with `compute_fma_absorbed_mul_skips` in the emit
     /// path.  Lifting the fusion into the IR makes the Mul orphan a
     /// real producer-with-no-consumer and lets DCE handle it

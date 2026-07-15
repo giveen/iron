@@ -280,7 +280,7 @@ impl HipDevice {
         // Without this, AMDGPU's backend lowers `a / b` to
         // `V_RCP_F32 + V_MUL_F32` (1 ULP cheaper, 1 ULP less accurate).
         // The flag matches IEEE-754 rounding for every divide that
-        // didn't already go through `mt_fdiv`.
+        // didn't already go through `ffai_fdiv`.
         let prec_div = CString::new("-fno-fast-math").unwrap();
         let hip_root = std::env::var("HIP_PATH")
             .or_else(|_| std::env::var("ROCM_PATH"))

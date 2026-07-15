@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `kernels::moe::mt_moe_router_topk_biased` — top-K by biased
+//! GPU correctness for `kernels::moe::ffai_moe_router_topk_biased` — top-K by biased
 //! score, weights = unbiased[chosen] renormalised to sum 1.
 #![cfg(target_os = "macos")]
 
@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes, unpack_u32_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::moe_router_topk_biased::{
-    mt_moe_router_topk_biased,
-    mt_remap_u32,
+    ffai_moe_router_topk_biased,
+    ffai_remap_u32,
 };
 
 #[test]
@@ -40,7 +40,7 @@ fn moe_router_topk_biased_f32() {
     buffers.insert("k".into(), (k as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let mut kernel = mt_moe_router_topk_biased::kernel_ir_for(Dt::F32.to_dtype());
+    let mut kernel = ffai_moe_router_topk_biased::kernel_ir_for(Dt::F32.to_dtype());
     kernel.mode = KernelMode::Reduction;
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [1, 1, 1], [32, 1, 1])
@@ -54,7 +54,7 @@ fn moe_router_topk_biased_f32() {
     }
 }
 
-/// `mt_remap_u32`: out[i] = table[idx[i]] — a plain u32 gather over `n`
+/// `ffai_remap_u32`: out[i] = table[idx[i]] — a plain u32 gather over `n`
 /// elements. Non-generic Grid3D kernel (one thread per output), so it
 /// dispatches via `kernel_ir()` and a [n,1,1] grid with [1,1,1] tg.
 #[test]
@@ -74,7 +74,7 @@ fn remap_u32_matches_cpu() {
     buffers.insert("n".into(), (n as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("ctx");
-    let kernel = mt_remap_u32::kernel_ir();
+    let kernel = ffai_remap_u32::kernel_ir();
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [n, 1, 1], [1, 1, 1])
         .expect("dispatch");

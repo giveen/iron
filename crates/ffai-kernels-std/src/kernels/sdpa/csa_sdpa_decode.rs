@@ -9,7 +9,7 @@
 //!
 //! The caller builds `selected_indices` by unioning:
 //!   - the top-512 indices returned by the Lightning Indexer
-//!     (`mt_indexer_topk_block`)
+//!     (`ffai_indexer_topk_block`)
 //!   - the trailing `sliding_window` (DSv4 default: 128) most-recent
 //!     cache positions
 //!
@@ -39,7 +39,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_csa_sdpa_decode<T>(
+pub fn ffai_csa_sdpa_decode<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -301,12 +301,12 @@ mod tests {
         core::{DType, ir::KernelMode},
     };
 
-    use super::mt_csa_sdpa_decode;
+    use super::ffai_csa_sdpa_decode;
 
     fn msl_for(dt: DType) -> String {
-        let mut k = mt_csa_sdpa_decode::kernel_ir_for(dt);
+        let mut k = ffai_csa_sdpa_decode::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_csa_sdpa_decode codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_csa_sdpa_decode codegen succeeds")
     }
 
     #[test]
@@ -315,8 +315,8 @@ mod tests {
             let src = msl_for(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_csa_sdpa_decode"),
-                "MSL for {dt:?} should declare mt_csa_sdpa_decode:\n{src}",
+                src.contains("kernel void ffai_csa_sdpa_decode"),
+                "MSL for {dt:?} should declare ffai_csa_sdpa_decode:\n{src}",
             );
         }
     }
@@ -325,7 +325,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_csa_sdpa_decode;
+    use super::ffai_csa_sdpa_decode;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Sparse-gather oracle: dense SDPA but only over the listed cache
@@ -402,7 +402,7 @@ pub mod kernel_tests {
             &q, &k, &v, &selected, n_q_heads, n_kv_heads, head_dim, kv_stride, scale,
         );
         let sel_bytes: Vec<u8> = selected.iter().flat_map(|i| i.to_le_bytes()).collect();
-        TestSetup::new(mt_csa_sdpa_decode::kernel_ir_for(dt))
+        TestSetup::new(ffai_csa_sdpa_decode::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -422,7 +422,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_csa_sdpa_decode;
+    use super::ffai_csa_sdpa_decode;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_csa(dt: DType) -> BenchSetup {
@@ -433,7 +433,7 @@ pub mod kernel_benches {
         let bytes = (2 * n_q_heads * head_dim + 2 * n_kv_heads * kv_stride * head_dim)
             * dt.size_bytes()
             + n_selected * 4;
-        BenchSetup::new(mt_csa_sdpa_decode::kernel_ir_for(dt))
+        BenchSetup::new(ffai_csa_sdpa_decode::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

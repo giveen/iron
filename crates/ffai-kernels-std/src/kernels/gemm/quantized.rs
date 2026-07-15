@@ -5,7 +5,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_qmv<T>(
+pub fn ffai_qmv<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -307,13 +307,13 @@ pub fn mt_qmv<T>(
     }
 }
 
-// ─── mt_qmm ─────────────────────────────────────────────────────────────
+// ─── ffai_qmm ─────────────────────────────────────────────────────────────
 //
-// Quantized matmul (B>1 / prefill). Same int4 weight layout as `mt_qmv`
+// Quantized matmul (B>1 / prefill). Same int4 weight layout as `ffai_qmv`
 // extended along the M axis (token count). Each threadgroup owns 8
-// consecutive output columns at one M-row — `mt_qmv`'s 2 SG × 4 N-row
+// consecutive output columns at one M-row — `ffai_qmv`'s 2 SG × 4 N-row
 // tile lifted into M via an outer grid axis (`tgid_y = m_row`). The
-// inner K-walk is bit-identical to `mt_qmv`: each lane caches 16 X
+// inner K-walk is bit-identical to `ffai_qmv`: each lane caches 16 X
 // values per 512-wide K-block and reuses them across all 4 N-rows in
 // its simdgroup, using the same mask-without-shift trick (X
 // pre-scaled by inverse nibble position, weight mask returns
@@ -334,13 +334,13 @@ pub fn mt_qmv<T>(
 //   x       [m, k]                 T
 //   out     [m, n]                 T
 //
-// At M = 1 this is byte-identical to `mt_qmv`. At M > 1 each M-row
+// At M = 1 this is byte-identical to `ffai_qmv`. At M > 1 each M-row
 // runs as a fully independent threadgroup grid axis — no W reuse
 // across M-rows (W is loaded fresh per (M-row, N-tile) pair). The
 // natural v3 step is a BM × BN output tile with W cached in TG
 // memory and amortised across BM M-rows.
 #[kernel]
-pub fn mt_qmm<T>(
+pub fn ffai_qmm<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -393,7 +393,7 @@ pub fn mt_qmm<T>(
         let xi13 = xb + 13u32;
         let xi14 = xb + 14u32;
         let xi15 = xb + 15u32;
-        // Mask-without-shift constants. Same as mt_qmv.
+        // Mask-without-shift constants. Same as ffai_qmv.
         let s_16 = 0.0625f32;
         let s_256 = 0.00390625f32;
         let s_4096 = 0.000244140625f32;
@@ -441,7 +441,7 @@ pub fn mt_qmm<T>(
         let x13 = x13_raw * s_16;
         let x14 = x14_raw * s_256;
         let x15 = x15_raw * s_4096;
-        // Group index within this row's K dimension. mt_qmv uses
+        // Group index within this row's K dimension. ffai_qmv uses
         // `xb / 64` because there `xb` is already a K-position; here
         // `xb` includes the `x_row_base = m_row * k` offset, so we
         // recompute against the K-local base.
@@ -620,12 +620,12 @@ pub fn mt_qmm<T>(
     }
 }
 
-// ─── mt_qmm_bm2 ─────────────────────────────────────────────────────────
+// ─── ffai_qmm_bm2 ─────────────────────────────────────────────────────────
 //
 // Quantized matmul v3 — BM × BN output tile with TG-memory-free W reuse.
 //
 // Same int4 weight layout + 8-output 2 SG × 4 N-row geometry as
-// `mt_qmm`, but lifts BM=2 M-rows into the same threadgroup so the W
+// `ffai_qmm`, but lifts BM=2 M-rows into the same threadgroup so the W
 // packs + nibble extractions are loaded ONCE per K-block per N-row and
 // reused across both M-rows. Per K-block per TG: 8 W loads (unchanged
 // from v2) producing 16 outputs (vs 8). W bandwidth per output halves.
@@ -643,11 +643,11 @@ pub fn mt_qmm<T>(
 //   16 W nibble extracts (shared)          =  64 bytes
 //   ≈ 240 bytes — well inside Apple GPU's ~1024 byte/lane register file.
 //
-// At M < 2 the caller should dispatch `mt_qmm` (BM=1) instead — this
+// At M < 2 the caller should dispatch `ffai_qmm` (BM=1) instead — this
 // kernel asserts `m % 2 == 0` via the grid dim. v4 BM=4 is the next
-// step if M=32 still doesn't beat MLX after this lands; see #55.
+// step if M=32 still doesn't beat MLX after this lands.
 #[kernel]
-pub fn mt_qmm_bm2<T>(
+pub fn ffai_qmm_bm2<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -1038,12 +1038,12 @@ pub fn mt_qmm_bm2<T>(
     }
 }
 
-// ─── mt_qmm_bm4 ─────────────────────────────────────────────────────────
+// ─── ffai_qmm_bm4 ─────────────────────────────────────────────────────────
 //
 // Quantized matmul v4 — BM × BN output tile with 4× W reuse.
 //
-// Same int4 layout + 8-output 2 SG × 4 N-row geometry as mt_qmm and
-// mt_qmm_bm2, but lifts BM=4 M-rows into the same threadgroup so the
+// Same int4 layout + 8-output 2 SG × 4 N-row geometry as ffai_qmm and
+// ffai_qmm_bm2, but lifts BM=4 M-rows into the same threadgroup so the
 // W packs + nibble extractions are loaded ONCE per K-block per N-row
 // and reused across all four M-rows. Per K-block per TG: 8 W loads
 // (unchanged from v2/bm2) producing 32 outputs (vs bm2's 16, v2's 8).
@@ -1069,7 +1069,7 @@ pub fn mt_qmm_bm2<T>(
 // Predicted: ~half of MLX's M=16-32 gap recovered without simdgroup-
 // matrix primitives.
 #[kernel]
-pub fn mt_qmm_bm4<T>(
+pub fn ffai_qmm_bm4<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -1440,9 +1440,9 @@ pub fn mt_qmm_bm4<T>(
     }
 }
 
-// ─── mt_qmv_int8_fast ───────────────────────────────────────────────────
+// ─── ffai_qmv_int8_fast ───────────────────────────────────────────────────
 //
-// Int8 decode GEMV — mirrors `mt_qmv`'s 8-row-per-TG geometry but for
+// Int8 decode GEMV — mirrors `ffai_qmv`'s 8-row-per-TG geometry but for
 // int8 weights (4 bytes/u32).
 //
 // ## Geometry
@@ -1461,10 +1461,10 @@ pub fn mt_qmm_bm4<T>(
 //     against typical f32 X values; explicit shifts are cleaner and avoid
 //     the precision hazard of multiplying by ~6e-8.
 //   - Bias hoist (algebraic split) retained: xs accumulates raw X per
-//     block; acc += scale * qdot + bias * xs mirrors `mt_qmv` exactly.
+//     block; acc += scale * qdot + bias * xs mirrors `ffai_qmv` exactly.
 //   - `& 0xFF` mask extracts byte codes 0..255 (unsigned int8).
 //
-// ## Layouts (same field names as mt_qmv)
+// ## Layouts (same field names as ffai_qmv)
 //   w       [m, k/4]               u32   — int8 codes (4 per uint32)
 //   scales  [m, k/group_size]      T
 //   biases  [m, k/group_size]      T
@@ -1472,7 +1472,7 @@ pub fn mt_qmm_bm4<T>(
 //   out     [m]                    T
 
 #[kernel]
-pub fn mt_qmv_int8_fast<T>(
+pub fn ffai_qmv_int8_fast<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -1483,7 +1483,7 @@ pub fn mt_qmv_int8_fast<T>(
 ) {
     // 8-row-per-TG geometry: 2 simdgroups × 32 lanes, each SG handles
     // 4 consecutive output rows. X loads are shared across all 4 rows
-    // in a simdgroup, reducing X bandwidth by 4×. Mirrors `mt_qmv` for
+    // in a simdgroup, reducing X bandwidth by 4×. Mirrors `ffai_qmv` for
     // int4 except K-block = 128 (4 X per lane × 32 lanes) and weight
     // codes use explicit byte extraction (shift 0/8/16/24, mask 0xFF).
     let tg = tgid_x;
@@ -1580,16 +1580,16 @@ pub fn mt_qmv_int8_fast<T>(
     }
 }
 
-// ─── mt_qmm_int8_fast ───────────────────────────────────────────────────
+// ─── ffai_qmm_int8_fast ───────────────────────────────────────────────────
 //
-// Int8 matmul (M=1 batched form) — mirrors `mt_qmm` for int4 but adapted
+// Int8 matmul (M=1 batched form) — mirrors `ffai_qmm` for int4 but adapted
 // for int8 weights (4 bytes/u32). Same 8-row-per-TG geometry: 2 SG × 32
 // lanes, each SG handles 4 N-rows. K-block = 128 (4 X per lane × 32
 // lanes). Grid: [n / 8, m, 1].
 //
-// At M = 1 this is byte-identical to `mt_qmv_int8_fast` with the X
+// At M = 1 this is byte-identical to `ffai_qmv_int8_fast` with the X
 // index incorporating the M-row base. Bias hoist, explicit byte shifts,
-// and algebraic-split accumulator all match `mt_qmv_int8_fast`.
+// and algebraic-split accumulator all match `ffai_qmv_int8_fast`.
 //
 // ## Layouts
 //   w       [n, k/4]               u32   — int8 codes (4 per uint32)
@@ -1599,7 +1599,7 @@ pub fn mt_qmv_int8_fast<T>(
 //   out     [m, n]                 T
 
 #[kernel]
-pub fn mt_qmm_int8_fast<T>(
+pub fn ffai_qmm_int8_fast<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -1697,9 +1697,9 @@ pub fn mt_qmm_int8_fast<T>(
     }
 }
 
-// ─── mt_qmm_bm2_int8_fast ───────────────────────────────────────────────
+// ─── ffai_qmm_bm2_int8_fast ───────────────────────────────────────────────
 //
-// Int8 matmul BM=2 — mirrors `mt_qmm_bm2` for int4 but adapted for
+// Int8 matmul BM=2 — mirrors `ffai_qmm_bm2` for int4 but adapted for
 // int8 weights. Two M-rows per TG; W packs extracted once per K-block
 // per N-row, reused across both M-rows. K-block = 128.
 //
@@ -1716,7 +1716,7 @@ pub fn mt_qmm_int8_fast<T>(
 //   out     [m, n]                 T
 
 #[kernel]
-pub fn mt_qmm_bm2_int8_fast<T>(
+pub fn ffai_qmm_bm2_int8_fast<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -1847,9 +1847,9 @@ pub fn mt_qmm_bm2_int8_fast<T>(
     }
 }
 
-// ─── mt_qmm_bm4_int8_fast ───────────────────────────────────────────────
+// ─── ffai_qmm_bm4_int8_fast ───────────────────────────────────────────────
 //
-// Int8 matmul BM=4 — mirrors `mt_qmm_bm4` for int4 but adapted for
+// Int8 matmul BM=4 — mirrors `ffai_qmm_bm4` for int4 but adapted for
 // int8 weights. Four M-rows per TG; W packs loaded once per K-block per
 // N-row and reused across all 4 M-rows. K-block = 128 (4 X per lane ×
 // 32 lanes).
@@ -1867,7 +1867,7 @@ pub fn mt_qmm_bm2_int8_fast<T>(
 //   out     [m, n]                 T
 
 #[kernel]
-pub fn mt_qmm_bm4_int8_fast<T>(
+pub fn ffai_qmm_bm4_int8_fast<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -2054,7 +2054,7 @@ pub fn mt_qmm_bm4_int8_fast<T>(
     }
 }
 
-// ─── mt_qmm_mma ─────────────────────────────────────────────────────────
+// ─── ffai_qmm_mma ─────────────────────────────────────────────────────────
 //
 // Quantized matmul via simdgroup-matrix MMA — the M ≥ 32 path that hits
 // MLX's `affine_qmm_t` ALU throughput. Mirrors MLX's 32×32 output tile
@@ -2099,11 +2099,11 @@ pub fn mt_qmm_bm4_int8_fast<T>(
 //
 // Closes the M ≥ 32 gap to MLX: simdgroup-matrix MMA = 8×8×8 = 512 MACs
 // per simdgroup per instruction vs bm4's 32 scalar FMAs + simd_sum.
-// Predicted on the QUANTIZED_SHAPES grid: ≥ 100% MT MLX at M=32 (M5)
-// / ≥ 80% MT MLX (M2). M=8/16 stays on bm4 — MMA tile is 75%/50% empty
+// Predicted on the QUANTIZED_SHAPES grid: ≥ 100% FFAI MLX at M=32 (M5)
+// / ≥ 80% FFAI MLX (M2). M=8/16 stays on bm4 — MMA tile is 75%/50% empty
 // at those Ms (would waste 1024-output budget).
 #[kernel]
-pub fn mt_qmm_mma<T>(
+pub fn ffai_qmm_mma<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -2154,7 +2154,7 @@ pub fn mt_qmm_mma<T>(
     // A (X) and B (W^T) frag scratch, reused per k_inner. Keep at native
     // T precision — Fix 5 (upcast to f32 to mirror MLX's half→float MMA
     // path) was tested in layered-bench: identical f16 numbers (93-96%
-    // MT MLX) with and without the upcast, so we keep simpler half MMA.
+    // FFAI MLX) with and without the upcast, so we keep simpler half MMA.
     let a_f0 = simdgroup_alloc::<T, 8, 8>();
     let a_f1 = simdgroup_alloc::<T, 8, 8>();
     let b_f0 = simdgroup_alloc::<T, 8, 8>();
@@ -2178,7 +2178,7 @@ pub fn mt_qmm_mma<T>(
     // 32-bank conflicts on the 8×8 frag column reads. For f16 the dtype-aware
     // skew formula `BK + 16/sizeof(T)` (mirroring MLX `affine_qmm_t`) bumps
     // this to 40 — see Fix 1 in `/tmp/mlx_archaeology.md`. The actual value
-    // is patched per-dtype in `mt_qmm_for` (`xs_ld_const`/`ws_ld_const` IR
+    // is patched per-dtype in `ffai_qmm_for` (`xs_ld_const`/`ws_ld_const` IR
     // names are looked up + rewritten); the literal `36u32` here is the f32
     // value and is also the default for non-f16 dtypes.
     let xs_ld_const = 36u32;
@@ -2361,12 +2361,12 @@ pub fn mt_qmm_mma<T>(
     );
 }
 
-// ─── mt_qmm_mma_m16 ─────────────────────────────────────────────────────
+// ─── ffai_qmm_mma_m16 ─────────────────────────────────────────────────────
 //
 // Half-height simdgroup-matrix MMA — the M=16 cell. The full-tile
-// `mt_qmm_mma` requires `m % 32 == 0`, so M=16 falls through to bm4 in
+// `ffai_qmm_mma` requires `m % 32 == 0`, so M=16 falls through to bm4 in
 // the selector. bm4 wins moderate-N at M=16 but loses wide-N on M2 Pro
-// (76-94% MT MLX). This kernel maps M=16 exactly to 2 frag_m positions
+// (76-94% FFAI MLX). This kernel maps M=16 exactly to 2 frag_m positions
 // (no padding waste) and gets MMA-class ALU + N-amortization.
 //
 // Geometry:
@@ -2374,14 +2374,14 @@ pub fn mt_qmm_mma<T>(
 //   BM = 16, BN = BK = 32 → 16×32 output tile (512 outputs/TG)
 //   Grid: [N/32, M/16, 1]
 //   Each SG owns a 16×16 sub-tile = 2 frag_m × 2 frag_n = 4 8×8 frags
-//   (same MMA work-per-SG as mt_qmm_mma — we halve only the warp-m grid)
+//   (same MMA work-per-SG as ffai_qmm_mma — we halve only the warp-m grid)
 //   Per K-block per SG: 4 frags × 4 k-inner = 16 MMAs (32 across TG)
 //
 // Threadgroup memory (skewed BK+4 = 36 stride to break 32-bank conflicts):
 //   Xs[16 × 36] = 576 T  (X tile, 16 rows × 32 cols + 4 skew)
 //   Ws[32 × 36] = 1152 T (dequant W tile, 32 rows × 32 cols + 4 skew)
 //   Total: 1728 T (6.75 KB f32 / 3.375 KB f16) — half the X tile of
-//   mt_qmm_mma; same Ws.
+//   ffai_qmm_mma; same Ws.
 //
 // Per K-block:
 //   1. Coop X load — 64 lanes × 8 strides each fill 512-elt Xs tile.
@@ -2390,22 +2390,22 @@ pub fn mt_qmm_mma<T>(
 //      step covers half the W tile (64 packs).
 //   3. threadgroup_barrier()
 //   4. Per SG (sm=0, sn = sg & 1): 4 frags × 4 k-inner unrolled MMA —
-//      identical body to mt_qmm_mma's per-SG inner loop.
+//      identical body to ffai_qmm_mma's per-SG inner loop.
 //   5. After K-loop, write each SG's 4 frags to global out.
 //
-// Frag lane mapping (Apple steel_gemm layout, same as mt_qmm_mma):
+// Frag lane mapping (Apple steel_gemm layout, same as ffai_qmm_mma):
 //   qid = lane/4, fm = (qid & 4) + ((lane/2) % 4),
 //   fn0 = (qid & 2)*2 + (lane%2)*2, fn1 = fn0 + 1
 //
 // Per-lane register footprint: 4 C f32 frags (16 elems × 4B = 64B) +
 // 4 A/B T frags (~16B) + scratch ≈ 256 B — well under the ~1 KB/lane
-// register file. Occupancy at 64 tpg is 2× mt_qmm_mma's 128 tpg.
+// register file. Occupancy at 64 tpg is 2× ffai_qmm_mma's 128 tpg.
 //
 // At M < 16 this kernel padding-wastes >= 50% of the tile (would route
-// to bm2/bm4). At M = 32 use mt_qmm_mma (full tile, 2× the output
-// budget). Selector route: `m == 16` → mt_qmm_mma_m16.
+// to bm2/bm4). At M = 32 use ffai_qmm_mma (full tile, 2× the output
+// budget). Selector route: `m == 16` → ffai_qmm_mma_m16.
 #[kernel]
-pub fn mt_qmm_mma_m16<T>(
+pub fn ffai_qmm_mma_m16<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -2425,14 +2425,14 @@ pub fn mt_qmm_mma_m16<T>(
     let sm = 0u32;
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
-    // 8×8 frag lane mapping (Apple steel_gemm layout — same as mt_qmm_mma).
+    // 8×8 frag lane mapping (Apple steel_gemm layout — same as ffai_qmm_mma).
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
     let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
     let fn1 = fn0 + 1u32;
     // TG memory for X tile [16 × 32] and dequant W tile [32 × 32].
     // BK + 4 = 36 stride for bank-conflict avoidance — same skew rationale
-    // as mt_qmm_mma. Xs size = 16 × 36 = 576 T; Ws size = 32 × 36 = 1152 T.
+    // as ffai_qmm_mma. Xs size = 16 × 36 = 576 T; Ws size = 32 × 36 = 1152 T.
     threadgroup_alloc("xs", 576, T);
     threadgroup_alloc("ws", 1152, T);
     // ── 4 output frags per SG, init to 0 ──
@@ -2699,12 +2699,12 @@ pub fn mt_qmm_mma_m16<T>(
     );
 }
 
-// ─── mt_qmm_mma_int8 ────────────────────────────────────────────────────
+// ─── ffai_qmm_mma_int8 ────────────────────────────────────────────────────
 //
-// Int8-quantized simdgroup-matrix MMA prefill — mirrors `mt_qmm_mma` but
+// Int8-quantized simdgroup-matrix MMA prefill — mirrors `ffai_qmm_mma` but
 // operates on int8-packed weights (4 bytes per u32, `pack_factor=4`).
 //
-// Geometry (identical to mt_qmm_mma):
+// Geometry (identical to ffai_qmm_mma):
 //   tpg = 128 = 4 SG × 32 lanes (WM=2, WN=2 warp grid)
 //   BM = BN = BK = 32, output tile 32×32 (1024 outputs/TG)
 //   Grid: [N/32, M/32, 1]
@@ -2725,10 +2725,10 @@ pub fn mt_qmm_mma_m16<T>(
 //   All 4 values in a pack share the same group (4 < 64).
 //
 // TG memory layout: identical Xs[32×36] / Ws[32×36] shape (skew=4).
-// X load: same as mt_qmm_mma (8 contiguous K elems per lane, vec4 fusion).
-// MMA inner loop: identical to mt_qmm_mma (4 k-inner × 4 frags = 16 MMAs/SG).
+// X load: same as ffai_qmm_mma (8 contiguous K elems per lane, vec4 fusion).
+// MMA inner loop: identical to ffai_qmm_mma (4 k-inner × 4 frags = 16 MMAs/SG).
 #[kernel]
-pub fn mt_qmm_mma_int8<T>(
+pub fn ffai_qmm_mma_int8<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -2747,14 +2747,14 @@ pub fn mt_qmm_mma_int8<T>(
     let sm = sg / 2u32;
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
-    // 8×8 frag lane mapping (Apple steel_gemm layout — same as mt_qmm_mma).
+    // 8×8 frag lane mapping (Apple steel_gemm layout — same as ffai_qmm_mma).
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
     let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
     let fn1 = fn0 + 1u32;
     // TG memory for X tile [BM × BK] and dequant W tile [BN × BK].
     // BK + 4 = 36 stride for bank-conflict avoidance — same skew rationale
-    // as mt_qmm_mma. Xs size = 32 × 36 = 1152 T; Ws size = 32 × 36 = 1152 T.
+    // as ffai_qmm_mma. Xs size = 32 × 36 = 1152 T; Ws size = 32 × 36 = 1152 T.
     threadgroup_alloc("xs", 1152, T);
     threadgroup_alloc("ws", 1152, T);
     // ── 4 output frags per SG, init to 0 ──
@@ -2785,7 +2785,7 @@ pub fn mt_qmm_mma_int8<T>(
     let xs_ld = xs_ld_const;
     let ws_ld = ws_ld_const;
     // Coop X-load mapping. 32×32 = 1024 elements, 128 lanes × 8 elems each.
-    // Same vec4-fusion layout as mt_qmm_mma: lane_in_tg/4 = m_row, lane_in_tg%4 = k_quad.
+    // Same vec4-fusion layout as ffai_qmm_mma: lane_in_tg/4 = m_row, lane_in_tg%4 = k_quad.
     let x_m_row = lane_in_tg / 4u32;
     let x_k_quad = lane_in_tg & 3u32;
     let x_k_base = x_k_quad * 8u32;
@@ -2857,7 +2857,7 @@ pub fn mt_qmm_mma_int8<T>(
         threadgroup_store("ws", ws_base_1 + 3u32, (s_1 * q3_1 + b_1).cast::<T>());
         threadgroup_barrier();
         // ── 3. MMA inner loop — 4 frags × 4 k-inner = 16 MMAs per SG ──
-        // Identical to mt_qmm_mma: A-load, barrier, B-load, barrier, MMAs,
+        // Identical to ffai_qmm_mma: A-load, barrier, B-load, barrier, MMAs,
         // barrier; serpentine MMA order (00→01→11→10).
         let row_a0 = sm * 16u32 + fm; // frag_m = 0
         let row_a1 = sm * 16u32 + 8u32 + fm; // frag_m = 8
@@ -2964,12 +2964,12 @@ pub fn mt_qmm_mma_int8<T>(
     );
 }
 
-// ─── mt_qmm_mma_m16_int8 ────────────────────────────────────────────────
+// ─── ffai_qmm_mma_m16_int8 ────────────────────────────────────────────────
 //
 // Int8 half-height MMA — the M=16 cell, int8 weights.
-// Mirrors `mt_qmm_mma_m16` but with int8 pack format (4 bytes/u32).
+// Mirrors `ffai_qmm_mma_m16` but with int8 pack format (4 bytes/u32).
 //
-// Geometry (identical to mt_qmm_mma_m16):
+// Geometry (identical to ffai_qmm_mma_m16):
 //   tpg = 64 = 2 SG × 32 lanes (WM=1, WN=2 warp grid)
 //   BM = 16, BN = BK = 32 → 16×32 output tile (512 outputs/TG)
 //   Grid: [N/32, M/16, 1]
@@ -2982,12 +2982,12 @@ pub fn mt_qmm_mma_int8<T>(
 //   w_row = pack_idx / 8, pack_in_row = pack_idx % 8.
 //   Each pack dequants 4 bytes → Ws[w_row*ws_ld + pack_in_row*4 + i].
 //
-// X load: mt_qmm_mma_m16 flat-stride pattern (8 strides of 64 lanes covering
+// X load: ffai_qmm_mma_m16 flat-stride pattern (8 strides of 64 lanes covering
 // the 512-element Xs tile). Same as int4.
 //
-// MMA inner loop: identical to mt_qmm_mma_m16 (no A/B barrier; 4 k-inner).
+// MMA inner loop: identical to ffai_qmm_mma_m16 (no A/B barrier; 4 k-inner).
 #[kernel]
-pub fn mt_qmm_mma_m16_int8<T>(
+pub fn ffai_qmm_mma_m16_int8<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -3005,7 +3005,7 @@ pub fn mt_qmm_mma_m16_int8<T>(
     let sm = 0u32;
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
-    // 8×8 frag lane mapping (Apple steel_gemm layout — same as mt_qmm_mma).
+    // 8×8 frag lane mapping (Apple steel_gemm layout — same as ffai_qmm_mma).
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
     let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
@@ -3285,13 +3285,13 @@ pub fn mt_qmm_mma_m16_int8<T>(
     );
 }
 
-// ─── mt_qmm_mma_int2 ────────────────────────────────────────────────────
+// ─── ffai_qmm_mma_int2 ────────────────────────────────────────────────────
 //
-// Int2-quantized simdgroup-matrix MMA prefill — mirrors `mt_qmm_mma` but
+// Int2-quantized simdgroup-matrix MMA prefill — mirrors `ffai_qmm_mma` but
 // operates on int2-packed weights (16 codes per u32, `pack_factor=16`).
 // Sized for the 2-bit affine path used at very-low-bit decode-time matmuls.
 //
-// Geometry (identical to mt_qmm_mma):
+// Geometry (identical to ffai_qmm_mma):
 //   tpg = 128 = 4 SG × 32 lanes (WM=2, WN=2 warp grid)
 //   BM = BN = BK = 32, output tile 32×32 (1024 outputs/TG)
 //   Grid: [N/32, M/32, 1]
@@ -3319,15 +3319,15 @@ pub fn mt_qmm_mma_m16_int8<T>(
 //   a K-block share one group (32 < 64 and kb is K-block-aligned).
 //
 // TG memory layout: identical Xs[32×36] / Ws[32×36] shape (skew=4).
-// X load: same as mt_qmm_mma (8 contiguous K elems per lane, vec4 fusion).
-// MMA inner loop: identical to mt_qmm_mma (4 k-inner × 4 frags = 16 MMAs/SG).
+// X load: same as ffai_qmm_mma (8 contiguous K elems per lane, vec4 fusion).
+// MMA inner loop: identical to ffai_qmm_mma (4 k-inner × 4 frags = 16 MMAs/SG).
 //
 // At max_q=3 (vs int4's 15, int8's 255) the per-group quantization error
 // is the loosest of any variant — bench tol matches int4/int8 at 1e-2;
 // cosine similarity at production shapes is the relevant signal, not abs
 // error (small element magnitudes dominate).
 #[kernel]
-pub fn mt_qmm_mma_int2<T>(
+pub fn ffai_qmm_mma_int2<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -3346,14 +3346,14 @@ pub fn mt_qmm_mma_int2<T>(
     let sm = sg / 2u32;
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
-    // 8×8 frag lane mapping (Apple steel_gemm layout — same as mt_qmm_mma).
+    // 8×8 frag lane mapping (Apple steel_gemm layout — same as ffai_qmm_mma).
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
     let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
     let fn1 = fn0 + 1u32;
     // TG memory for X tile [BM × BK] and dequant W tile [BN × BK].
     // BK + 4 = 36 stride for bank-conflict avoidance — same skew rationale
-    // as mt_qmm_mma. Xs size = 32 × 36 = 1152 T; Ws size = 32 × 36 = 1152 T.
+    // as ffai_qmm_mma. Xs size = 32 × 36 = 1152 T; Ws size = 32 × 36 = 1152 T.
     threadgroup_alloc("xs", 1152, T);
     threadgroup_alloc("ws", 1152, T);
     // ── 4 output frags per SG, init to 0 ──
@@ -3384,7 +3384,7 @@ pub fn mt_qmm_mma_int2<T>(
     let xs_ld = xs_ld_const;
     let ws_ld = ws_ld_const;
     // Coop X-load mapping. 32×32 = 1024 elements, 128 lanes × 8 elems each.
-    // Same vec4-fusion layout as mt_qmm_mma: lane_in_tg/4 = m_row, lane_in_tg%4 = k_quad.
+    // Same vec4-fusion layout as ffai_qmm_mma: lane_in_tg/4 = m_row, lane_in_tg%4 = k_quad.
     let x_m_row = lane_in_tg / 4u32;
     let x_k_quad = lane_in_tg & 3u32;
     let x_k_base = x_k_quad * 8u32;
@@ -3458,7 +3458,7 @@ pub fn mt_qmm_mma_int2<T>(
         }
         threadgroup_barrier();
         // ── 3. MMA inner loop — 4 frags × 4 k-inner = 16 MMAs per SG ──
-        // Identical to mt_qmm_mma_int8: A-load, barrier, B-load, barrier,
+        // Identical to ffai_qmm_mma_int8: A-load, barrier, B-load, barrier,
         // MMAs in serpentine (00→01→11→10) order, barrier; 4 k-inner.
         let row_a0 = sm * 16u32 + fm; // frag_m = 0
         let row_a1 = sm * 16u32 + 8u32 + fm; // frag_m = 8
@@ -3561,7 +3561,7 @@ pub fn mt_qmm_mma_int2<T>(
     );
 }
 
-// ─── mt_affine_dequantize_int4 ─────────────────────────────────────────
+// ─── ffai_affine_dequantize_int4 ─────────────────────────────────────────
 //
 // One thread per pack (8 nibbles in one uint32). For each output i in
 // 0..8: `q = (val >> (i*4)) & 0xf`, then `out[oindex+i] = scale * q + bias`
@@ -3572,7 +3572,7 @@ pub fn mt_qmm_mma_int2<T>(
 // same output (MLX views weights as `uint8_t*`, ours as `Tensor<u32>` —
 // same bits, different lens).
 #[kernel]
-pub fn mt_affine_dequantize_int4<T>(
+pub fn ffai_affine_dequantize_int4<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -3604,7 +3604,7 @@ pub fn mt_affine_dequantize_int4<T>(
     store(out[oindex + 7u32], (scale * q7.cast::<f32>() + bias).cast::<T>());
 }
 
-// ─── mt_affine_quantize_int4 ───────────────────────────────────────────
+// ─── ffai_affine_quantize_int4 ───────────────────────────────────────────
 //
 // Inverse of dequantize: one threadgroup per group, finds min/max over
 // the group, computes scale/bias, then packs 8 nibbles per uint32. The
@@ -3626,7 +3626,7 @@ pub fn mt_affine_dequantize_int4<T>(
 // Bigger group sizes or other bit widths follow the same template with
 // different constants.
 #[kernel]
-pub fn mt_affine_quantize_int4<T>(
+pub fn ffai_affine_quantize_int4<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -3670,7 +3670,7 @@ pub fn mt_affine_quantize_int4<T>(
     }
 }
 
-// ─── mt_affine_dequantize_int8 ─────────────────────────────────────────
+// ─── ffai_affine_dequantize_int8 ─────────────────────────────────────────
 //
 // One thread per pack (4 bytes in one uint32). Same shape as int4 but
 // each pack covers 4 output values instead of 8, and bit-extraction
@@ -3678,7 +3678,7 @@ pub fn mt_affine_quantize_int4<T>(
 //
 // Faithful port of MLX `affine_dequantize<T, group_size, 8>`.
 #[kernel]
-pub fn mt_affine_dequantize_int8<T>(
+pub fn ffai_affine_dequantize_int8<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -3702,9 +3702,9 @@ pub fn mt_affine_dequantize_int8<T>(
     store(out[oindex + 3u32], (scale * q3.cast::<f32>() + bias).cast::<T>());
 }
 
-// ─── mt_affine_quantize_int8 ───────────────────────────────────────────
+// ─── ffai_affine_quantize_int8 ───────────────────────────────────────────
 #[kernel]
-pub fn mt_affine_quantize_int8<T>(
+pub fn ffai_affine_quantize_int8<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -3748,7 +3748,7 @@ pub fn mt_affine_quantize_int8<T>(
     }
 }
 
-// ─── mt_affine_dequantize_int2 ─────────────────────────────────────────
+// ─── ffai_affine_dequantize_int2 ─────────────────────────────────────────
 //
 // One thread per pack (16 two-bit values in one uint32). `bits=2` packs
 // cleanly into a uint32 (16 values, no byte-stream crossing), so this
@@ -3759,7 +3759,7 @@ pub fn mt_affine_quantize_int8<T>(
 // Faithful port of MLX `affine_dequantize<T, group_size, 2>` from
 // `quantized.h`.
 #[kernel]
-pub fn mt_affine_dequantize_int2<T>(
+pub fn ffai_affine_dequantize_int2<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -3780,17 +3780,17 @@ pub fn mt_affine_dequantize_int2<T>(
     }
 }
 
-// ─── mt_affine_quantize_int2 ───────────────────────────────────────────
+// ─── ffai_affine_quantize_int2 ───────────────────────────────────────────
 //
-// Inverse of `mt_affine_dequantize_int2`. One threadgroup of 32 threads
+// Inverse of `ffai_affine_dequantize_int2`. One threadgroup of 32 threads
 // per group: each lane covers `group_size / 32 = 2` input values, the
 // min/max reduce runs over the simdgroup, then `packs_per_group =
 // group_size / 16` lanes each assemble one uint32 (16 two-bit codes).
 //
-// n_bins = 3 (`2^2 - 1`). Same template as `mt_affine_quantize_int4`
+// n_bins = 3 (`2^2 - 1`). Same template as `ffai_affine_quantize_int4`
 // with the pack width widened from 8 nibbles to 16 two-bit fields.
 #[kernel]
-pub fn mt_affine_quantize_int2<T>(
+pub fn ffai_affine_quantize_int2<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -3850,9 +3850,9 @@ pub fn mt_affine_quantize_int2<T>(
 // stream serially (iterating over all group_size elements, ORing each
 // code's bits into the correct uint32 word at the right shift).
 //
-// Bit layouts are the exact inverse of `mt_affine_dequantize_int{3,5,6}`.
+// Bit layouts are the exact inverse of `ffai_affine_dequantize_int{3,5,6}`.
 
-// ─── mt_affine_quantize_int3 ──────────────────────────────────────────
+// ─── ffai_affine_quantize_int3 ──────────────────────────────────────────
 //
 // int3 (3-bit codes): 96-bit stream for group_size=32.
 // Lane 0 iterates over all 32 values, computes q = clamp(round(v), 0, 7),
@@ -3868,7 +3868,7 @@ pub fn mt_affine_quantize_int2<T>(
 // - Reduction mode (simd_min / simd_max). TPG = 32 (one simdgroup).
 // - Grid: [n_groups, 1, 1].
 #[kernel]
-pub fn mt_affine_quantize_int3<T>(
+pub fn ffai_affine_quantize_int3<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -3923,7 +3923,7 @@ pub fn mt_affine_quantize_int3<T>(
     }
 }
 
-// ─── mt_affine_quantize_int5 ──────────────────────────────────────────
+// ─── ffai_affine_quantize_int5 ──────────────────────────────────────────
 //
 // int5 (5-bit codes): 160-bit stream for group_size=32 (5 uint32 words).
 // Same bit-stream OR strategy as int3 but with 5 output words.
@@ -3932,7 +3932,7 @@ pub fn mt_affine_quantize_int3<T>(
 // - Reduction mode (simd_min / simd_max). TPG = 32 (one simdgroup).
 // - Grid: [n_groups, 1, 1].
 #[kernel]
-pub fn mt_affine_quantize_int5<T>(
+pub fn ffai_affine_quantize_int5<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -3993,7 +3993,7 @@ pub fn mt_affine_quantize_int5<T>(
     }
 }
 
-// ─── mt_affine_quantize_int6 ──────────────────────────────────────────
+// ─── ffai_affine_quantize_int6 ──────────────────────────────────────────
 //
 // int6 (6-bit codes): 192-bit stream for group_size=32 (6 uint32 words).
 // Same bit-stream OR strategy as int3/int5 but with 6 output words.
@@ -4002,7 +4002,7 @@ pub fn mt_affine_quantize_int5<T>(
 // - Reduction mode (simd_min / simd_max). TPG = 32 (one simdgroup).
 // - Grid: [n_groups, 1, 1].
 #[kernel]
-pub fn mt_affine_quantize_int6<T>(
+pub fn ffai_affine_quantize_int6<T>(
     w: Tensor<T>,
     mut out: Tensor<u32>,
     mut scales: Tensor<T>,
@@ -4078,7 +4078,7 @@ pub fn mt_affine_quantize_int6<T>(
 // exactly.
 
 #[kernel]
-pub fn mt_affine_dequantize_int3<T>(
+pub fn ffai_affine_dequantize_int3<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4124,7 +4124,7 @@ pub fn mt_affine_dequantize_int3<T>(
 }
 
 #[kernel]
-pub fn mt_affine_dequantize_int5<T>(
+pub fn ffai_affine_dequantize_int5<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4176,7 +4176,7 @@ pub fn mt_affine_dequantize_int5<T>(
 }
 
 #[kernel]
-pub fn mt_affine_dequantize_int6<T>(
+pub fn ffai_affine_dequantize_int6<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4217,13 +4217,13 @@ pub fn mt_affine_dequantize_int6<T>(
 // Multi-bit-width quantized matvec / vecmat / matmul family
 // ═══════════════════════════════════════════════════════════════════════
 //
-// The hand-unrolled `mt_qmv` / `mt_qmm*` above are int4-only, f32+f16 —
+// The hand-unrolled `ffai_qmv` / `ffai_qmm*` above are int4-only, f32+f16 —
 // the production hot path. This section closes the rest of the
 // `affine_qmv / qvm / qmm` coverage gap with a clean, generic family:
 //
-//   - `mt_qmv_b{3,4,5,6,8}`  — quantized matvec, `y = W · x`
-//   - `mt_qvm_b{3,4,5,6,8}`  — quantized vecmat, `y = xᵀ · W`
-//   - `mt_qmm_b{3,4,5,6,8}`  — quantized matmul (batched matvec)
+//   - `ffai_qmv_b{3,4,5,6,8}`  — quantized matvec, `y = W · x`
+//   - `ffai_qvm_b{3,4,5,6,8}`  — quantized vecmat, `y = xᵀ · W`
+//   - `ffai_qmm_b{3,4,5,6,8}`  — quantized matmul (batched matvec)
 //
 // Every kernel is generic over `T` (so **bf16** flows through the same
 // body — closing the bf16 gap) and parameterised on bit-width via an
@@ -4233,7 +4233,7 @@ pub fn mt_affine_dequantize_int6<T>(
 //
 // These are correctness-first scalar kernels — one threadgroup per
 // output element, lanes stride the K dimension, `simd_sum` reduces.
-// They are not the perf path (the unrolled int4 `mt_qmv`/`mt_qmm*`
+// They are not the perf path (the unrolled int4 `ffai_qmv`/`ffai_qmm*`
 // remain that, and the NAX/MMA qmm variant is upstream PR #137); they
 // exist so every MLX `affine_qmv/qvm/qmm` bit-width × dtype cell has a
 // ffai-kernels kernel + a GPU correctness test behind it.
@@ -4272,15 +4272,15 @@ pub fn mt_affine_dequantize_int6<T>(
 // bit-widths (two-word bit-stream extraction). Each body is parameterised
 // on BITS via `#[kernel(variants(...))]`.
 //
-// `mt_qmm_b*` is the M-batched form of `mt_qmv_b*`; the bodies are
+// `ffai_qmm_b*` is the M-batched form of `ffai_qmv_b*`; the bodies are
 // identical — dispatch `grid = [N, M, 1]` for batched, `[N, 1, 1]` for
 // the plain matvec.
 
 /// Quantized matvec / matmul (`y = W · x`) — pow2 bit-widths (4, 8).
 /// W is `[N, K]` row-major; element `(row, d)` lives in a pack-aligned u32.
-/// Produces: `mt_qmv_b4`, `mt_qmv_b8`.
+/// Produces: `ffai_qmv_b4`, `ffai_qmv_b8`.
 #[kernel(variants(BITS = [4u32, 8u32], suffix = "b{BITS}"))]
-pub fn mt_qmv<T>(
+pub fn ffai_qmv<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4334,9 +4334,9 @@ pub fn mt_qmv<T>(
 /// Quantized matvec / matmul (`y = W · x`) — odd bit-widths (3, 5, 6).
 /// W is `[N, K]` bit-stream-packed; element `(row, d)` may straddle two
 /// consecutive u32 words.
-/// Produces: `mt_qmv_odd_b3`, `mt_qmv_odd_b5`, `mt_qmv_odd_b6`.
+/// Produces: `ffai_qmv_odd_b3`, `ffai_qmv_odd_b5`, `ffai_qmv_odd_b6`.
 #[kernel(variants(BITS = [3u32, 5u32, 6u32], suffix = "b{BITS}"))]
-pub fn mt_qmv_odd<T>(
+pub fn ffai_qmv_odd<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4393,11 +4393,11 @@ pub fn mt_qmv_odd<T>(
 }
 
 /// Quantized matmul / batched matvec (`y = W · x`) — pow2 bit-widths.
-/// Identical body to `mt_qmv`; registered under `qmm_b*` so the bench
+/// Identical body to `ffai_qmv`; registered under `qmm_b*` so the bench
 /// scoreboard tracks it separately. Dispatch `grid = [N, M, 1]`.
-/// Produces: `mt_qmm_b4`, `mt_qmm_b8`.
+/// Produces: `ffai_qmm_b4`, `ffai_qmm_b8`.
 #[kernel(variants(BITS = [4u32, 8u32], suffix = "b{BITS}"))]
-pub fn mt_qmm<T>(
+pub fn ffai_qmm<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4445,9 +4445,9 @@ pub fn mt_qmm<T>(
 }
 
 /// Quantized matmul (`y = W · x`) — odd bit-widths.
-/// Produces: `mt_qmm_odd_b3`, `mt_qmm_odd_b5`, `mt_qmm_odd_b6`.
+/// Produces: `ffai_qmm_odd_b3`, `ffai_qmm_odd_b5`, `ffai_qmm_odd_b6`.
 #[kernel(variants(BITS = [3u32, 5u32, 6u32], suffix = "b{BITS}"))]
-pub fn mt_qmm_odd<T>(
+pub fn ffai_qmm_odd<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4505,9 +4505,9 @@ pub fn mt_qmm_odd<T>(
 
 /// Quantized vecmat (`y = xᵀ · W`) — pow2 bit-widths. W is `[K, N]`
 /// row-major; output column `c` sums over K, reading element `(d, c)`.
-/// Produces: `mt_qvm_b4`, `mt_qvm_b8`.
+/// Produces: `ffai_qvm_b4`, `ffai_qvm_b8`.
 #[kernel(variants(BITS = [4u32, 8u32], suffix = "b{BITS}"))]
-pub fn mt_qvm<T>(
+pub fn ffai_qvm<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4556,9 +4556,9 @@ pub fn mt_qvm<T>(
 
 /// Quantized vecmat (`y = xᵀ · W`) — odd bit-widths. W is `[K, N]`
 /// bit-stream-packed.
-/// Produces: `mt_qvm_odd_b3`, `mt_qvm_odd_b5`, `mt_qvm_odd_b6`.
+/// Produces: `ffai_qvm_odd_b3`, `ffai_qvm_odd_b5`, `ffai_qvm_odd_b6`.
 #[kernel(variants(BITS = [3u32, 5u32, 6u32], suffix = "b{BITS}"))]
-pub fn mt_qvm_odd<T>(
+pub fn ffai_qvm_odd<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4610,7 +4610,7 @@ pub fn mt_qvm_odd<T>(
     }
 }
 
-// ─── mt_qvm_int4_fast ─────────────────────────────────────────────────
+// ─── ffai_qvm_int4_fast ─────────────────────────────────────────────────
 //
 // Perf-tuned int4 vecmat `y = xᵀ · W` where W is `[K, N]` row-major.
 //
@@ -4654,13 +4654,13 @@ pub fn mt_qvm_odd<T>(
 //   group_size: 64 (standard Qwen3 gs=64).
 
 /// Perf-tuned int4 vecmat `y = xᵀ · W`, W `[K, N]` — 8 output columns
-/// per TG, mirroring `mt_qmv`'s 8-row geometry with K/N transposed.
+/// per TG, mirroring `ffai_qmv`'s 8-row geometry with K/N transposed.
 ///
 /// Each simdgroup handles 4 consecutive output columns. Lane-strided over
 /// K: each lane covers `K/32` K-positions. Grid: `[N/8, 1, 1]`, TPG = 64,
 /// group_size = 64.
 #[kernel]
-pub fn mt_qvm_int4_fast<T>(
+pub fn ffai_qvm_int4_fast<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4780,9 +4780,9 @@ pub fn mt_qvm_int4_fast<T>(
     }
 }
 
-// ─── mt_qmm_mma_b{3,5,6} — bit-stream MMA for odd bit-widths ────────────────
+// ─── ffai_qmm_mma_b{3,5,6} — bit-stream MMA for odd bit-widths ────────────────
 //
-// Bit-width-generalized siblings of `mt_qmm_mma` for int3 / int5 / int6
+// Bit-width-generalized siblings of `ffai_qmm_mma` for int3 / int5 / int6
 // quantized dense GEMM. Identical tiled-MMA geometry (BM=BN=BK=32, 4 SGs,
 // 2×2 warp grid) — the *only* change is the per-lane W dequant: instead
 // of the int4-specific 8-nibble unpack, the weight row is treated as a
@@ -4800,7 +4800,7 @@ pub fn mt_qvm_int4_fast<T>(
 // Grid: [N/32, M/32, 1], tpg=128 (4 SG × 32 lanes).
 /// Odd-bit-width MMA quantized matmul — variable bit-widths (3, 5, 6).
 ///
-/// Produces kernels: `mt_qmm_mma_b3`, `mt_qmm_mma_b5`, `mt_qmm_mma_b6`.
+/// Produces kernels: `ffai_qmm_mma_b3`, `ffai_qmm_mma_b5`, `ffai_qmm_mma_b6`.
 ///
 /// Each variant is a cooperative-dequant GEMM that unpacks `BITS`-wide
 /// LSB-first codes from the bit-stream weight layout, dequantizes via
@@ -4815,7 +4815,7 @@ pub fn mt_qvm_int4_fast<T>(
 /// Grid: `[N/32, M/32, 1]`, tpg = 128 (4 SG × 32 lanes).
 #[kernel(variants(BITS = [3, 5, 6], suffix = "b{BITS}"))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_qmm_mma<T>(
+pub fn ffai_qmm_mma<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -4867,7 +4867,7 @@ pub fn mt_qmm_mma<T>(
     let w_row = lane_in_tg / 4u32;
     let pack_in_row = lane_in_tg & 3u32;
 
-    // X coop-load lane assignments: same shape as mt_qmm_mma.
+    // X coop-load lane assignments: same shape as ffai_qmm_mma.
     let x_m_row = lane_in_tg / 4u32;
     let x_k_quad = lane_in_tg & 3u32;
     let x_k_base = x_k_quad * 8u32;
@@ -4884,7 +4884,7 @@ pub fn mt_qmm_mma<T>(
     let w_row_base = (w_n_base + w_row) * u32_per_row;
 
     for kb in range(0u32, k, 32u32) {
-        // ── 1. Coop X load — identical to mt_qmm_mma ──
+        // ── 1. Coop X load — identical to ffai_qmm_mma ──
         let x_row_dev_base = (x_m_base + x_m_row) * k + kb + x_k_base;
         let x_ws_base = x_m_row * xs_ld + x_k_base;
         let xv0 = load(x[x_row_dev_base]).cast::<T>();
@@ -4937,7 +4937,7 @@ pub fn mt_qmm_mma<T>(
         threadgroup_barrier();
 
         // ── 3. MMA inner loop — 4 frags × 4 k-inner ──
-        // Identical to mt_qmm_mma: serpentine (0,0)→(0,1)→(1,1)→(1,0).
+        // Identical to ffai_qmm_mma: serpentine (0,0)→(0,1)→(1,1)→(1,0).
         let row_a0 = sm * 16u32 + fm;
         let row_a1 = sm * 16u32 + 8u32 + fm;
         let col_b0 = sn * 16u32;
@@ -5045,7 +5045,7 @@ pub fn mt_qmm_mma<T>(
     );
 }
 
-/// Auto-select the best `mt_qmm*` kernel for a given dtype + M
+/// Auto-select the best `ffai_qmm*` kernel for a given dtype + M
 /// (number of tokens / batched rows in this prefill). Returns the
 /// kernel IR ready to dispatch. Caller still owns grid sizing — see
 /// the table in the docstring for the per-route grid shape.
@@ -5058,7 +5058,7 @@ pub fn mt_qmm_mma<T>(
 /// | `m == 16`            | `mma_m16`   | Half-height MMA (BM=16, BN=32) — beats bm4 here   |
 /// | `m >= 4 && m%4==0`   | `bm4`       | BM=4 hand-unroll, K=256 (M=8, 12, 20, 24, 28)     |
 /// | `m >= 2 && m%2==0`   | `bm2`       | BM=2 hand-unroll (M=2, 6, 10, 14, 18, 22, 26, 30) |
-/// | M=1 / odd M          | `mt_qmm`    | v2 (any M, including 1)                            |
+/// | M=1 / odd M          | `ffai_qmm`    | v2 (any M, including 1)                            |
 ///
 /// Per-cell wins vs MLX `affine_qmm_t` (5-run median, both rigs):
 ///
@@ -5071,32 +5071,32 @@ pub fn mt_qmm_mma<T>(
 /// At M=32, mma f32 essentially at MLX parity; f16 remains 9-16pt
 /// below MLX (open follow-up — 4 layered tweaks identified by the
 /// MLX archaeology study at `/tmp/mlx_archaeology.md`).
-pub fn mt_qmm_for(
+pub fn ffai_qmm_for(
     dtype: ffai_kernels::core::dtype::DType,
     m: u32,
 ) -> ffai_kernels::core::ir::Kernel {
     use ffai_kernels::core::ir::KernelMode;
     let mut k = if m >= 32 && m.is_multiple_of(32) {
         // Full simdgroup-matrix MMA path (M=32, 64, 96, ...).
-        let mut kk = mt_qmm_mma::kernel_ir_for(dtype);
+        let mut kk = ffai_qmm_mma::kernel_ir_for(dtype);
         patch_qmm_mma_dtype_aware_skew(&mut kk, dtype);
         kk
     } else if m == 16 {
         // Half-height MMA — half tpg → 2× occupancy. Wins M=16 cell
-        // on both rigs (119-176% MT MLX vs bm4's 76-146%).
-        mt_qmm_mma_m16::kernel_ir_for(dtype)
+        // on both rigs (119-176% FFAI MLX vs bm4's 76-146%).
+        ffai_qmm_mma_m16::kernel_ir_for(dtype)
     } else if m >= 4 && m.is_multiple_of(4) {
         // BM=4 K=256 — M=8, 12, 20, 24, 28.
-        mt_qmm_bm4::kernel_ir_for(dtype)
+        ffai_qmm_bm4::kernel_ir_for(dtype)
     } else if m >= 2 && m.is_multiple_of(2) {
         // BM=2 — M=2, 6, 10, 14, 18, 22, 26, 30.
-        mt_qmm_bm2::kernel_ir_for(dtype)
+        ffai_qmm_bm2::kernel_ir_for(dtype)
     } else {
         // M=1 + odd M ≥ 3 — bm2/bm4/mma* undefined (need even M).
-        mt_qmm::kernel_ir_for(dtype)
+        ffai_qmm::kernel_ir_for(dtype)
     };
     // Reduction mode required for the `tgid_x`/`tgid_y` aliases all
-    // kernels reference. Same dispatch contract as `mt_qmv`.
+    // kernels reference. Same dispatch contract as `ffai_qmv`.
     k.mode = KernelMode::Reduction;
     k
 }
@@ -5171,61 +5171,61 @@ mod qmm_selector_tests {
     fn selector_picks_mma_at_m_multiple_of_32() {
         // M % 32 == 0 → full simdgroup-matrix MMA tile.
         for m in [32u32, 64, 96, 128] {
-            let k = mt_qmm_for(DType::F32, m);
-            assert_eq!(k.name, "mt_qmm_mma", "m={m}: multiple of 32 should route to mma");
+            let k = ffai_qmm_for(DType::F32, m);
+            assert_eq!(k.name, "ffai_qmm_mma", "m={m}: multiple of 32 should route to mma");
         }
     }
 
     #[test]
     fn selector_picks_mma_m16_at_m_16() {
         // M = 16 → half-height MMA (mma_m16 beats bm4 + full mma there).
-        let k = mt_qmm_for(DType::F32, 16);
-        assert_eq!(k.name, "mt_qmm_mma_m16");
+        let k = ffai_qmm_for(DType::F32, 16);
+        assert_eq!(k.name, "ffai_qmm_mma_m16");
     }
 
     #[test]
     fn selector_picks_bm4_at_m_8_12_20_24_28() {
         // M % 4 == 0 cells NOT routed to mma/mma_m16 — bm4 covers them.
         for m in [4u32, 8, 12, 20, 24, 28, 36, 60] {
-            let k = mt_qmm_for(DType::F32, m);
-            assert_eq!(k.name, "mt_qmm_bm4", "m={m}: m%4==0 not mma should route to bm4");
+            let k = ffai_qmm_for(DType::F32, m);
+            assert_eq!(k.name, "ffai_qmm_bm4", "m={m}: m%4==0 not mma should route to bm4");
         }
     }
 
     #[test]
     fn selector_picks_bm2_at_even_m_not_multiple_of_4() {
         for m in [2u32, 6, 10, 14, 18, 22, 26, 30] {
-            let k = mt_qmm_for(DType::F32, m);
-            assert_eq!(k.name, "mt_qmm_bm2", "m={m}: even-not-mod-4 should route to bm2");
+            let k = ffai_qmm_for(DType::F32, m);
+            assert_eq!(k.name, "ffai_qmm_bm2", "m={m}: even-not-mod-4 should route to bm2");
         }
     }
 
     #[test]
     fn selector_picks_v2_at_m_1() {
-        let k = mt_qmm_for(DType::F32, 1);
-        assert_eq!(k.name, "mt_qmm");
+        let k = ffai_qmm_for(DType::F32, 1);
+        assert_eq!(k.name, "ffai_qmm");
     }
 
     #[test]
     fn selector_picks_v2_at_odd_m() {
         for m in [3u32, 5, 7, 9, 15, 31] {
-            let k = mt_qmm_for(DType::F32, m);
-            assert_eq!(k.name, "mt_qmm", "m={m}: odd M should route to v2");
+            let k = ffai_qmm_for(DType::F32, m);
+            assert_eq!(k.name, "ffai_qmm", "m={m}: odd M should route to v2");
         }
     }
 
     #[test]
     fn selector_picks_bm4_across_dtypes_at_m_8() {
         for dt in [DType::F32, DType::F16] {
-            let k = mt_qmm_for(dt, 8);
-            assert_eq!(k.name, "mt_qmm_bm4", "dt={dt:?}");
+            let k = ffai_qmm_for(dt, 8);
+            assert_eq!(k.name, "ffai_qmm_bm4", "dt={dt:?}");
         }
     }
 
     #[test]
     fn selector_kernels_carry_reduction_mode() {
         for m in [1u32, 4, 8, 16, 32] {
-            let k = mt_qmm_for(DType::F32, m);
+            let k = ffai_qmm_for(DType::F32, m);
             assert_eq!(
                 k.mode,
                 ffai_kernels::core::ir::KernelMode::Reduction,
@@ -5289,16 +5289,16 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 1e-1])]
     fn test_affine_dequantize_int4(dt: DType) -> TestSetup {
-        dequant_setup(mt_affine_dequantize_int4::kernel_ir_for(dt), 4, 64, 8, dt)
+        dequant_setup(ffai_affine_dequantize_int4::kernel_ir_for(dt), 4, 64, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_affine_dequantize_int8(dt: DType) -> TestSetup {
         // int8 codes span 0..255 → larger dequant magnitudes, wider tol.
-        dequant_setup(mt_affine_dequantize_int8::kernel_ir_for(dt), 8, 64, 4, dt)
+        dequant_setup(ffai_affine_dequantize_int8::kernel_ir_for(dt), 8, 64, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 1e-1])]
     fn test_affine_dequantize_int2(dt: DType) -> TestSetup {
-        dequant_setup(mt_affine_dequantize_int2::kernel_ir_for(dt), 2, 64, 16, dt)
+        dequant_setup(ffai_affine_dequantize_int2::kernel_ir_for(dt), 2, 64, 16, dt)
     }
 
     // ── affine dequantize, odd bit-widths (int3 / int5 / int6) ────────────
@@ -5383,15 +5383,15 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 1e-1])]
     fn test_affine_dequantize_int3(dt: DType) -> TestSetup {
-        dequant_odd_setup(mt_affine_dequantize_int3::kernel_ir_for(dt), 3, 8, 32, 4, dt)
+        dequant_odd_setup(ffai_affine_dequantize_int3::kernel_ir_for(dt), 3, 8, 32, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_affine_dequantize_int5(dt: DType) -> TestSetup {
-        dequant_odd_setup(mt_affine_dequantize_int5::kernel_ir_for(dt), 5, 8, 32, 4, dt)
+        dequant_odd_setup(ffai_affine_dequantize_int5::kernel_ir_for(dt), 5, 8, 32, 4, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 5e-1])]
     fn test_affine_dequantize_int6(dt: DType) -> TestSetup {
-        dequant_odd_setup(mt_affine_dequantize_int6::kernel_ir_for(dt), 6, 4, 32, 4, dt)
+        dequant_odd_setup(ffai_affine_dequantize_int6::kernel_ir_for(dt), 6, 4, 32, 4, dt)
     }
 
     // ── affine quantize (float → bit-stream) ──────────────────────────────
@@ -5400,7 +5400,7 @@ pub mod kernel_tests {
     // per-group `scales`, and per-group `biases`. The packed codes go through
     // a `round((v-bias)*inv_scale)` snap whose last bit is sensitive to Metal
     // fast-math FMA fusion (the legacy round-trip test in
-    // `tests/affine_int356_quantize_gpu_correctness.rs` (removed in #240)
+    // `tests/affine_int356_quantize_gpu_correctness.rs` (since removed)
     // sidesteps this by checking a quantize→dequantize round-trip within one
     // step). Here we pin the part
     // that is exact and the genuinely parallel hard part — the per-group
@@ -5446,27 +5446,27 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int2(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int2::kernel_ir_for(dt), 2, 64, 8, dt)
+        quantize_setup(ffai_affine_quantize_int2::kernel_ir_for(dt), 2, 64, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int3(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int3::kernel_ir_for(dt), 3, 32, 8, dt)
+        quantize_setup(ffai_affine_quantize_int3::kernel_ir_for(dt), 3, 32, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int4(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int4::kernel_ir_for(dt), 4, 64, 8, dt)
+        quantize_setup(ffai_affine_quantize_int4::kernel_ir_for(dt), 4, 64, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int5(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int5::kernel_ir_for(dt), 5, 32, 8, dt)
+        quantize_setup(ffai_affine_quantize_int5::kernel_ir_for(dt), 5, 32, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int6(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int6::kernel_ir_for(dt), 6, 32, 8, dt)
+        quantize_setup(ffai_affine_quantize_int6::kernel_ir_for(dt), 6, 32, 8, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-3, 1e-2])]
     fn test_affine_quantize_int8(dt: DType) -> TestSetup {
-        quantize_setup(mt_affine_quantize_int8::kernel_ir_for(dt), 8, 64, 8, dt)
+        quantize_setup(ffai_affine_quantize_int8::kernel_ir_for(dt), 8, 64, 8, dt)
     }
 
     // ── qmv / qmm matmul family (dequant-then-matmul oracle) ───────────────
@@ -5477,7 +5477,7 @@ pub mod kernel_tests {
     // tiling (K-blocks, BM tiles, MMA frags) is a performance detail that the
     // CPU oracle is blind to: a faithful dequant-then-matmul reference pins MSL
     // emit + dispatch wiring + index math against the IR (the same contract the
-    // legacy `tests/qmm_gpu_correctness.rs` (removed in #240) oracle checks).
+    // legacy `tests/qmm_gpu_correctness.rs` (since removed) oracle checks).
     // Inputs are kept small so
     // outputs are O(1) and an absolute tolerance is meaningful, and are
     // dtype-rounded so the oracle sees exactly what the kernel loads.
@@ -5580,12 +5580,12 @@ pub mod kernel_tests {
     // qmv (int4 / int8): 8 output rows per TG, 2 SG × 32 lanes, m=1 x-vector.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmv(dt: DType) -> TestSetup {
-        qx_setup(mt_qmv::kernel_ir_for(dt), 1, 32, 512, 4, 64, false, [4, 1, 1], [64, 1, 1], dt)
+        qx_setup(ffai_qmv::kernel_ir_for(dt), 1, 32, 512, 4, 64, false, [4, 1, 1], [64, 1, 1], dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmv_int8_fast(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmv_int8_fast::kernel_ir_for(dt),
+            ffai_qmv_int8_fast::kernel_ir_for(dt),
             1,
             32,
             512,
@@ -5601,21 +5601,43 @@ pub mod kernel_tests {
     // qmm (int4): grid [n/8, m/bm, 1], tpg 64.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm(dt: DType) -> TestSetup {
-        qx_setup(mt_qmm::kernel_ir_for(dt), 8, 16, 512, 4, 64, true, [2, 8, 1], [64, 1, 1], dt)
+        qx_setup(ffai_qmm::kernel_ir_for(dt), 8, 16, 512, 4, 64, true, [2, 8, 1], [64, 1, 1], dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_bm2(dt: DType) -> TestSetup {
-        qx_setup(mt_qmm_bm2::kernel_ir_for(dt), 8, 16, 512, 4, 64, true, [2, 4, 1], [64, 1, 1], dt)
+        qx_setup(
+            ffai_qmm_bm2::kernel_ir_for(dt),
+            8,
+            16,
+            512,
+            4,
+            64,
+            true,
+            [2, 4, 1],
+            [64, 1, 1],
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_bm4(dt: DType) -> TestSetup {
-        qx_setup(mt_qmm_bm4::kernel_ir_for(dt), 8, 16, 512, 4, 64, true, [2, 2, 1], [64, 1, 1], dt)
+        qx_setup(
+            ffai_qmm_bm4::kernel_ir_for(dt),
+            8,
+            16,
+            512,
+            4,
+            64,
+            true,
+            [2, 2, 1],
+            [64, 1, 1],
+            dt,
+        )
     }
     // qmm (int8): same grid contract, byte-extracted codes.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_int8_fast(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_int8_fast::kernel_ir_for(dt),
             8,
             16,
             512,
@@ -5630,7 +5652,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_bm2_int8_fast(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_bm2_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_bm2_int8_fast::kernel_ir_for(dt),
             8,
             16,
             512,
@@ -5645,7 +5667,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_bm4_int8_fast(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_bm4_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_bm4_int8_fast::kernel_ir_for(dt),
             8,
             16,
             512,
@@ -5663,7 +5685,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_mma(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_mma::kernel_ir_for(dt),
+            ffai_qmm_mma::kernel_ir_for(dt),
             32,
             64,
             512,
@@ -5678,7 +5700,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_mma_m16(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_mma_m16::kernel_ir_for(dt),
+            ffai_qmm_mma_m16::kernel_ir_for(dt),
             16,
             64,
             512,
@@ -5693,7 +5715,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_mma_int8(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_mma_int8::kernel_ir_for(dt),
+            ffai_qmm_mma_int8::kernel_ir_for(dt),
             32,
             64,
             512,
@@ -5708,7 +5730,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_mma_m16_int8(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_mma_m16_int8::kernel_ir_for(dt),
+            ffai_qmm_mma_m16_int8::kernel_ir_for(dt),
             16,
             64,
             512,
@@ -5723,7 +5745,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_mma_int2(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_mma_int2::kernel_ir_for(dt),
+            ffai_qmm_mma_int2::kernel_ir_for(dt),
             32,
             64,
             512,
@@ -5780,7 +5802,7 @@ pub mod kernel_tests {
         let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
         let x = unpack_f32(&pack_f32(&x_f, dt), dt);
         let expected = qvm_oracle(&w, &s, &b, &x, n, k, group_size);
-        TestSetup::new(mt_qvm_int4_fast::kernel_ir_for(dt))
+        TestSetup::new(ffai_qvm_int4_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("w", u32_bytes(&w), DType::U32))
             .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
@@ -5796,8 +5818,8 @@ pub mod kernel_tests {
 
     // ── Generic affine qmv/qvm/qmm family + odd-width MMA ─────────────────
     //
-    // These bit-width-parametric kernels (`mt_qmv_b*`, `mt_qvm_b*`,
-    // `mt_qmm_b*`, `mt_qmm_mma_b{3,5,6}`) read a per-row bit-stream weight:
+    // These bit-width-parametric kernels (`ffai_qmv_b*`, `ffai_qvm_b*`,
+    // `ffai_qmm_b*`, `ffai_qmm_mma_b{3,5,6}`) read a per-row bit-stream weight:
     // row `r` holds its codes contiguously starting at bit `r·cols·bits`.
     // Because `cols·bits` is a multiple of 32 for every shape here, the
     // per-row streams pack end-to-end into ONE global contiguous LSB-first
@@ -5962,11 +5984,11 @@ pub mod kernel_tests {
             }
         };
     }
-    qmv_test!(test_qmv_b3, mt_qmv_odd_b3, 3);
-    qmv_test!(test_qmv_b4, mt_qmv_b4, 4);
-    qmv_test!(test_qmv_b5, mt_qmv_odd_b5, 5);
-    qmv_test!(test_qmv_b6, mt_qmv_odd_b6, 6);
-    qmv_test!(test_qmv_b8, mt_qmv_b8, 8);
+    qmv_test!(test_qmv_b3, ffai_qmv_odd_b3, 3);
+    qmv_test!(test_qmv_b4, ffai_qmv_b4, 4);
+    qmv_test!(test_qmv_b5, ffai_qmv_odd_b5, 5);
+    qmv_test!(test_qmv_b6, ffai_qmv_odd_b6, 6);
+    qmv_test!(test_qmv_b8, ffai_qmv_b8, 8);
 
     // Generic qmm (M-batched matvec): grid [n, m, 1].
     macro_rules! qmm_test {
@@ -5988,11 +6010,11 @@ pub mod kernel_tests {
             }
         };
     }
-    qmm_test!(test_qmm_b3, mt_qmm_odd_b3, 3);
-    qmm_test!(test_qmm_b4, mt_qmm_b4, 4);
-    qmm_test!(test_qmm_b5, mt_qmm_odd_b5, 5);
-    qmm_test!(test_qmm_b6, mt_qmm_odd_b6, 6);
-    qmm_test!(test_qmm_b8, mt_qmm_b8, 8);
+    qmm_test!(test_qmm_b3, ffai_qmm_odd_b3, 3);
+    qmm_test!(test_qmm_b4, ffai_qmm_b4, 4);
+    qmm_test!(test_qmm_b5, ffai_qmm_odd_b5, 5);
+    qmm_test!(test_qmm_b6, ffai_qmm_odd_b6, 6);
+    qmm_test!(test_qmm_b8, ffai_qmm_b8, 8);
 
     // Generic qvm (vecmat, M=1): grid [n, 1, 1].
     macro_rules! qvm_test {
@@ -6003,11 +6025,11 @@ pub mod kernel_tests {
             }
         };
     }
-    qvm_test!(test_qvm_b3, mt_qvm_odd_b3, 3);
-    qvm_test!(test_qvm_b4, mt_qvm_b4, 4);
-    qvm_test!(test_qvm_b5, mt_qvm_odd_b5, 5);
-    qvm_test!(test_qvm_b6, mt_qvm_odd_b6, 6);
-    qvm_test!(test_qvm_b8, mt_qvm_b8, 8);
+    qvm_test!(test_qvm_b3, ffai_qvm_odd_b3, 3);
+    qvm_test!(test_qvm_b4, ffai_qvm_b4, 4);
+    qvm_test!(test_qvm_b5, ffai_qvm_odd_b5, 5);
+    qvm_test!(test_qvm_b6, ffai_qvm_odd_b6, 6);
+    qvm_test!(test_qvm_b8, ffai_qvm_b8, 8);
 
     // Odd-width simdgroup-matrix MMA (b3/b5/b6): grid [n/32, m/32, 1], tpg 128,
     // gs_per_row constexpr. Same per-row bit-stream weight as the generic path.
@@ -6030,9 +6052,9 @@ pub mod kernel_tests {
             }
         };
     }
-    qmm_mma_odd_test!(test_qmm_mma_b3, mt_qmm_mma_b3, 3);
-    qmm_mma_odd_test!(test_qmm_mma_b5, mt_qmm_mma_b5, 5);
-    qmm_mma_odd_test!(test_qmm_mma_b6, mt_qmm_mma_b6, 6);
+    qmm_mma_odd_test!(test_qmm_mma_b3, ffai_qmm_mma_b3, 3);
+    qmm_mma_odd_test!(test_qmm_mma_b5, ffai_qmm_mma_b5, 5);
+    qmm_mma_odd_test!(test_qmm_mma_b6, ffai_qmm_mma_b6, 6);
 }
 
 /// New-syntax benchmarks for the affine dequantize kernels.
@@ -6060,7 +6082,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 4, 8], suffix = "int{BITS}"))]
     fn bench_dequant_pow2(dt: DType) -> BenchSetup {
-        db(mt_affine_dequantize_intBITS::kernel_ir_for(dt), BITS, 64, 65536, dt)
+        db(ffai_affine_dequantize_intBITS::kernel_ir_for(dt), BITS, 64, 65536, dt)
     }
 
     // ── odd-bit dequant (int3/5/6) ─────────────────────────────────────────
@@ -6095,15 +6117,15 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_int3(dt: DType) -> BenchSetup {
-        db_odd(mt_affine_dequantize_int3::kernel_ir_for(dt), 8, 3, 32, 65536, dt)
+        db_odd(ffai_affine_dequantize_int3::kernel_ir_for(dt), 8, 3, 32, 65536, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_int5(dt: DType) -> BenchSetup {
-        db_odd(mt_affine_dequantize_int5::kernel_ir_for(dt), 8, 5, 32, 65536, dt)
+        db_odd(ffai_affine_dequantize_int5::kernel_ir_for(dt), 8, 5, 32, 65536, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_int6(dt: DType) -> BenchSetup {
-        db_odd(mt_affine_dequantize_int6::kernel_ir_for(dt), 4, 3, 32, 65536, dt)
+        db_odd(ffai_affine_dequantize_int6::kernel_ir_for(dt), 4, 3, 32, 65536, dt)
     }
 
     // ── affine quantize benches ───────────────────────────────────────────
@@ -6126,13 +6148,13 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [2, 4, 8], suffix = "int{BITS}"))]
     fn bench_quant_pow2(dt: DType) -> BenchSetup {
-        qb(mt_affine_quantize_intBITS::kernel_ir_for(dt), BITS, 64, 65536, dt)
+        qb(ffai_affine_quantize_intBITS::kernel_ir_for(dt), BITS, 64, 65536, dt)
     }
 
     #[bench(dtypes = [f32, f16, bf16],
             variants(BITS = [3, 5, 6], suffix = "int{BITS}"))]
     fn bench_quant_odd(dt: DType) -> BenchSetup {
-        qb(mt_affine_quantize_intBITS::kernel_ir_for(dt), BITS, 32, 65536, dt)
+        qb(ffai_affine_quantize_intBITS::kernel_ir_for(dt), BITS, 32, 65536, dt)
     }
 
     // ── qmv / qmm matmul-family benches ────────────────────────────────────
@@ -6292,15 +6314,15 @@ pub mod kernel_benches {
     /// any bit pattern is a valid packed quant code, and `Tiny` scales bound the
     /// dequantized magnitude regardless.
     ///
-    /// Why `Tiny`, not `Positive`/`Signed`: MT folds the dequant dot in f32
+    /// Why `Tiny`, not `Positive`/`Signed`: FFAI folds the dequant dot in f32
     /// while MLX rounds its output to the I/O dtype, so the A/B gap **scales with
     /// the output magnitude** (`≈ max_code × √K`). At K=4096 a `Positive`/`Signed`
     /// fill drives the f16/bf16 output to the thousands, where one output ULP
-    /// already exceeds the absolute tol (this is the PR #240 CI "Bench" failure,
+    /// already exceeds the absolute tol (this is the CI "Bench" failure,
     /// worse on the paravirtual CI GPU). `Tiny` keeps the output ≈ O(0.1), so the
     /// absolute gap shrinks ~30000× — comfortably inside tol — while the
     /// scale-invariant `cosine_sim` floor still guards against any *algorithmic*
-    /// MT-vs-MLX divergence (which tiny magnitudes can't mask).
+    /// FFAI-vs-MLX divergence (which tiny magnitudes can't mask).
     #[allow(clippy::too_many_arguments)]
     fn qmb_ref(
         kernel: Kernel,
@@ -6360,7 +6382,7 @@ pub mod kernel_benches {
     }
 
     // tol floors mirror the legacy quantized benches (qmv 1e-3, qmm 1e-2): the
-    // MT kernels fold the dequant dot in f32 while MLX accumulates in the
+    // FFAI kernels fold the dequant dot in f32 while MLX accumulates in the
     // simdgroup/tile dtype, so the A/B gap scales with `max_code × √K`.
     const QMV_TOL: f32 = 1e-3;
     const QMM_TOL: f32 = 1e-2;
@@ -6368,7 +6390,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmv::kernel_ir_for(dt),
+            ffai_qmv::kernel_ir_for(dt),
             1,
             4096,
             4096,
@@ -6384,7 +6406,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_int8_fast(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmv_int8_fast::kernel_ir_for(dt),
+            ffai_qmv_int8_fast::kernel_ir_for(dt),
             1,
             4096,
             4096,
@@ -6400,7 +6422,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm::kernel_ir_for(dt),
+            ffai_qmm::kernel_ir_for(dt),
             4,
             4096,
             4096,
@@ -6416,7 +6438,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_bm2(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_bm2::kernel_ir_for(dt),
+            ffai_qmm_bm2::kernel_ir_for(dt),
             8,
             4096,
             4096,
@@ -6432,7 +6454,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_bm4(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_bm4::kernel_ir_for(dt),
+            ffai_qmm_bm4::kernel_ir_for(dt),
             8,
             4096,
             4096,
@@ -6448,7 +6470,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_int8_fast(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_int8_fast::kernel_ir_for(dt),
             4,
             4096,
             4096,
@@ -6464,7 +6486,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_bm2_int8_fast(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_bm2_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_bm2_int8_fast::kernel_ir_for(dt),
             8,
             4096,
             4096,
@@ -6480,7 +6502,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_bm4_int8_fast(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_bm4_int8_fast::kernel_ir_for(dt),
+            ffai_qmm_bm4_int8_fast::kernel_ir_for(dt),
             8,
             4096,
             4096,
@@ -6496,7 +6518,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_mma::kernel_ir_for(dt),
+            ffai_qmm_mma::kernel_ir_for(dt),
             32,
             4096,
             4096,
@@ -6512,7 +6534,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_m16(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_mma_m16::kernel_ir_for(dt),
+            ffai_qmm_mma_m16::kernel_ir_for(dt),
             16,
             4096,
             4096,
@@ -6528,7 +6550,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_int8(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_mma_int8::kernel_ir_for(dt),
+            ffai_qmm_mma_int8::kernel_ir_for(dt),
             32,
             4096,
             4096,
@@ -6544,7 +6566,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_m16_int8(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_mma_m16_int8::kernel_ir_for(dt),
+            ffai_qmm_mma_m16_int8::kernel_ir_for(dt),
             16,
             4096,
             4096,
@@ -6560,7 +6582,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_int2(dt: DType) -> BenchSetup {
         qmb_ref(
-            mt_qmm_mma_int2::kernel_ir_for(dt),
+            ffai_qmm_mma_int2::kernel_ir_for(dt),
             32,
             4096,
             4096,
@@ -6581,7 +6603,7 @@ pub mod kernel_benches {
         let gs_per_col = k / group_size;
         let sz = dt.size_bytes();
         let bytes = n * k / 2 + 2 * gs_per_col * n * sz + k * sz + n * sz;
-        BenchSetup::new(mt_qvm_int4_fast::kernel_ir_for(dt))
+        BenchSetup::new(ffai_qvm_int4_fast::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("w", k * n / 8, DType::U32))
             .buffer(BenchBuffer::random("scales", gs_per_col * n, dt))
@@ -6600,7 +6622,7 @@ pub mod kernel_benches {
 
     // ── multi-bit-width qmv / qvm / qmm family (b3/b4/b5/b6/b8) ─────────────
     //
-    // The generic `mt_q{mv,vm,mm}_b*` kernels (correctness-first scalar bodies)
+    // The generic `ffai_q{mv,vm,mm}_b*` kernels (correctness-first scalar bodies)
     // differ from the hand-unrolled int4 `qmb` path in two ways the helper must
     // honour:
     //   1. They take a `group_size` constexpr (not `gs_per_row`), and always
@@ -6646,68 +6668,68 @@ pub mod kernel_benches {
     // qmv (matvec, M=1): grid [N, 1, 1].
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_b3(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmv_odd_b3::kernel_ir_for(dt), 1, 4096, 4096, 3, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qmv_odd_b3::kernel_ir_for(dt), 1, 4096, 4096, 3, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_b4(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmv_b4::kernel_ir_for(dt), 1, 4096, 4096, 4, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qmv_b4::kernel_ir_for(dt), 1, 4096, 4096, 4, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_b5(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmv_odd_b5::kernel_ir_for(dt), 1, 4096, 4096, 5, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qmv_odd_b5::kernel_ir_for(dt), 1, 4096, 4096, 5, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_b6(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmv_odd_b6::kernel_ir_for(dt), 1, 4096, 4096, 6, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qmv_odd_b6::kernel_ir_for(dt), 1, 4096, 4096, 6, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmv_b8(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmv_b8::kernel_ir_for(dt), 1, 4096, 4096, 8, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qmv_b8::kernel_ir_for(dt), 1, 4096, 4096, 8, 64, [4096, 1, 1], dt)
     }
 
     // qvm (vecmat, M=1): W is [K, N]; grid [N, 1, 1]. Same buffer totals as
     // qmv (n·k codes, n·gspr scales) — only the kernel's index math differs.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qvm_b3(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qvm_odd_b3::kernel_ir_for(dt), 1, 4096, 4096, 3, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qvm_odd_b3::kernel_ir_for(dt), 1, 4096, 4096, 3, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qvm_b4(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qvm_b4::kernel_ir_for(dt), 1, 4096, 4096, 4, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qvm_b4::kernel_ir_for(dt), 1, 4096, 4096, 4, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qvm_b5(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qvm_odd_b5::kernel_ir_for(dt), 1, 4096, 4096, 5, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qvm_odd_b5::kernel_ir_for(dt), 1, 4096, 4096, 5, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qvm_b6(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qvm_odd_b6::kernel_ir_for(dt), 1, 4096, 4096, 6, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qvm_odd_b6::kernel_ir_for(dt), 1, 4096, 4096, 6, 64, [4096, 1, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qvm_b8(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qvm_b8::kernel_ir_for(dt), 1, 4096, 4096, 8, 64, [4096, 1, 1], dt)
+        qmb_gs(ffai_qvm_b8::kernel_ir_for(dt), 1, 4096, 4096, 8, 64, [4096, 1, 1], dt)
     }
 
     // qmm (batched matvec, M=4): grid [N, M, 1].
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_b3(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmm_odd_b3::kernel_ir_for(dt), 4, 4096, 4096, 3, 64, [4096, 4, 1], dt)
+        qmb_gs(ffai_qmm_odd_b3::kernel_ir_for(dt), 4, 4096, 4096, 3, 64, [4096, 4, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_b4(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmm_b4::kernel_ir_for(dt), 4, 4096, 4096, 4, 64, [4096, 4, 1], dt)
+        qmb_gs(ffai_qmm_b4::kernel_ir_for(dt), 4, 4096, 4096, 4, 64, [4096, 4, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_b5(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmm_odd_b5::kernel_ir_for(dt), 4, 4096, 4096, 5, 64, [4096, 4, 1], dt)
+        qmb_gs(ffai_qmm_odd_b5::kernel_ir_for(dt), 4, 4096, 4096, 5, 64, [4096, 4, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_b6(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmm_odd_b6::kernel_ir_for(dt), 4, 4096, 4096, 6, 64, [4096, 4, 1], dt)
+        qmb_gs(ffai_qmm_odd_b6::kernel_ir_for(dt), 4, 4096, 4096, 6, 64, [4096, 4, 1], dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_b8(dt: DType) -> BenchSetup {
-        qmb_gs(mt_qmm_b8::kernel_ir_for(dt), 4, 4096, 4096, 8, 64, [4096, 4, 1], dt)
+        qmb_gs(ffai_qmm_b8::kernel_ir_for(dt), 4, 4096, 4096, 8, 64, [4096, 4, 1], dt)
     }
 
     // ── qmm_mma multi-bit-width (b3/b5/b6) ─────────────────────────────────
@@ -6750,14 +6772,14 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_b3(dt: DType) -> BenchSetup {
-        qmm_mma_b(mt_qmm_mma_b3::kernel_ir_for(dt), 4096, 4096, 3, 64, dt)
+        qmm_mma_b(ffai_qmm_mma_b3::kernel_ir_for(dt), 4096, 4096, 3, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_b5(dt: DType) -> BenchSetup {
-        qmm_mma_b(mt_qmm_mma_b5::kernel_ir_for(dt), 4096, 4096, 5, 64, dt)
+        qmm_mma_b(ffai_qmm_mma_b5::kernel_ir_for(dt), 4096, 4096, 5, 64, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_mma_b6(dt: DType) -> BenchSetup {
-        qmm_mma_b(mt_qmm_mma_b6::kernel_ir_for(dt), 4096, 4096, 6, 64, dt)
+        qmm_mma_b(ffai_qmm_mma_b6::kernel_ir_for(dt), 4096, 4096, 6, 64, dt)
     }
 }

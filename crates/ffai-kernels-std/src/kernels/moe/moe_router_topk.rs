@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! MoE router top-k expert selection — `mt_moe_router_topk` picks the top-k
+//! MoE router top-k expert selection — `ffai_moe_router_topk` picks the top-k
 //! experts per token by logit and emits the normalised routing weights
 //! (softmax over chosen-k, or global softmax), on-device so routing never
 //! round-trips to the CPU. The biased/unbiased dual-score variant lives in
@@ -8,7 +8,7 @@
 
 use ffai_kernels::kernel;
 
-// ── mt_moe_router_topk ───────────────────────────────────────────────────
+// ── ffai_moe_router_topk ───────────────────────────────────────────────────
 //
 // Per-token select top-k experts from `router_logits`, plus softmax
 // weights over the chosen k.
@@ -35,7 +35,7 @@ use ffai_kernels::kernel;
 // skips it; correctness lives in unit tests + downstream MoE
 // integration. Same convention as other ffai/ kernels (gather, sampling).
 #[kernel]
-pub fn mt_moe_router_topk<T>(
+pub fn ffai_moe_router_topk<T>(
     router_logits: Tensor<T>,
     mut indices_out: Tensor<u32>,
     mut weights_out: Tensor<T>,
@@ -217,7 +217,7 @@ pub mod kernel_tests {
             .collect();
         let logits = unpack_f32(&pack_f32(&logits_f, dt), dt);
         let (idx, w) = router_oracle(&logits, n_rows, n_experts, k, norm_topk_prob);
-        TestSetup::new(mt_moe_router_topk::kernel_ir_for(dt))
+        TestSetup::new(ffai_moe_router_topk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("router_logits", pack_f32(&logits_f, dt), dt))
             .input(TestBuffer::zeros("indices_out", n_rows * k, DType::U32))
@@ -253,7 +253,7 @@ pub mod kernel_benches {
         let k = 8usize;
         let sz = dt.size_bytes();
         let bytes = n_rows * n_experts * sz + n_rows * k * 4 + n_rows * k * sz;
-        BenchSetup::new(mt_moe_router_topk::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_router_topk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("router_logits", n_rows * n_experts, dt))
             .buffer(BenchBuffer::zeros("indices_out", n_rows * k, DType::U32).output())

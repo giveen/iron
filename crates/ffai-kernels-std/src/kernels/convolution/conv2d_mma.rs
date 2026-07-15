@@ -25,7 +25,7 @@
 //! flat (pixel, k_tap) position, doing a scatter-load from the NCHW image.
 //! The B matrix (weight, OIHW) is dense and loaded cooperatively.
 //!
-//! ## Tile geometry (mirrors `mt_qmm_mma`)
+//! ## Tile geometry (mirrors `ffai_qmm_mma`)
 //!
 //!   tpg = 128 = 4 SG × 32 lanes  (2×2 warp grid: sm = sg/2, sn = sg%2)
 //!   BM = BN = 32, BK = 32        (output tile 32×32 — 1024 outputs/TG)
@@ -41,8 +41,8 @@
 //!
 //! - stride = 1, dilation = 1, padding = 0 (vision patch-conv style)
 //! - `out_ch` divisible by 32, `n_pixels` (`batch*out_h*out_w`) divisible
-//!   by 32.  Padding extensions are a follow-up (same as `mt_qmm_mma` →
-//!   `mt_qmm_mma_m16`).
+//!   by 32.  Padding extensions are a follow-up (same as `ffai_qmm_mma` →
+//!   `ffai_qmm_mma_m16`).
 //! - NCHW input, OIHW weight — the standard PyTorch layout.
 //!
 //! ## A-tile implicit-im2col indexing
@@ -67,10 +67,10 @@
 //!
 //!   B[oc, kt] = weight[oc * in_ch * kh * kw + kt]
 //!
-//! The cooperative weight load mirrors the X-load in `mt_qmm_mma`: the B
+//! The cooperative weight load mirrors the X-load in `ffai_qmm_mma`: the B
 //! tile is `[BM_oc × BK_taps]` row-major in TG memory; each of the 128
 //! lanes loads 8 contiguous K-elements for one oc-row, then the MMA reads
-//! rows of B as K-vectors (no transpose needed vs `mt_qmm_mma`'s W^T).
+//! rows of B as K-vectors (no transpose needed vs `ffai_qmm_mma`'s W^T).
 //!
 //! Codegen-only. Correctness validated by the in-source `#[test_kernel]`s.
 
@@ -107,7 +107,7 @@ pub fn conv2d_mma<T>(
     let sn = sg & 1u32;
     let lane_in_tg = sg * 32u32 + lane;
     // ── 8×8 frag lane mapping (Apple steel_gemm layout) ──────────────────
-    // Same mapping as `mt_qmm_mma`.
+    // Same mapping as `ffai_qmm_mma`.
     // Each lane owns 2 elements per 8×8 frag at (fm, fn0) and (fm, fn1).
     let qid = lane / 4u32;
     let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
@@ -158,7 +158,7 @@ pub fn conv2d_mma<T>(
     // Base offset into input for this pixel's batch/spatial position.
     let in_n_stride = in_ch * in_h * in_w;
     let px_in_base = n_px * in_n_stride;
-    // Lane mapping for coop B-load (weight): same as X-load in mt_qmm_mma.
+    // Lane mapping for coop B-load (weight): same as X-load in ffai_qmm_mma.
     // lane_in_tg = oc_row * 4 + k_quad → oc_row ∈ 0..32, k_quad ∈ 0..4.
     let b_oc_row = lane_in_tg / 4u32;
     let b_k_quad = lane_in_tg & 3u32;
@@ -212,7 +212,7 @@ pub fn conv2d_mma<T>(
         // A-frag (pixels) at (fm, fn_i): as[(sm*16 + frag_m + fm)*36 + k_inner*8 + fn_i]
         // B-frag (weight) at (fm, fn_i): bs[(sn*16 + frag_n + fn_i)*36 + k_inner*8 + fm]
         // (B is loaded row-major [BM_oc × BK], read as transpose for the
-        // [BK × BM_oc] B-matrix — same swap as mt_qmm_mma's W^T read.)
+        // [BK × BM_oc] B-matrix — same swap as ffai_qmm_mma's W^T read.)
         let row_a0 = sm * 16u32 + fm;
         let row_a1 = sm * 16u32 + 8u32 + fm;
         let col_b0 = sn * 16u32;

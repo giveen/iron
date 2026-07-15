@@ -7,7 +7,7 @@
 //! into `auto v_add = fma(a, b, c);` while leaving the upstream
 //! `Op::Mul` in the IR.  The standalone Mul then emitted
 //! `auto v_mul = a * b;` as a dead variable in MSL, producing one
-//! `-Wunused-variable` warning per fusion site.  #207 worked around
+//! `-Wunused-variable` warning per fusion site.  An earlier change worked around
 //! that by pre-computing a "skip set" of absorbed-Mul VIDs in
 //! `compute_fma_absorbed_mul_skips` and threading a `skip_emit`
 //! parameter through every `emit_block` call — fragile mirroring of
@@ -94,7 +94,7 @@ impl super::Pass for FmaFusionPass {
                 fuse_block(block, &is_float);
             }
         }
-        // Per-pass DCE postcondition (#209/1): the rewriter leaves the
+        // Per-pass DCE postcondition: the rewriter leaves the
         // standalone Op::Mul behind (its only consumer, the absorbed
         // Add, was just replaced by Op::Fma).  Sweep it.
         super::dead_value_elim::eliminate_dead_values(kernel)?;

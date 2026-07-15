@@ -7,10 +7,10 @@
 //! skinny-M / skinny-N matmul with a very large K still saturates the
 //! GPU. It is a **two-kernel** dispatch:
 //!
-//!   1. `mt_steel_gemm_splitk_*` — each K-split computes a partial
+//!   1. `ffai_steel_gemm_splitk_*` — each K-split computes a partial
 //!      `[M, N]` product over its slice of K and writes it to a
 //!      `[n_splits, M, N]` fp32 partials buffer.
-//!   2. `mt_steel_gemm_splitk_accum*` — reduces the `n_splits` partial
+//!   2. `ffai_steel_gemm_splitk_accum*` — reduces the `n_splits` partial
 //!      `[M, N]` matrices into the final `[M, N]` output. The plain
 //!      `accum` form is a straight sum; the `axpby` form computes
 //!      `α·(Σ partials) + β·C_in` for the fused-bias / residual case.
@@ -57,7 +57,7 @@ use ffai_kernels::kernel;
 
 /// Split-K partial GEMM, both `(BM, BN, WM, WN)` block-shape instantiations.
 ///
-/// Produces: `mt_steel_gemm_splitk_64x64x16_2x2`, `_32x32x16_2x2`.
+/// Produces: `ffai_steel_gemm_splitk_64x64x16_2x2`, `_32x32x16_2x2`.
 /// Split-K is most useful for the 32×32 shape: skinny M/N with a large K.
 #[kernel(variants(
     BM = [64u32, 32u32],
@@ -66,7 +66,7 @@ use ffai_kernels::kernel;
     WN = [2u32,  2u32],
     suffix = "{BM}x{BN}x16_{WM}x{WN}"
 ))]
-pub fn mt_steel_gemm_splitk<T>(
+pub fn ffai_steel_gemm_splitk<T>(
     a: Tensor<T>,
     b: Tensor<T>,
     mut partials: Tensor<f32>,
@@ -170,7 +170,7 @@ pub fn mt_steel_gemm_splitk<T>(
 /// element. This is the plain-sum form of MLX's
 /// `steel_gemm_splitk_accum`.
 #[kernel]
-pub fn mt_steel_gemm_splitk_accum<T>(
+pub fn ffai_steel_gemm_splitk_accum<T>(
     partials: Tensor<f32>,
     mut out: Tensor<T>,
     #[constexpr] m: u32,
@@ -193,7 +193,7 @@ pub fn mt_steel_gemm_splitk_accum<T>(
 /// The fused-bias / residual variant of MLX's
 /// `steel_gemm_splitk_accum_*_axbpy`. One thread per output element.
 #[kernel]
-pub fn mt_steel_gemm_splitk_accum_axpby<T>(
+pub fn ffai_steel_gemm_splitk_accum_axpby<T>(
     partials: Tensor<f32>,
     c_in: Tensor<T>,
     mut out: Tensor<T>,
@@ -248,13 +248,13 @@ pub mod kernel_benches {
     // The MLX `gemm_splitk_accum*` kernels index by `thread_position_in_grid`
     // and do NO bounds check (`D[gid.x + gid.y*ldd]` unconditionally), so the
     // total dispatched thread count must equal `[N, M]` exactly — never larger.
-    // The MT runner dispatches with `dispatchThreadgroups`, so the threadgroup
+    // The FFAI runner dispatches with `dispatchThreadgroups`, so the threadgroup
     // grid `[N/ACCUM_TG_X, M/ACCUM_TG_Y]` × the group `[ACCUM_TG_X, ACCUM_TG_Y]`
     // must tile `[N, M]` with no overflow. 4096 is divisible by 32 on both axes.
     const ACCUM_TG_X: u32 = 32;
     const ACCUM_TG_Y: u32 = 32;
     /// Tolerance floor for the accum A/B — legacy accum bench `tol=1e-3`.
-    /// Both MT and MLX accumulate the fp32 partials in fp32, so the only
+    /// Both FFAI and MLX accumulate the fp32 partials in fp32, so the only
     /// divergence is the final narrowing cast to the output dtype.
     const ACCUM_TOL_FLOOR: f32 = 1e-3;
 
@@ -300,8 +300,8 @@ pub mod kernel_benches {
     // `bm32_bn32`: a matching MLX `bm32_bn32_bk16_wm2_wn2_MN_taligned_K_taligned`
     // instantiation DOES exist, and the partials layout aligns on paper
     // (`split_k_partition_stride = M*N`, `ldc = N` → `[split, M, N]` row-major,
-    // same as MT). BUT the MLX kernel writes its result through a `store_result`
-    // MMA-fragment epilogue whose per-lane element ordering must match MT's
+    // same as FFAI). BUT the MLX kernel writes its result through a `store_result`
+    // MMA-fragment epilogue whose per-lane element ordering must match FFAI's
     // `simdgroup_elem_store` lane mapping bit-for-bit for an element-wise A/B to
     // pass — and that equivalence was never proven on-GPU (the legacy harness
     // skipped split-K entirely). Attaching a reference here risks a spurious
@@ -309,17 +309,17 @@ pub mod kernel_benches {
     // perf-only pending a dedicated on-GPU equivalence check. → FLAGGED, perf-only.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_splitk_64x64x16_2x2(dt: DType) -> BenchSetup {
-        pb(mt_steel_gemm_splitk_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        pb(ffai_steel_gemm_splitk_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_splitk_32x32x16_2x2(dt: DType) -> BenchSetup {
-        pb(mt_steel_gemm_splitk_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        pb(ffai_steel_gemm_splitk_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 
     // ── Pass 2 — partial-sum reduction (Elementwise, one thread / elem) ────
     //
     // MLX reference: `steel_gemm_splitk_accum_<oname>_float32`
-    // (gemm_splitk_accum in steel_gemm_splitk.h). Both MT and MLX flat-index a
+    // (gemm_splitk_accum in steel_gemm_splitk.h). Both FFAI and MLX flat-index a
     // row-major `[M, N]` output and read a `[n_splits, M, N]` fp32 partials slab
     // with the same `s*M*N + idx` stride, so the outputs are element-equivalent.
     // MLX buffer order (steel_gemm_splitk.h `gemm_splitk_accum`):
@@ -336,7 +336,7 @@ pub mod kernel_benches {
         let tn = mlx_tname(dt);
         // Read every fp32 partial; write the [M, N] output.
         let bytes = N_SPLITS as usize * m * n * f32_sz + m * n * sz;
-        BenchSetup::new(mt_steel_gemm_splitk_accum::kernel_ir_for(dt))
+        BenchSetup::new(ffai_steel_gemm_splitk_accum::kernel_ir_for(dt))
             .mode(KernelMode::Elementwise)
             // `partials` seeded `Signed` (in-domain fp32, nan-free) and shared by
             // name with the reference; raw `random` f32 bytes alias to inf/nan.
@@ -359,9 +359,9 @@ pub mod kernel_benches {
                         "/metal/steel/gemm/steel_gemm_splitk.metal"
                     )),
                 )
-                // C_split[[0]] shared by name with the MT `partials` input.
+                // C_split[[0]] shared by name with the FFAI `partials` input.
                 .buffer(BenchBuffer::zeros("partials", N_SPLITS as usize * m * n, DType::F32))
-                // D[[1]] — fresh [M, N] output, same flat layout as MT `out`.
+                // D[[1]] — fresh [M, N] output, same flat layout as FFAI `out`.
                 .buffer(BenchBuffer::zeros("out", m * n, dt).output())
                 // k_partitions[[2]] / partition_stride[[3]] / ldd[[4]] (int, 4B).
                 .buffer(BenchBuffer::from_vec("k_partitions", (N_SPLITS as i32).to_le_bytes().to_vec(), DType::I32))
@@ -375,14 +375,14 @@ pub mod kernel_benches {
 
     // MLX reference: `steel_gemm_splitk_accum_<oname>_float32_axbpy`
     // (gemm_splitk_accum_axpby — note MLX's `axbpy` spelling). Computes
-    // `D = α·(Σ partials) + β·C`. The MT bench pins `alpha = beta = 1.0`.
+    // `D = α·(Σ partials) + β·C`. The FFAI bench pins `alpha = beta = 1.0`.
     // MLX buffer order (steel_gemm_splitk.h `gemm_splitk_accum_axpby`):
     //   C_split[[0]] (partials, shared), D[[1]] (out),
     //   k_partitions[[2]]=n_splits (int,4), partition_stride[[3]]=M*N (int,4),
     //   ldd[[4]]=N (int,4), C[[5]] (c_in, shared by name), ldc[[6]]=N (int,4),
     //   fdc[[7]]=1 (int,4), alpha[[8]] (f32,4), beta[[9]] (f32,4). `C` is indexed
     //   `gid.x*fdc + gid.y*ldc` → with ldc=N, fdc=1 it is the same flat row-major
-    //   `[M, N]` layout as MT's `c_in[idx]`. Same grid as plain accum.
+    //   `[M, N]` layout as FFAI's `c_in[idx]`. Same grid as plain accum.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_splitk_accum_axpby(dt: DType) -> BenchSetup {
         let (m, n) = (M as usize, N as usize);
@@ -391,7 +391,7 @@ pub mod kernel_benches {
         let tn = mlx_tname(dt);
         // Partials read + c_in read + out write.
         let bytes = N_SPLITS as usize * m * n * f32_sz + 2 * m * n * sz;
-        BenchSetup::new(mt_steel_gemm_splitk_accum_axpby::kernel_ir_for(dt))
+        BenchSetup::new(ffai_steel_gemm_splitk_accum_axpby::kernel_ir_for(dt))
             .mode(KernelMode::Elementwise)
             // `partials`/`c_in` seeded `Signed` and shared by name with the ref.
             .buffer(input_buffer("partials", N_SPLITS as usize * m * n, DType::F32, InputDomain::Signed))
@@ -427,7 +427,7 @@ pub mod kernel_benches {
                 .buffer(BenchBuffer::zeros("c_in", m * n, dt))
                 .buffer(BenchBuffer::from_vec("ldc", (N as i32).to_le_bytes().to_vec(), DType::I32))
                 .buffer(BenchBuffer::from_vec("fdc", 1i32.to_le_bytes().to_vec(), DType::I32))
-                // alpha[[8]] / beta[[9]] (f32, 4B) — matched to MT's 1.0 / 1.0.
+                // alpha[[8]] / beta[[9]] (f32, 4B) — matched to FFAI's 1.0 / 1.0.
                 .buffer(BenchBuffer::from_vec("alpha", 1.0f32.to_le_bytes().to_vec(), DType::F32))
                 .buffer(BenchBuffer::from_vec("beta", 1.0f32.to_le_bytes().to_vec(), DType::F32))
                 .grid(Grid::new_3d(N / ACCUM_TG_X, M / ACCUM_TG_Y, 1, [ACCUM_TG_X, ACCUM_TG_Y, 1]))
@@ -438,11 +438,11 @@ pub mod kernel_benches {
 
 /// New-syntax correctness tests for the two-kernel split-K steel GEMM —
 /// ports the oracle from the legacy
-/// `tests/steel_gemm_splitk_gpu_correctness.rs` (removed in #240).
+/// `tests/steel_gemm_splitk_gpu_correctness.rs` (since removed).
 ///
 /// Split-K is a single-dispatch-per-pass kernel, so each pass is pinned
 /// independently:
-///   - **pass 1** (`mt_steel_gemm_splitk_*`) — each K-split computes its
+///   - **pass 1** (`ffai_steel_gemm_splitk_*`) — each K-split computes its
 ///     partial `[M, N]` product into `partials[split, :, :]` (fp32). The
 ///     oracle is the per-split partial matmul over `[k_start, k_end)`.
 ///   - **pass 2** (`accum` / `accum_axpby`) — reduces synthetic `[n_split,
@@ -520,11 +520,11 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_splitk_pass1_64x64x16_2x2(dt: DType) -> TestSetup {
-        pass1_setup(mt_steel_gemm_splitk_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+        pass1_setup(ffai_steel_gemm_splitk_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_splitk_pass1_32x32x16_2x2(dt: DType) -> TestSetup {
-        pass1_setup(mt_steel_gemm_splitk_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+        pass1_setup(ffai_steel_gemm_splitk_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
     }
 
     // ── Pass 2 — partial-sum reduction (plain accum) ───────────────────────
@@ -545,7 +545,7 @@ pub mod kernel_tests {
             *e = acc;
         }
         let expected = unpack_f32(&pack_f32(&expected, dt), dt);
-        TestSetup::new(mt_steel_gemm_splitk_accum::kernel_ir_for(dt))
+        TestSetup::new(ffai_steel_gemm_splitk_accum::kernel_ir_for(dt))
             .mode(KernelMode::Elementwise)
             .input(TestBuffer::from_vec("partials", pack_f32(&partials, DType::F32), DType::F32))
             .input(TestBuffer::zeros("out", total, dt))
@@ -574,7 +574,7 @@ pub mod kernel_tests {
             *e = alpha * acc + beta * c_in[idx];
         }
         let expected = unpack_f32(&pack_f32(&expected, dt), dt);
-        TestSetup::new(mt_steel_gemm_splitk_accum_axpby::kernel_ir_for(dt))
+        TestSetup::new(ffai_steel_gemm_splitk_accum_axpby::kernel_ir_for(dt))
             .mode(KernelMode::Elementwise)
             .input(TestBuffer::from_vec("partials", pack_f32(&partials, DType::F32), DType::F32))
             .input(TestBuffer::from_vec("c_in", pack_f32(&c_in, dt), dt))

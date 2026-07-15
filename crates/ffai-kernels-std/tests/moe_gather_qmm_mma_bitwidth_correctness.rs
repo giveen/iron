@@ -3,9 +3,9 @@
 #![allow(clippy::manual_is_multiple_of)]
 
 //! GPU correctness for the bit-width-generalized MMA MoE BGEMMs
-//! `kernels::moe::moe_gather_qmm::mt_moe_gather_qmm_mma_b{3,5,6,8}`.
+//! `kernels::moe::moe_gather_qmm::ffai_moe_gather_qmm_mma_b{3,5,6,8}`.
 //!
-//! Same tiled-MMA algorithm as `mt_moe_gather_qmm_mma_int4`, but the
+//! Same tiled-MMA algorithm as `ffai_moe_gather_qmm_mma_int4`, but the
 //! weight coop-dequant pulls codes from a contiguous LSB-first bit-stream
 //! so any bit-width works. Each variant is validated against a naive CPU
 //! gather-matmul oracle over the bit-stream-packed weights — cosine ≥ 0.999.
@@ -23,10 +23,10 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::moe_gather_qmm::{
-    mt_moe_gather_qmm_mma_b3,
-    mt_moe_gather_qmm_mma_b5,
-    mt_moe_gather_qmm_mma_b6,
-    mt_moe_gather_qmm_mma_b8,
+    ffai_moe_gather_qmm_mma_b3,
+    ffai_moe_gather_qmm_mma_b5,
+    ffai_moe_gather_qmm_mma_b6,
+    ffai_moe_gather_qmm_mma_b8,
 };
 
 /// Pack one weight row's `k_in` codes into a contiguous LSB-first
@@ -156,20 +156,20 @@ fn run_bitwidth(
 
 #[test]
 fn moe_gather_qmm_mma_b3_matches_cpu_oracle() {
-    run_bitwidth(3, mt_moe_gather_qmm_mma_b3::kernel_ir_for);
+    run_bitwidth(3, ffai_moe_gather_qmm_mma_b3::kernel_ir_for);
 }
 
 #[test]
 fn moe_gather_qmm_mma_b5_matches_cpu_oracle() {
-    run_bitwidth(5, mt_moe_gather_qmm_mma_b5::kernel_ir_for);
+    run_bitwidth(5, ffai_moe_gather_qmm_mma_b5::kernel_ir_for);
 }
 
 #[test]
 fn moe_gather_qmm_mma_b6_matches_cpu_oracle() {
-    run_bitwidth(6, mt_moe_gather_qmm_mma_b6::kernel_ir_for);
+    run_bitwidth(6, ffai_moe_gather_qmm_mma_b6::kernel_ir_for);
 }
 
 #[test]
 fn moe_gather_qmm_mma_b8_matches_cpu_oracle() {
-    run_bitwidth(8, mt_moe_gather_qmm_mma_b8::kernel_ir_for);
+    run_bitwidth(8, ffai_moe_gather_qmm_mma_b8::kernel_ir_for);
 }

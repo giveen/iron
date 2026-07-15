@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! MPP-backed MoE grouped BGEMM, BM=16 — `mt_moe_gather_qmm_mma_int{4,8}_bm16_mpp`.
+//! MPP-backed MoE grouped BGEMM, BM=16 — `ffai_moe_gather_qmm_mma_int{4,8}_bm16_mpp`.
 //!
 //! Routes the per-tile matmul through Apple's MetalPerformancePrimitives
 //! `mpp::tensor_ops::matmul2d` (cooperative-tensor path, 1 simdgroup). The int4
@@ -36,7 +36,7 @@
 use ffai_kernels::kernel;
 
 /// MPP MoE grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup. `BITS` ∈ {4, 8}
-/// selects the weight precision; produces `mt_moe_gather_qmm_mma_int4_bm16_mpp`
+/// selects the weight precision; produces `ffai_moe_gather_qmm_mma_int4_bm16_mpp`
 /// and `_int8_bm16_mpp`.
 ///
 /// Params: `x [m_total, k_in]`, `w [n_experts, n_out, k_in*BITS/32]`
@@ -45,7 +45,7 @@ use ffai_kernels::kernel;
 /// `out [m_total, n_out]`.
 #[kernel(variants(BITS = [4, 8], suffix = "int{BITS}_bm16_mpp"))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_qmm_mma<T>(
+pub fn ffai_moe_gather_qmm_mma<T>(
     x: Tensor<T>,
     w: Tensor<u32>,
     scales: Tensor<T>,
@@ -194,8 +194,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_moe_gather_qmm_mma_int4_bm16_mpp");
+            let k = ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_moe_gather_qmm_mma_int4_bm16_mpp");
             assert_eq!(k.params.len(), 6);
             assert!(k.params[5].is_output);
             assert_eq!(k.constexprs.len(), 4);
@@ -212,7 +212,7 @@ mod tests {
     /// cooperative tensors resolve to `half`, never `bfloat`.
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::BF16);
+        let k = ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -230,12 +230,12 @@ mod tests {
     fn codegen_emits_mpp_include() {
         for (mut k, name) in [
             (
-                mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::F32),
-                "mt_moe_gather_qmm_mma_int4_bm16_mpp_f32",
+                ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(DType::F32),
+                "ffai_moe_gather_qmm_mma_int4_bm16_mpp_f32",
             ),
             (
-                mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(DType::F32),
-                "mt_moe_gather_qmm_mma_int8_bm16_mpp_f32",
+                ffai_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(DType::F32),
+                "ffai_moe_gather_qmm_mma_int8_bm16_mpp_f32",
             ),
         ] {
             k.name = name.into();
@@ -259,7 +259,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_moe_gather_qmm_mma_int4_bm16_mpp, mt_moe_gather_qmm_mma_int8_bm16_mpp};
+    use super::{ffai_moe_gather_qmm_mma_int4_bm16_mpp, ffai_moe_gather_qmm_mma_int8_bm16_mpp};
     use crate::kernels::moe::moe_mpp_shared::{
         MmaTestShape,
         int4_indexed_setup,
@@ -270,7 +270,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> TestSetup {
         int4_indexed_setup(
-            mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
             32, // bn
             16, // bm
@@ -282,7 +282,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int8_bm16_mpp(dt: DType) -> TestSetup {
         int8_indexed_setup(
-            mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
             32, // bn
             16, // bm
@@ -297,13 +297,13 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_moe_gather_qmm_mma_int4_bm16_mpp, mt_moe_gather_qmm_mma_int8_bm16_mpp};
+    use super::{ffai_moe_gather_qmm_mma_int4_bm16_mpp, ffai_moe_gather_qmm_mma_int8_bm16_mpp};
     use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> BenchSetup {
         int4_mma_bench(
-            mt_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
             MmaBenchShape {
                 bits: 4,
                 bn: 32,
@@ -322,7 +322,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int8_bm16_mpp(dt: DType) -> BenchSetup {
         int4_mma_bench(
-            mt_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
+            ffai_moe_gather_qmm_mma_int8_bm16_mpp::kernel_ir_for(dt),
             MmaBenchShape {
                 bits: 8,
                 bn: 32,

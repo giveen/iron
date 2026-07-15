@@ -13,8 +13,8 @@ use ffai_kernels::{
     core::{dtype::DType, ir::KernelMode},
 };
 use ffai_kernels_std::kernels::moe::{
-    moe_bgemm_q2k_bm64::mt_moe_bgemm_q2k_bm64,
-    moe_bgemm_q2k_view_u16_bm64::mt_moe_bgemm_q2k_view_u16_bm64,
+    moe_bgemm_q2k_bm64::ffai_moe_bgemm_q2k_bm64,
+    moe_bgemm_q2k_view_u16_bm64::ffai_moe_bgemm_q2k_view_u16_bm64,
 };
 
 fn xs(s: &mut u32) -> u32 {
@@ -106,7 +106,7 @@ fn q2k_view_u16_bm64_matches_pool() {
     pb.insert("m_total".into(), (m_total as u32).to_le_bytes().to_vec());
     pb.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
     pb.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
-    let pool_out = run(pb, mt_moe_bgemm_q2k_bm64::kernel_ir_for(DType::F32));
+    let pool_out = run(pb, ffai_moe_bgemm_q2k_bm64::kernel_ir_for(DType::F32));
 
     let raw_u16: Vec<u8> = raw.clone(); // bytes; view_u16/view_f16 reinterpret
     let mut vb: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -120,7 +120,7 @@ fn q2k_view_u16_bm64_matches_pool() {
     vb.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     vb.insert("tensor_byte_off".into(), 0u32.to_le_bytes().to_vec());
     vb.insert("expert_byte_stride".into(), ((nblk * 84) as u32).to_le_bytes().to_vec());
-    let view_out = run(vb, mt_moe_bgemm_q2k_view_u16_bm64::kernel_ir_for(DType::F32));
+    let view_out = run(vb, ffai_moe_bgemm_q2k_view_u16_bm64::kernel_ir_for(DType::F32));
 
     let mut worst = 0.0f32;
     let mut wi = 0;

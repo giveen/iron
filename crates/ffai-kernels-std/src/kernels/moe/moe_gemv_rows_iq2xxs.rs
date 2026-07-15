@@ -1,9 +1,9 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Prefill MoE IQ2_XXS GEMV-over-rows — the fast decode gemv
-//! (mt_moe_gather_gemv_iq2xxs, ~270 GB/s) applied to a whole batch of
+//! (ffai_moe_gather_gemv_iq2xxs, ~270 GB/s) applied to a whole batch of
 //! M = N*topK (token,expert) rows in ONE dispatch, instead of the
-//! coop-tile MMA bgemm (mt_moe_bgemm_iq2xxs_mpp, ~4-10 GB/s — 15-70x
+//! coop-tile MMA bgemm (ffai_moe_bgemm_iq2xxs_mpp, ~4-10 GB/s — 15-70x
 //! slower). The bgemm's MMA staging + barriers dominate at these quant
 //! shapes; the direct simd_sum dot-product the gemv uses is far faster.
 //!
@@ -22,7 +22,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_moe_gemv_rows_iq2xxs<T>(
+pub fn ffai_moe_gemv_rows_iq2xxs<T>(
     x: Tensor<T>,
     qs_all: Tensor<u32>,
     d_all: Tensor<f32>,
@@ -81,7 +81,7 @@ pub fn mt_moe_gemv_rows_iq2xxs<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gemv_rows_iq2xxs;
+    use super::ffai_moe_gemv_rows_iq2xxs;
 
     // M=256 rows, production gate/up dims (m_out=2048, k_in=4096).
     #[bench(dtypes = [f32, f16, bf16])]
@@ -91,7 +91,7 @@ pub mod kernel_benches {
         let m_out = 2048usize;
         let k_in = 4096usize;
         let nblk = m_out * (k_in / 256);
-        BenchSetup::new(mt_moe_gemv_rows_iq2xxs::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gemv_rows_iq2xxs::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", m_total * k_in, dt))
             .buffer(BenchBuffer::random("qs_all", n_experts * nblk * 16, DType::U32))

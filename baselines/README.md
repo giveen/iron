@@ -51,9 +51,9 @@ that step is informational only — it never gates the job.
 
 | File | Chip | Captured @ | Headline |
 |---|---|---|---|
-| [`apple-m1-max.json`](apple-m1-max.json) | Apple M1 Max | `dd4c2ef` (2026-05-20) | 327/327 implemented + numerically correct; **avg MT% 146%**. Refreshed against current `dev` (post #110/#128/#129/#135); the prior baseline predated those landings so `ffaik bench`'s auto-diff was comparing against stale numbers. |
-| [`apple-m4-max.json`](apple-m4-max.json) | Apple M4 Max | `adc6816` (2026-05-24) | 496/496 implemented + numerically correct; **avg MT% 141%**. |
-| [`apple-m5-max.json`](apple-m5-max.json) | Apple M5 Max | `0cb0a85` (2026-05-18) | 241/241 implemented + numerically correct; **avg MT% 136%** but masked by an `sdpa` GQA bf16 regression to **31%** of MLX (see below). |
+| [`apple-m1-max.json`](apple-m1-max.json) | Apple M1 Max | `dd4c2ef` (2026-05-20) | 327/327 implemented + numerically correct; **avg FFAI % 146%**. Refreshed against current `dev`; the prior baseline predated recent landings so `ffaik bench`'s auto-diff was comparing against stale numbers. |
+| [`apple-m4-max.json`](apple-m4-max.json) | Apple M4 Max | `adc6816` (2026-05-24) | 496/496 implemented + numerically correct; **avg FFAI % 141%**. |
+| [`apple-m5-max.json`](apple-m5-max.json) | Apple M5 Max | `0cb0a85` (2026-05-18) | 241/241 implemented + numerically correct; **avg FFAI % 136%** but masked by an `sdpa` GQA bf16 regression to **31%** of MLX (see below). |
 
 ## Apple M5 Max — headline findings (2026-05-18, dev @ `0cb0a85`)
 
@@ -62,10 +62,10 @@ Codegen flags: `native_bfloat=true`, `use_simd_matrix=false`,
 
 ### Regressions on the LLM hot path
 
-The "avg MT% 136%" headline is driven by big elementwise wins; the
+The "avg FFAI % 136%" headline is driven by big elementwise wins; the
 kernels that actually matter for LLM decode regress on M5 Max:
 
-| Kernel | Shape | dtype | MT / MLX |
+| Kernel | Shape | dtype | FFAI / MLX |
 |---|---|---|---|
 | `sdpa` | H=32 N=4096 D=128 **gqa=4** | **bf16** | **31%** |
 | `sdpa` | H=32 N=4096 D=128 gqa=4 | f16 | 62% |
@@ -80,7 +80,7 @@ kernels that actually matter for LLM decode regress on M5 Max:
 
 The dominant pattern is **SDPA + GQA + bf16**. MLX's
 `sdpa_vector_2pass` picks a per-shape `blocks` value tuned for the
-target chip; FFAI Kernels's current `mt_sdpa` uses a fixed single-pass
+target chip; FFAI Kernels's current `ffai_sdpa` uses a fixed single-pass
 8-simdgroups-per-head layout. The mismatch widens on M5 because the
 optimal block size differs from M3/M4.
 
@@ -96,7 +96,7 @@ optimal block size differs from M3/M4.
 - Single bench run, no warmup-aware averaging — treat individual
   outlier ratios (e.g. `unary sqrt f16` at 980%) as noise unless they
   reproduce on a re-run.
-- Avg MT% is an unweighted mean over 241 kernel/shape/dtype rows.
+- Avg FFAI % is an unweighted mean over 241 kernel/shape/dtype rows.
   It does not reflect FFAI inference throughput; for that, drill into
   the per-kernel rows tied to the LLM hot path.
 - `equiv` is checked for every row; 241/241 passed.

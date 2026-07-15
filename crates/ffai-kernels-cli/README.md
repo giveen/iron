@@ -38,7 +38,7 @@ ffaik build
 ffaik build --emit all -o /tmp/kernel-pkg
 
 # Inspect one kernel's IR and generated MSL
-ffaik inspect --kernel mt_rms_norm
+ffaik inspect --kernel ffai_rms_norm
 
 # Show GPU device info
 ffaik device

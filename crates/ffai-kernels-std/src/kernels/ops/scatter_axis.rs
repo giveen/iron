@@ -27,7 +27,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_scatter_axis<T>(
+pub fn ffai_scatter_axis<T>(
     updates: Tensor<T>,
     indices: Tensor<u32>,
     mut out: Tensor<T>,
@@ -43,19 +43,19 @@ pub fn mt_scatter_axis<T>(
     store(out[out_off], load(updates[idx]));
 }
 
-/// New-syntax correctness for `mt_scatter_axis` (exact). Indices are an
+/// New-syntax correctness for `ffai_scatter_axis` (exact). Indices are an
 /// identity-along-axis pattern so no two updates collide — the scatter is
 /// deterministic; unwritten out slots stay zero (matched by the zeroed input).
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_scatter_axis;
+    use super::ffai_scatter_axis;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_mt_scatter_axis(dt: DType) -> TestSetup {
+    fn test_ffai_scatter_axis(dt: DType) -> TestSetup {
         let (outer, axis_upd, axis_size, inner) = (2usize, 3, 5, 4);
         let upd_len = outer * axis_upd * inner;
         let out_len = outer * axis_size * inner;
@@ -70,7 +70,7 @@ pub mod kernel_tests {
             let s = indices[idx] as usize;
             expected[(o * axis_size + s) * inner + i] = upd_dt[idx];
         }
-        TestSetup::new(mt_scatter_axis::kernel_ir_for(dt))
+        TestSetup::new(ffai_scatter_axis::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("updates", pack_f32(&updates, dt), dt))
             .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
             .input(TestBuffer::zeros("out", out_len, dt))
@@ -82,11 +82,11 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_scatter_axis`.
+/// New-syntax benchmark for `ffai_scatter_axis`.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_scatter_axis;
+    use super::ffai_scatter_axis;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_scatter_axis(dt: DType) -> BenchSetup {
@@ -95,7 +95,7 @@ pub mod kernel_benches {
         let indices: Vec<u8> = (0..upd_len)
             .flat_map(|idx| (((idx / inner) % axis_upd) as u32).to_le_bytes())
             .collect();
-        BenchSetup::new(mt_scatter_axis::kernel_ir_for(dt))
+        BenchSetup::new(ffai_scatter_axis::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("updates", upd_len, dt))
             .buffer(BenchBuffer::from_vec("indices", indices, DType::U32))
             .buffer(BenchBuffer::zeros("out", outer * axis_size * inner, dt).output())

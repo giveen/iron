@@ -6,7 +6,7 @@
 //! integer family (int2/3/4/5/6 + MXINT2..6 + MXINT8).
 //!
 //! `y = qmatmul(rms_norm(x) · norm_weight, W_q)` in one dispatch — the int4
-//! fusion of `kernels/norm/rms_norm_qgemv.rs` (`mt_rms_norm_qgemv`, the simple
+//! fusion of `kernels/norm/rms_norm_qgemv.rs` (`ffai_rms_norm_qgemv`, the simple
 //! one-row-per-TG variant) with the block-scaled weight decode of
 //! `mlx/block_scaled_matmul.rs`. The normalized activation never leaves
 //! registers between the RMSNorm reduce and the matvec.
@@ -15,7 +15,7 @@
 //!
 //! - **Mode: Reduction**, `grid = [out_dim, 1, 1]`, `tpg = [TPG, 1, 1]` with
 //!   TPG ≥ 32 and a multiple of 32 (tests/benches use 64). One TG per row.
-//! - Phase 1: per-thread Σx², `mt_rms_inv_scalar` does the TG reduce + rsqrt.
+//! - Phase 1: per-thread Σx², `ffai_rms_inv_scalar` does the TG reduce + rsqrt.
 //! - Phase 2: the pack-/element-strided block-scaled GEMV of
 //!   `block_scaled_matmul.rs`, feeding on `normed[i] = x[i]·norm_weight[i]·inv_rms`.
 //! - `in_dim` a multiple of `block_size`; 4-bit `block_size` a multiple of 8,
@@ -38,7 +38,7 @@ use ffai_kernels::kernel;
 /// normalized activation `normed[i] = x[i]·norm_weight[i]·inv_rms`. Per-element
 /// weight decode + per-block scale by the `(BITS, WDEC, SKIND)` co-vars; buffer
 /// types by `(WT, ST)` — see `gemm/block_scaled_matmul` for the legend. Decodes
-/// through `kernels/primitives.rs`. Produces `mt_<FMT>_rms_norm_qgemv`.
+/// through `kernels/primitives.rs`. Produces `ffai_<FMT>_rms_norm_qgemv`.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
@@ -73,7 +73,7 @@ use ffai_kernels::kernel;
     suffix = "{FMT}_rms_norm_qgemv",
 ))]
 #[allow(clippy::too_many_arguments)]
-pub fn mt<T>(
+pub fn ffai<T>(
     x: Tensor<T>,
     norm_weight: Tensor<T>,
     weight: Tensor<WT>,
@@ -95,7 +95,7 @@ pub fn mt<T>(
             ssq = ssq + v * v;
         }
     }
-    let inv_rms = mt_rms_inv_scalar(ssq, eps_buf, in_dim);
+    let inv_rms = ffai_rms_inv_scalar(ssq, eps_buf, in_dim);
     // Phase 2: block-scaled GEMV over `normed[i] = x[i]·norm_weight[i]·inv_rms`.
     let n_blocks = in_dim / block_size;
     let row_block_off = row * n_blocks;
@@ -114,14 +114,14 @@ pub fn mt<T>(
                 let scale = if SKIND == 0u32 {
                     exp2(sraw.cast::<f32>() - 127.0f32)
                 } else if SKIND == 1u32 {
-                    mt_decode_e4m3(sraw.cast::<u32>()) * global
+                    ffai_decode_e4m3(sraw.cast::<u32>()) * global
                 } else {
                     sraw.cast::<f32>()
                 };
                 let packed = load(weight[row_pack_off + pack_idx]);
                 let p_off = pack_idx * 8u32;
                 for i in range(0u32, 8u32, 1u32) {
-                    let val = mt_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
+                    let val = ffai_decode_e2m1((packed >> (i * 4u32)) & 0xFu32);
                     let d = p_off + i;
                     let normed =
                         load(x[d]).cast::<f32>() * load(norm_weight[d]).cast::<f32>() * inv_rms;
@@ -157,17 +157,17 @@ pub fn mt<T>(
                     let w1 = load(
                         weight[row_word_off + select(spill > 0u32, word_idx + 1u32, word_idx)],
                     );
-                    let q = mt_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
+                    let q = ffai_unpack_nbit(w0, w1, bit_in_w, lo_bits, spill);
                     let qf = q.cast::<f32>();
                     select(q >= half, qf - full, qf)
                 } else {
                     let raw = load(weight[row_off + c]).cast::<u32>();
                     if WDEC == 2u32 {
-                        mt_decode_e4m3(raw)
+                        ffai_decode_e4m3(raw)
                     } else if WDEC == 3u32 {
-                        mt_decode_e5m2(raw)
+                        ffai_decode_e5m2(raw)
                     } else {
-                        mt_decode_int8(raw)
+                        ffai_decode_int8(raw)
                     }
                 };
                 let normed =
@@ -263,18 +263,18 @@ pub mod kernel_tests {
     // out_dim 4, in_dim 256 (divisible by both block sizes 16 / 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp4_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxfp4, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxfp4, 4, 256, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp4_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_nvfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp4, 4, 256, dt)
+        rms_qgemv_setup(ffai_nvfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp4, 4, 256, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e4m3_rms_norm_qgemv(dt: DType) -> TestSetup {
         rms_qgemv_setup(
-            mt_mxfp8_e4m3_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             4,
             256,
@@ -285,7 +285,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxfp8_e5m2_rms_norm_qgemv(dt: DType) -> TestSetup {
         rms_qgemv_setup(
-            mt_mxfp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             4,
             256,
@@ -295,7 +295,7 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_nvfp8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp8, 4, 256, dt)
+        rms_qgemv_setup(ffai_nvfp8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp8, 4, 256, dt)
     }
 
     // Legacy float-scale fp4 / fp8 + symmetric int8. fp8_e4m3 reuses the
@@ -303,19 +303,25 @@ pub mod kernel_tests {
     // in_dim 256 is a multiple of int8's block_size 64 (= 4 × 64).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_fp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4, 256, dt)
+        rms_qgemv_setup(ffai_fp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_nvfp8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp8E4m3, 4, 256, dt)
+        rms_qgemv_setup(ffai_nvfp8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp8E4m3, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_fp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp8E5m2, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_fp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Fp8E5m2,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4, 256, dt)
+        rms_qgemv_setup(ffai_int8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4, 256, dt)
     }
 
     // Symmetric sub-byte ints (FP32 group scale, group 64) + MXINT (E8M0 block
@@ -325,47 +331,47 @@ pub mod kernel_tests {
     // tracks the RMSNorm + dequant-then-dot reference to float precision.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4, 256, dt)
+        rms_qgemv_setup(ffai_int2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4, 256, dt)
+        rms_qgemv_setup(ffai_int3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4, 256, dt)
+        rms_qgemv_setup(ffai_int4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4, 256, dt)
+        rms_qgemv_setup(ffai_int5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4, 256, dt)
+        rms_qgemv_setup(ffai_int6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint2_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint2, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint2, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint3_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint3, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint3, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint4_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint4, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint4, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint5_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint5, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint5, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint6_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint6, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint6, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_mxint8_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_mxint8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint8, 4, 256, dt)
+        rms_qgemv_setup(ffai_mxint8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxint8, 4, 256, dt)
     }
 
     // FP16-scale twins of the FP32-scaled formats. `fp8_e4m3_f16` reuses the
@@ -375,7 +381,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_nvfp8_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
         rms_qgemv_setup(
-            mt_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             4,
             256,
@@ -385,7 +391,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e4m3_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
         rms_qgemv_setup(
-            mt_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             4,
             256,
@@ -394,12 +400,12 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp4_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_fp4_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4F16, 4, 256, dt)
+        rms_qgemv_setup(ffai_fp4_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4F16, 4, 256, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_fp8_e5m2_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
         rms_qgemv_setup(
-            mt_fp8_e5m2_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4,
             256,
@@ -408,27 +414,63 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int2_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int2_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int2_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int2F16,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int3_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int3_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int3_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int3F16,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int4_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int4_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int4_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int4F16,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int5_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int5_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int5_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int5F16,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int6_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int6_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int6_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int6F16,
+            4,
+            256,
+            dt,
+        )
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_int8_f16_rms_norm_qgemv(dt: DType) -> TestSetup {
-        rms_qgemv_setup(mt_int8_f16_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8F16, 4, 256, dt)
+        rms_qgemv_setup(
+            ffai_int8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Int8F16,
+            4,
+            256,
+            dt,
+        )
     }
 }
 
@@ -489,16 +531,28 @@ pub mod kernel_benches {
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp4_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_mxfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Mxfp4, 4096, 4096, dt)
+        rms_qgemv_bench(
+            ffai_mxfp4_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_nvfp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp4, 4096, 4096, dt)
+        rms_qgemv_bench(
+            ffai_nvfp4_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Nvfp4,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e4m3_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxfp8_e4m3_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e4m3_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E4,
             4096,
             4096,
@@ -508,7 +562,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxfp8_e5m2_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxfp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxfp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxfp8E5,
             4096,
             4096,
@@ -517,16 +571,22 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_nvfp8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Nvfp8, 4096, 4096, dt)
+        rms_qgemv_bench(
+            ffai_nvfp8_rms_norm_qgemv::kernel_ir_for(dt),
+            QFormat::Nvfp8,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_fp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_fp4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Fp4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_nvfp8_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3,
             4096,
             4096,
@@ -536,7 +596,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_fp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2,
             4096,
             4096,
@@ -545,33 +605,33 @@ pub mod kernel_benches {
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int8_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int8, 4096, 4096, dt)
     }
     // Symmetric sub-byte ints (FP32 group scale) + MXINT (E8M0 block scale).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int2_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int2, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int3_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int3, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int4_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int4, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int5_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int5, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_rms_norm_qgemv(dt: DType) -> BenchSetup {
-        rms_qgemv_bench(mt_int6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4096, 4096, dt)
+        rms_qgemv_bench(ffai_int6_rms_norm_qgemv::kernel_ir_for(dt), QFormat::Int6, 4096, 4096, dt)
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint2_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint2_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint2_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint2,
             4096,
             4096,
@@ -581,7 +641,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint3_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint3_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint3_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint3,
             4096,
             4096,
@@ -591,7 +651,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint4_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint4_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint4_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint4,
             4096,
             4096,
@@ -601,7 +661,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint5_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint5_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint5_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint5,
             4096,
             4096,
@@ -611,7 +671,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint6_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint6_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint6_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint6,
             4096,
             4096,
@@ -621,7 +681,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_mxint8_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_mxint8_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_mxint8_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Mxint8,
             4096,
             4096,
@@ -632,7 +692,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp8_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Nvfp8F16,
             4096,
             4096,
@@ -642,7 +702,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e4m3_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_nvfp8_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E4m3F16,
             4096,
             4096,
@@ -652,7 +712,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp4_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_fp4_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp4_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp4F16,
             4096,
             4096,
@@ -662,7 +722,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_fp8_e5m2_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_fp8_e5m2_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_fp8_e5m2_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Fp8E5m2F16,
             4096,
             4096,
@@ -672,7 +732,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int2_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int2_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int2_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int2F16,
             4096,
             4096,
@@ -682,7 +742,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int3_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int3_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int3_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int3F16,
             4096,
             4096,
@@ -692,7 +752,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int4_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int4_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int4_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int4F16,
             4096,
             4096,
@@ -702,7 +762,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int5_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int5_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int5_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int5F16,
             4096,
             4096,
@@ -712,7 +772,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int6_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int6_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int6_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int6F16,
             4096,
             4096,
@@ -722,7 +782,7 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_int8_f16_rms_norm_qgemv(dt: DType) -> BenchSetup {
         rms_qgemv_bench(
-            mt_int8_f16_rms_norm_qgemv::kernel_ir_for(dt),
+            ffai_int8_f16_rms_norm_qgemv::kernel_ir_for(dt),
             QFormat::Int8F16,
             4096,
             4096,

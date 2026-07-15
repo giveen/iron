@@ -23,7 +23,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_decode_d512_sink<T>(
+pub fn ffai_sdpa_decode_d512_sink<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -290,12 +290,12 @@ mod tests {
         core::{DType, ir::KernelMode},
     };
 
-    use super::mt_sdpa_decode_d512_sink;
+    use super::ffai_sdpa_decode_d512_sink;
 
     fn msl_for(dt: DType) -> String {
-        let mut k = mt_sdpa_decode_d512_sink::kernel_ir_for(dt);
+        let mut k = ffai_sdpa_decode_d512_sink::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_sdpa_decode_d512_sink codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_sdpa_decode_d512_sink codegen succeeds")
     }
 
     #[test]
@@ -304,8 +304,8 @@ mod tests {
             let src = msl_for(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_sdpa_decode_d512_sink"),
-                "MSL for {dt:?} should declare mt_sdpa_decode_d512_sink:\n{src}",
+                src.contains("kernel void ffai_sdpa_decode_d512_sink"),
+                "MSL for {dt:?} should declare ffai_sdpa_decode_d512_sink:\n{src}",
             );
         }
     }
@@ -315,7 +315,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_decode_d512_sink;
+    use super::ffai_sdpa_decode_d512_sink;
     use crate::utils::{pack_f32, unpack_f32};
 
     /// Dense softmax-attention oracle with a per-head `sink_logit`
@@ -390,7 +390,7 @@ pub mod kernel_tests {
         let expected = naive_sdpa_sink(
             &q, &k, &v, &sink, n_q_heads, n_kv_heads, head_dim, n_kv, kv_stride, scale,
         );
-        TestSetup::new(mt_sdpa_decode_d512_sink::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_decode_d512_sink::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -410,7 +410,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_decode_d512_sink;
+    use super::ffai_sdpa_decode_d512_sink;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_decode_d512_sink(dt: DType) -> BenchSetup {
@@ -420,7 +420,7 @@ pub mod kernel_benches {
         let scale = 1.0f32 / (head_dim as f32).sqrt();
         let bytes = (2 * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim) * dt.size_bytes()
             + n_q_heads * 4;
-        BenchSetup::new(mt_sdpa_decode_d512_sink::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_decode_d512_sink::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

@@ -6,9 +6,9 @@
 //! use for their `linear_attention` layers (75% of layers in the hybrid
 //! architecture). Two kernels:
 //!
-//!   - `mt_gated_delta_step`  — single-token decode (`T = 1`)
-//!   - `mt_gated_delta_chunk` — multi-token chunked prefill (`T > 1`); the
-//!     kernel that actually unblocks ctx > 2048 (issue #111). State stays
+//!   - `ffai_gated_delta_step`  — single-token decode (`T = 1`)
+//!   - `ffai_gated_delta_chunk` — multi-token chunked prefill (`T > 1`); the
+//!     kernel that actually unblocks ctx > 2048. State stays
 //!     register-resident across the inner T loop so the recurrence runs
 //!     once per dispatch instead of N independent decode calls.
 //!
@@ -50,7 +50,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_gated_delta_step<T>(
+pub fn ffai_gated_delta_step<T>(
     q: Tensor<T>,             // [B, Hk, Dk]   flat: (b * Hk + hk_idx) * Dk + dk_offset
     k: Tensor<T>,             // [B, Hk, Dk]   same layout as q
     v: Tensor<T>,             // [B, Hv, Dv]   flat: n * Dv + dv_idx  where n = b*Hv + hv_idx
@@ -128,9 +128,9 @@ pub fn mt_gated_delta_step<T>(
 //  Chunked-prefill form (T > 1)
 // ────────────────────────────────────────────────────────────────────
 
-/// `mt_gated_delta_chunk` — multi-token GDN forward over `T` tokens.
+/// `ffai_gated_delta_chunk` — multi-token GDN forward over `T` tokens.
 ///
-/// Same recurrence math as `mt_gated_delta_step`, wrapped in an inner
+/// Same recurrence math as `ffai_gated_delta_step`, wrapped in an inner
 /// `for t in 0..T` loop. The recurrent state stays in per-lane
 /// stack-allocated registers across the entire T sweep, so a single
 /// dispatch handles a full chunk of `T` tokens with one set of
@@ -139,7 +139,7 @@ pub fn mt_gated_delta_step<T>(
 ///
 /// This is the kernel that unblocks Qwen3.6 ctx > 2048: the hybrid
 /// scheduler in mlx-swift-lm calls a chunked GDN kernel for the
-/// `linear_attention` layers during prefill. The bug in issue #111 is
+/// `linear_attention` layers during prefill. The bug is
 /// the scheduler currently emits a single chunk of 2048 with no T-loop
 /// to span longer prefills; this kernel + a scheduler patch fix it.
 ///
@@ -153,7 +153,7 @@ pub fn mt_gated_delta_step<T>(
 ///
 /// ## DISPATCH INVARIANTS
 ///
-/// Same dispatch geometry as `mt_gated_delta_step`:
+/// Same dispatch geometry as `ffai_gated_delta_step`:
 ///
 /// - **Mode: Reduction.** Each threadgroup is one simdgroup (32 threads).
 /// - **Grid: `[dv, B * Hv, 1]`, TG: `[32, 1, 1]`.**
@@ -164,7 +164,7 @@ pub fn mt_gated_delta_step<T>(
 ///   constexpr) so a single PSO compiles for all chunk sizes the
 ///   scheduler picks.
 #[kernel]
-pub fn mt_gated_delta_chunk<T>(
+pub fn ffai_gated_delta_chunk<T>(
     q: Tensor<T>,             // [B, T, Hk, Dk]
     k: Tensor<T>,             // [B, T, Hk, Dk]
     v: Tensor<T>,             // [B, T, Hv, Dv]
@@ -254,13 +254,13 @@ pub fn mt_gated_delta_chunk<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{mt_gated_delta_chunk, mt_gated_delta_step};
+    use super::{ffai_gated_delta_chunk, ffai_gated_delta_step};
     use crate::utils::{pack_f32, unpack_f32};
 
     /// CPU oracle: mirrors `_gated_delta_step_ops` from
     /// `mlx_lm/models/gated_delta.py` (see the legacy
-    /// `tests/gated_delta_gpu_correctness.rs::naive_gated_delta_step`, removed
-    /// in #240).
+    /// `tests/gated_delta_gpu_correctness.rs::naive_gated_delta_step`, since
+    /// removed).
     /// Returns `(y, state_out)` flattened.
     #[allow(clippy::too_many_arguments)]
     fn oracle(
@@ -326,7 +326,7 @@ pub mod kernel_tests {
 
         let (y_exp, state_exp) = oracle(&q, &k, &v, &g, &beta, &state_in, b, hv, hk, dv, dk);
 
-        TestSetup::new(mt_gated_delta_step::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_step::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -348,15 +348,15 @@ pub mod kernel_tests {
     // GQA (Hv = 2*Hk), full recurrence path. f16/bf16 dependent reductions
     // (kv_mem → delta → update → out) widen the band.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-5, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_step_gqa(dt: DType) -> TestSetup { setup(2, 4, 2, 8, 64, dt) }
+    fn test_ffai_gated_delta_step_gqa(dt: DType) -> TestSetup { setup(2, 4, 2, 8, 64, dt) }
 
     // Hv == Hk (no key-sharing) at the minimum dk=32, single batch.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-5, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_step_no_gqa(dt: DType) -> TestSetup { setup(1, 4, 4, 4, 32, dt) }
+    fn test_ffai_gated_delta_step_no_gqa(dt: DType) -> TestSetup { setup(1, 4, 4, 4, 32, dt) }
 
-    // ── mt_gated_delta_chunk: multi-token prefill recurrence ───────────────
+    // ── ffai_gated_delta_chunk: multi-token prefill recurrence ───────────────
     //
-    // Same per-step recurrence as `mt_gated_delta_step`, but the kernel threads
+    // Same per-step recurrence as `ffai_gated_delta_step`, but the kernel threads
     // the (Dv, Dk) state across `t_len` tokens within one threadgroup. The
     // oracle runs the step recurrence sequentially over T, keeping state in f32
     // (matching the kernel's in-register state), and emits per-token `y` plus
@@ -455,7 +455,7 @@ pub mod kernel_tests {
         );
         let (y_exp, state_exp) =
             chunk_oracle(&q, &k, &v, &g, &beta, &state_in, b, t_len, hv, hk, dv, dk);
-        TestSetup::new(mt_gated_delta_chunk::kernel_ir_for(dt))
+        TestSetup::new(ffai_gated_delta_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -479,18 +479,18 @@ pub mod kernel_tests {
     // the single-step decode test leaves dormant. f16/bf16 widen with the
     // 16-step dependent recurrence.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-4, 5e-2, 2e-1])]
-    fn test_mt_gated_delta_chunk(dt: DType) -> TestSetup { chunk_setup(1, 16, 4, 2, 8, 64, dt) }
+    fn test_ffai_gated_delta_chunk(dt: DType) -> TestSetup { chunk_setup(1, 16, 4, 2, 8, 64, dt) }
 }
 
 /// New-syntax benchmarks for the GDN decode + chunked-prefill kernels.
-/// `mt_gated_delta_step` (decode) and `mt_gated_delta_chunk` (multi-token
+/// `ffai_gated_delta_step` (decode) and `ffai_gated_delta_chunk` (multi-token
 /// prefill) — both MLX-less reduction kernels (`class=GenericEmpty`), so
 /// `Ref(GB/s)` is blank. The chunk kernel is bench-only here (its
 /// correctness is recurrent-state, pinned by the legacy oracle test).
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{mt_gated_delta_chunk, mt_gated_delta_step};
+    use super::{ffai_gated_delta_chunk, ffai_gated_delta_step};
 
     // Decode step at Qwen3.6-class head_dim (dk=dv=256-ish kept small for the
     // in-process runner): one simdgroup per (dv, b*hv) element.
@@ -498,7 +498,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_step(dt: DType) -> BenchSetup {
         let (b, hv, hk, dv, dk) = (2usize, 4usize, 2usize, 64usize, 256usize);
         let n_total = b * hv;
-        BenchSetup::new(mt_gated_delta_step::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_step::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", b * hk * dk, dt))
             .buffer(BenchBuffer::random("k", b * hk * dk, dt))
@@ -521,7 +521,7 @@ pub mod kernel_benches {
     fn bench_gated_delta_chunk(dt: DType) -> BenchSetup {
         let (b, t, hv, hk, dv, dk) = (1usize, 64usize, 4usize, 2usize, 8usize, 64usize);
         let n_total = b * hv;
-        BenchSetup::new(mt_gated_delta_chunk::kernel_ir_for(dt))
+        BenchSetup::new(ffai_gated_delta_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", b * t * hk * dk, dt))
             .buffer(BenchBuffer::random("k", b * t * hk * dk, dt))

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! GPU correctness for `ffai::mt_sdpa_prefill_d512_sink` — multi-query
+//! GPU correctness for `ffai::ffai_sdpa_prefill_d512_sink` — multi-query
 //! causal sliding-window SDPA (d512, attn sink, MQA). Oracle: per-(q_pos,
 //! q_head) causal softmax with sink over the KV window.
 #![cfg(target_os = "macos")]
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::sdpa::sdpa_prefill_d512_sink::mt_sdpa_prefill_d512_sink;
+use ffai_kernels_std::kernels::sdpa::sdpa_prefill_d512_sink::ffai_sdpa_prefill_d512_sink;
 
 fn xorshift(s: &mut u32) -> u32 {
     let mut x = *s;
@@ -90,7 +90,7 @@ fn run_case_nq(dt: Dt, n_q: usize, n_query: usize, kv: usize, window: usize, tol
     b.insert("scale".into(), scale.to_le_bytes().to_vec());
 
     let ctx = Context::new().unwrap();
-    let mut kern = mt_sdpa_prefill_d512_sink::kernel_ir_for(dt.to_dtype());
+    let mut kern = ffai_sdpa_prefill_d512_sink::kernel_ir_for(dt.to_dtype());
     kern.mode = KernelMode::Reduction;
     let r =
         ctx.dispatch_with_grid(&kern, &b, &BTreeMap::new(), [n_q, n_query, 1], [32, 1, 1]).unwrap();

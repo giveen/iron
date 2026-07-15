@@ -1,7 +1,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
 //! Multi-query SDPA for `head_dim == 256`. The d=256 sibling of
-//! `mt_sdpa_multi`, generalising `mt_sdpa_decode_d256` with a
+//! `ffai_sdpa_multi`, generalising `ffai_sdpa_decode_d256` with a
 //! query dimension. One threadgroup per (query, q_head) attends a
 //! shared K/V cache in a single dispatch, TPG=1024 online softmax,
 //! same multi-query causal / full semantics as the d=128 reference
@@ -24,8 +24,8 @@
 //! ## DISPATCH INVARIANTS
 //!
 //! Reduction-mode kernel, STRICT threadgroup geometry, same
-//! machine-freeze hazard as `mt_sdpa_decode_d256` and
-//! `mt_sdpa_multi`. Consumers MUST encode these as preconditions
+//! machine-freeze hazard as `ffai_sdpa_decode_d256` and
+//! `ffai_sdpa_multi`. Consumers MUST encode these as preconditions
 //! in their wrappers.
 //!
 //! - **TPG = 1024 threads** (32 simdgroups × 32 lanes). Hard. A TPG
@@ -55,12 +55,12 @@
 //! over Apple's per-kernel threadgroup-memory cap. We split into two
 //! halves (dims 0..3 then 4..7) and reuse the same 4 tg_out buffers
 //! across both phases. Two extra barriers, same ~16 KB allocation.
-//! This mirrors `mt_sdpa_decode_d256` exactly.
+//! This mirrors `ffai_sdpa_decode_d256` exactly.
 
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_sdpa_multi_d256<T>(
+pub fn ffai_sdpa_multi_d256<T>(
     q: Tensor<T>,
     k: Tensor<T>,
     v: Tensor<T>,
@@ -218,12 +218,12 @@ mod tests {
         core::{DType, ir::KernelMode},
     };
 
-    use super::mt_sdpa_multi_d256;
+    use super::ffai_sdpa_multi_d256;
 
     fn msl_for(dt: DType) -> String {
-        let mut k = mt_sdpa_multi_d256::kernel_ir_for(dt);
+        let mut k = ffai_sdpa_multi_d256::kernel_ir_for(dt);
         k.mode = KernelMode::Reduction;
-        MslGenerator::default().generate(&k).expect("mt_sdpa_multi_d256 codegen succeeds")
+        MslGenerator::default().generate(&k).expect("ffai_sdpa_multi_d256 codegen succeeds")
     }
 
     #[test]
@@ -232,8 +232,8 @@ mod tests {
             let src = msl_for(dt);
             assert!(!src.trim().is_empty(), "MSL for {dt:?} should not be empty");
             assert!(
-                src.contains("kernel void mt_sdpa_multi_d256"),
-                "MSL for {dt:?} should declare mt_sdpa_multi_d256:\n{src}",
+                src.contains("kernel void ffai_sdpa_multi_d256"),
+                "MSL for {dt:?} should declare ffai_sdpa_multi_d256:\n{src}",
             );
         }
     }
@@ -242,7 +242,7 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_sdpa_multi_d256;
+    use super::ffai_sdpa_multi_d256;
     use crate::utils::{pack_f32, unpack_f32};
 
     // Per (query, q_head): softmax(Q·Kᵀ·scale)·V over the attended KV
@@ -320,7 +320,7 @@ pub mod kernel_tests {
             &q, &k, &v, n_q_heads, n_kv_heads, head_dim, base_kv, n_query, kv_stride, causal, scale,
         );
 
-        TestSetup::new(mt_sdpa_multi_d256::kernel_ir_for(dt))
+        TestSetup::new(ffai_sdpa_multi_d256::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("q", pack_f32(&q, dt), dt))
             .input(TestBuffer::from_vec("k", pack_f32(&k, dt), dt))
@@ -350,7 +350,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_sdpa_multi_d256;
+    use super::ffai_sdpa_multi_d256;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_multi_d256(dt: DType) -> BenchSetup {
@@ -362,7 +362,7 @@ pub mod kernel_benches {
         let n_kv = base_kv + n_query;
         let bytes = (2 * n_query * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim)
             * dt.size_bytes();
-        BenchSetup::new(mt_sdpa_multi_d256::kernel_ir_for(dt))
+        BenchSetup::new(ffai_sdpa_multi_d256::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
             .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))

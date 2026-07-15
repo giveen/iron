@@ -8,7 +8,7 @@
 //! the legacy `mlx/` + `ffai/` split.
 //!
 //! `ffai/arg_reduce.rs` (`ffai_argmax`) was a byte-for-byte duplicate of
-//! `mt_argmax` (in `arg_reduce.rs`) and was dropped, not moved.
+//! `ffai_argmax` (in `arg_reduce.rs`) and was dropped, not moved.
 
 pub mod arange;
 pub mod arg_reduce;

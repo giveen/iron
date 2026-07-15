@@ -64,7 +64,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    K["#[kernel]<br/>fn mt_exp&lt;T&gt;(..)"] --> IR["IR<br/>(Op variants)"]
+    K["#[kernel]<br/>fn ffai_exp&lt;T&gt;(..)"] --> IR["IR<br/>(Op variants)"]
     V["#[kernel(variants(...))]"] -. "stamps N kernels" .-> IR
     IR --> Passes["codegen passes<br/>const-fold · vectorize · unroll · FMA · DCE · …"]
     Passes --> Backend{CodegenBackend<br/>Target}

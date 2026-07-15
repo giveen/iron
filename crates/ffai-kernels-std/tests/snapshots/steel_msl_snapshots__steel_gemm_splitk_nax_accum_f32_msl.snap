@@ -6,7 +6,7 @@ expression: msl
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void mt_steel_gemm_splitk_accum_nax(
+kernel void ffai_steel_gemm_splitk_accum_nax(
     const device float *partials [[buffer(0)]],
     device float *out [[buffer(1)]],
     constant uint &m [[buffer(2)]],

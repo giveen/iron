@@ -3,15 +3,15 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
 
-//! GPU correctness for `kernels::ssm::gated_delta_prep_chunk::mt_gated_delta_prep_chunk`.
+//! GPU correctness for `kernels::ssm::gated_delta_prep_chunk::ffai_gated_delta_prep_chunk`.
 //!
 //! The chunked variant must match T sequential calls of
-//! `mt_gated_delta_prep_step` carrying state forward — that is exactly
+//! `ffai_gated_delta_prep_step` carrying state forward — that is exactly
 //! the per-token loop body in `Qwen35GDNMixer.forwardMany` we are
 //! replacing with one dispatch.
 //!
 //! CPU oracle: scalar prep + recurrence, T times, state carried.
-//! GPU under test: one `mt_gated_delta_prep_chunk` dispatch over `T`.
+//! GPU under test: one `ffai_gated_delta_prep_chunk` dispatch over `T`.
 
 #![cfg(target_os = "macos")]
 
@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::ssm::{
-    gated_delta_prep_chunk::mt_gated_delta_prep_chunk,
-    gated_delta_qknorm_prepass::mt_gated_delta_qknorm_prepass,
+    gated_delta_prep_chunk::ffai_gated_delta_prep_chunk,
+    gated_delta_qknorm_prepass::ffai_gated_delta_qknorm_prepass,
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -164,13 +164,13 @@ fn run_gpu(
     prepass_buffers.insert("hv".into(), (hv as u32).to_le_bytes().to_vec());
     prepass_buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
 
-    let mut prepass_kernel = mt_gated_delta_qknorm_prepass::kernel_ir_for(dt.to_dtype());
+    let mut prepass_kernel = ffai_gated_delta_qknorm_prepass::kernel_ir_for(dt.to_dtype());
     prepass_kernel.mode = KernelMode::Reduction;
     let prepass_result = ctx
         .dispatch_with_grid(&prepass_kernel, &prepass_buffers, &BTreeMap::new(), [t, b * hk, 1], [
             32, 1, 1,
         ])
-        .expect("mt_gated_delta_qknorm_prepass dispatch");
+        .expect("ffai_gated_delta_qknorm_prepass dispatch");
     let q_normed = prepass_result.outputs.get("q_normed").expect("q_normed").clone();
     let k_normed = prepass_result.outputs.get("k_normed").expect("k_normed").clone();
 
@@ -192,12 +192,12 @@ fn run_gpu(
     buffers.insert("hv".into(), (hv as u32).to_le_bytes().to_vec());
     buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
 
-    let mut kernel = mt_gated_delta_prep_chunk::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_gated_delta_prep_chunk::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [dv, n_total, 1], [32, 1, 1])
-        .expect("mt_gated_delta_prep_chunk dispatch");
+        .expect("ffai_gated_delta_prep_chunk dispatch");
 
     let y = unpack_bytes(result.outputs.get("y").expect("y"), dt);
     let state_out = unpack_bytes(result.outputs.get("state_out").expect("state_out"), dt);

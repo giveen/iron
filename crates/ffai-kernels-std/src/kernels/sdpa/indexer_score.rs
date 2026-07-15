@@ -19,7 +19,7 @@
 //! DSv4 production shape: `n_heads = 64`, `d_idx = 128`. The
 //! indexer's job is to pick 512 cache positions per CSA / HCA layer
 //! per decode step; this kernel produces the aggregate score, and a
-//! follow-up `mt_indexer_topk` does the bitonic top-512.
+//! follow-up `ffai_indexer_topk` does the bitonic top-512.
 //!
 //! ## Dispatch
 //!
@@ -35,7 +35,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_indexer_score<T>(
+pub fn ffai_indexer_score<T>(
     q_idx: Tensor<T>,
     k_idx: Tensor<T>,
     w: Tensor<f32>,
@@ -70,7 +70,7 @@ pub fn mt_indexer_score<T>(
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_indexer_score;
+    use super::ffai_indexer_score;
     use crate::utils::{pack_f32, unpack_f32};
 
     fn cpu_reference(
@@ -111,7 +111,7 @@ pub mod kernel_tests {
         let q_dt = unpack_f32(&pack_f32(&q_idx, dt), dt);
         let k_dt = unpack_f32(&pack_f32(&k_idx, dt), dt);
         let expected = cpu_reference(&q_dt, &k_dt, &w, n_heads, d_idx, n_kv);
-        TestSetup::new(mt_indexer_score::kernel_ir_for(dt))
+        TestSetup::new(ffai_indexer_score::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("q_idx", pack_f32(&q_idx, dt), dt))
             .input(TestBuffer::from_vec("k_idx", pack_f32(&k_idx, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w, DType::F32), DType::F32))
@@ -136,14 +136,14 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_indexer_score;
+    use super::ffai_indexer_score;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_indexer(dt: DType) -> BenchSetup {
         let (n_heads, d_idx, n_kv) = (64usize, 128usize, 4096usize);
         let bytes =
             (n_heads * d_idx + n_kv * n_heads * d_idx) * dt.size_bytes() + n_heads * 4 + n_kv * 4;
-        BenchSetup::new(mt_indexer_score::kernel_ir_for(dt))
+        BenchSetup::new(ffai_indexer_score::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("q_idx", n_heads * d_idx, dt))
             .buffer(BenchBuffer::random("k_idx", n_kv * n_heads * d_idx, dt))
             .buffer(BenchBuffer::random("w", n_heads, DType::F32))

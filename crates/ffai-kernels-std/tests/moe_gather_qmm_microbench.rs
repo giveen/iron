@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Microbench: `mt_moe_gather_qmm_int4` at Qwen3.6-35B-A3B shape.
+//! Microbench: `ffai_moe_gather_qmm_int4` at Qwen3.6-35B-A3B shape.
 //!
 //! `#[ignore]`-gated — run with:
 //!   cargo test -p ffai-kernels-std --test moe_gather_qmm_microbench --release -- --ignored --nocapture
@@ -14,10 +14,10 @@ use std::{collections::BTreeMap, time::Instant};
 use common::{Dt, gpu_lock, pack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::moe_gather_qmm::{
-    mt_moe_gather_qmm_int4,
-    mt_moe_gather_qmm_int4_m8,
-    mt_moe_gather_qmm_mma_int4,
-    mt_moe_gather_qmm_mma_int4_bm16,
+    ffai_moe_gather_qmm_int4,
+    ffai_moe_gather_qmm_int4_m8,
+    ffai_moe_gather_qmm_mma_int4,
+    ffai_moe_gather_qmm_mma_int4_bm16,
 };
 
 fn pack_int4_row(weights: &[u32]) -> Vec<u32> {
@@ -132,10 +132,10 @@ fn time_gather_qmm_vd(
     buffers.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
 
     let mut kernel = match variant {
-        Variant::M1 => mt_moe_gather_qmm_int4::kernel_ir_for(dt.to_dtype()),
-        Variant::M8 => mt_moe_gather_qmm_int4_m8::kernel_ir_for(dt.to_dtype()),
-        Variant::Mma => mt_moe_gather_qmm_mma_int4::kernel_ir_for(dt.to_dtype()),
-        Variant::MmaBm16 => mt_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt.to_dtype()),
+        Variant::M1 => ffai_moe_gather_qmm_int4::kernel_ir_for(dt.to_dtype()),
+        Variant::M8 => ffai_moe_gather_qmm_int4_m8::kernel_ir_for(dt.to_dtype()),
+        Variant::Mma => ffai_moe_gather_qmm_mma_int4::kernel_ir_for(dt.to_dtype()),
+        Variant::MmaBm16 => ffai_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(dt.to_dtype()),
     };
     kernel.mode = KernelMode::Reduction;
     let (grid, tg) = match variant {

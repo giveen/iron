@@ -2,7 +2,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::type_complexity)]
 
-//! GPU correctness for `kernels::ssm::gated_delta_prep::mt_gated_delta_prep_step`.
+//! GPU correctness for `kernels::ssm::gated_delta_prep::ffai_gated_delta_prep_step`.
 //!
 //! The fused kernel absorbs the host-side prep that
 //! `Qwen35GDNMixer.forward` currently does between conv1d and the GDN
@@ -12,7 +12,7 @@
 //!   2. per-head RMSNorm + scale of q, k
 //!   3. g    = exp(-exp(A_log) · softplus(a_raw + dt_bias))
 //!   4. beta = sigmoid(b_raw)
-//!   5. the recurrence (same math as `mt_gated_delta_step`)
+//!   5. the recurrence (same math as `ffai_gated_delta_step`)
 //!
 //! The CPU oracle in this file is intentionally written as
 //!   `cpu_prep(...)` → `naive_gated_delta_step(...)`
@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 
 use common::{Dt, gpu_lock, pack_bytes, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
-use ffai_kernels_std::kernels::ssm::gated_delta_prep::mt_gated_delta_prep_step;
+use ffai_kernels_std::kernels::ssm::gated_delta_prep::ffai_gated_delta_prep_step;
 
 // ────────────────────────────────────────────────────────────────────
 //  CPU oracle: scalar prep + recurrence.
@@ -238,7 +238,7 @@ fn run_gpu(
     dv: usize,
     dk: usize,
 ) -> (Vec<f32>, Vec<f32>) {
-    assert!(dk.is_multiple_of(32), "mt_gated_delta_prep_step requires dk % 32 == 0");
+    assert!(dk.is_multiple_of(32), "ffai_gated_delta_prep_step requires dk % 32 == 0");
     let n_total = b * hv;
 
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -258,12 +258,12 @@ fn run_gpu(
     buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
 
     let ctx = Context::new().expect("Context::new on macOS");
-    let mut kernel = mt_gated_delta_prep_step::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_gated_delta_prep_step::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
     let result = ctx
         .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [dv, n_total, 1], [32, 1, 1])
-        .expect("mt_gated_delta_prep_step dispatch");
+        .expect("ffai_gated_delta_prep_step dispatch");
 
     let y = unpack_bytes(result.outputs.get("y").expect("y"), dt);
     let state_out = unpack_bytes(result.outputs.get("state_out").expect("state_out"), dt);
@@ -665,7 +665,7 @@ fn prep_step_bf16_multi_step_8_consecutive() {
 //  When q_norm_weight / k_norm_weight are identity and a_log / a_raw /
 //  dt_bias / b_raw are chosen so g and beta land at the values used by
 //  the (unfused) legacy `tests/gated_delta_gpu_correctness.rs` tests
-//  (removed in #240), the fused
+//  (since removed), the fused
 //  kernel's output should match the CPU oracle to the same precision
 //  envelope the unfused kernel does. This is the regression net under
 //  the "drop-in replacement" claim.
@@ -675,7 +675,7 @@ fn prep_step_bf16_multi_step_8_consecutive() {
 fn prep_step_f32_matches_unfused_path_when_weights_identity() {
     // Recovers the unweighted `perHeadRMSNormScale35` path the existing
     // Qwen3.6 host code uses. Equivalent to passing (q, k) already
-    // RMSNorm-scaled through `mt_gated_delta_step`.
+    // RMSNorm-scaled through `ffai_gated_delta_step`.
     let (cy, cs) = run_cell(1, 8, 4, 16, 64, Dt::F32, true, 1.0);
     assert!(cy >= 0.999, "f32 unfused-equivalence y cos = {cy:.6}");
     assert!(cs >= 0.999, "f32 unfused-equivalence state cos = {cs:.6}");

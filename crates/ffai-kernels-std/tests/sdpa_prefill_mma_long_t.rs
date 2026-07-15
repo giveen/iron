@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Long-context + batched coverage for `mt_sdpa_prefill_mma`.
+//! Long-context + batched coverage for `ffai_sdpa_prefill_mma`.
 //!
 //! The kernel is bench-wired at B=1, T=512 in
 //! `mlx/steel/attn/steel_attention_mma.rs`. The dispatch geometry
@@ -29,7 +29,7 @@ mod common;
 
 use common::{Dt, gpu_lock, pack_bytes, ramp, unpack_bytes};
 use ffai_kernels::Context;
-use ffai_kernels_std::kernels::sdpa::steel_attn::steel_attention_mma::mt_sdpa_prefill_mma;
+use ffai_kernels_std::kernels::sdpa::steel_attn::steel_attention_mma::ffai_sdpa_prefill_mma;
 
 /// Naive SDPA prefill (single batch, full causal). Q/K/V are
 /// `[n_heads_or_kv * T * D]` row-major; output is `[n_heads * T * D]`.
@@ -110,7 +110,7 @@ fn run_sdpa_prefill(
     buffers.insert("n_kv_heads".into(), (n_kv_heads as u32).to_le_bytes().to_vec());
     buffers.insert("scale".into(), scale.to_le_bytes().to_vec());
 
-    let mut kernel = mt_sdpa_prefill_mma::kernel_ir_for(dt.to_dtype());
+    let mut kernel = ffai_sdpa_prefill_mma::kernel_ir_for(dt.to_dtype());
     // SimdGroup2D is the bench's dispatch mode for this kernel (see
     // `run_sdpa_prefill` in `crates/ffai-kernels-std/src/run_spec.rs`).
     // It's required because the body reads `tgid_x`/`tgid_y`/`tgid_z`
@@ -128,7 +128,7 @@ fn run_sdpa_prefill(
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_matches_cpu_reference_t2048_f32() {
+fn ffai_sdpa_prefill_mma_matches_cpu_reference_t2048_f32() {
     let _g = gpu_lock();
 
     // T=2048 hits 64 q tiles per head; small enough that the CPU
@@ -189,7 +189,7 @@ fn mt_sdpa_prefill_mma_matches_cpu_reference_t2048_f32() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_b2_via_head_flatten_t1024_f32() {
+fn ffai_sdpa_prefill_mma_b2_via_head_flatten_t1024_f32() {
     let _g = gpu_lock();
 
     // Backwards-compat pin: callers that flatten Q/K/V to the
@@ -291,7 +291,7 @@ fn mt_sdpa_prefill_mma_b2_via_head_flatten_t1024_f32() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_kernel_side_b2_t1024_f32() {
+fn ffai_sdpa_prefill_mma_kernel_side_b2_t1024_f32() {
     let _g = gpu_lock();
 
     // True B>1 dispatch: kernel reads `batch = tgid_z` and folds it
@@ -382,7 +382,7 @@ fn mt_sdpa_prefill_mma_kernel_side_b2_t1024_f32() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_kernel_side_b4_t512_f32() {
+fn ffai_sdpa_prefill_mma_kernel_side_b4_t512_f32() {
     let _g = gpu_lock();
 
     // Tighter-batch (B=4) coverage at T=512: catches per-batch
@@ -469,7 +469,7 @@ fn mt_sdpa_prefill_mma_kernel_side_b4_t512_f32() {
 }
 
 #[test]
-fn mt_sdpa_prefill_mma_matches_cpu_reference_t4096_f32() {
+fn ffai_sdpa_prefill_mma_matches_cpu_reference_t4096_f32() {
     let _g = gpu_lock();
 
     // T=4096 hits 128 q tiles per head. n_heads=2 caps CPU ref cost.

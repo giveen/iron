@@ -4,8 +4,8 @@
 //!
 //! Two scan shapes over a `[rows, n]` input, scanned along the last
 //! axis:
-//!   - **inclusive** — `mt_scan`: `out[i] = Σ_{j≤i} inp[j]`.
-//!   - **exclusive** — `mt_scan_exclusive`: `out[i] = Σ_{j<i} inp[j]`
+//!   - **inclusive** — `ffai_scan`: `out[i] = Σ_{j≤i} inp[j]`.
+//!   - **exclusive** — `ffai_scan_exclusive`: `out[i] = Σ_{j<i} inp[j]`
 //!     (`out[0] = 0`). MLX's `contig_scan_*` family carries an
 //!     `exclusive` template flag for the same split.
 //!
@@ -29,7 +29,7 @@
 use ffai_kernels::kernel;
 
 #[kernel]
-pub fn mt_scan<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let lane = simd_lane;
@@ -91,7 +91,7 @@ pub fn mt_scan<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 
 // ── Exclusive scan ───────────────────────────────────────────────────────
 //
-// Identical machinery to `mt_scan`; only the store stage differs — each
+// Identical machinery to `ffai_scan`; only the store stage differs — each
 // output position receives the running sum of every *strictly prior*
 // element. `base_prefix` is the exclusive prefix before this thread's
 // 4-element group, so element k stores `base_prefix + (sum of v0..v_{k-1})`.
@@ -101,7 +101,7 @@ pub fn mt_scan<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 // `#[test_kernel]`s instead.
 
 #[kernel]
-pub fn mt_scan_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let lane = simd_lane;
@@ -166,20 +166,20 @@ pub fn mt_scan_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 // ── Multi-op scan variants (prod / max / min) ────────────────────────────
 //
 // The same two-level (per-simdgroup + cross-simdgroup) prefix-scan
-// machinery from `mt_scan` / `mt_scan_exclusive`, parameterised by a
+// machinery from `ffai_scan` / `ffai_scan_exclusive`, parameterised by a
 // different binary operation and identity element:
 //
 //   | kernel                  | op  | identity |
 //   |-------------------------|-----|----------|
-//   | mt_scan_prod            | ×   | 1.0      |
-//   | mt_scan_prod_exclusive  | ×   | 1.0      |
-//   | mt_scan_max             | max | -∞       |
-//   | mt_scan_max_exclusive   | max | -∞       |
-//   | mt_scan_min             | min | +∞       |
-//   | mt_scan_min_exclusive   | min | +∞       |
+//   | ffai_scan_prod            | ×   | 1.0      |
+//   | ffai_scan_prod_exclusive  | ×   | 1.0      |
+//   | ffai_scan_max             | max | -∞       |
+//   | ffai_scan_max_exclusive   | max | -∞       |
+//   | ffai_scan_min             | min | +∞       |
+//   | ffai_scan_min_exclusive   | min | +∞       |
 //
 // The exclusive variant stores the running prefix *before* the current
-// element — identical in structure to `mt_scan_exclusive`.
+// element — identical in structure to `ffai_scan_exclusive`.
 //
 // MLX's `contig_scan_*` family carries `op ∈ {sum, prod, max, min}` and
 // an `exclusive` flag that cover all eight kernels (four ops × two
@@ -203,7 +203,7 @@ pub fn mt_scan_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 // This avoids adding new simd intrinsics to the DSL while remaining
 // correct for all values, including zeros and negatives.
 //
-// DISPATCH INVARIANTS (same as mt_scan):
+// DISPATCH INVARIANTS (same as ffai_scan):
 //  - Reduction mode, `grid = [1, rows, 1]`, `tg = [tpg, 1, 1]`.
 //  - `tpg` a multiple of 32; `n_simd ≤ 8` (so `lsize ≤ 256`).
 //  - `tgs` buffer is `lsize` f32 slots; `sgs` is 9 f32 slots.
@@ -214,7 +214,7 @@ pub fn mt_scan_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32)
 // Identity element is 1.0; out-of-range loads are padded with 1.0.
 
 #[kernel]
-pub fn mt_scan_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -277,7 +277,7 @@ pub fn mt_scan_prod<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 // `out[0] = 1`,  `out[i] = v[0] * … * v[i-1]`  (exclusive prefix product).
 
 #[kernel]
-pub fn mt_scan_prod_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_prod_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -335,7 +335,7 @@ pub fn mt_scan_prod_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n:
 // Identity element is -∞; out-of-range loads are padded with -∞.
 
 #[kernel]
-pub fn mt_scan_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -401,7 +401,7 @@ pub fn mt_scan_max<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 // `out[0] = -∞`,  `out[i] = max(v[0], …, v[i-1])`  (exclusive max prefix).
 
 #[kernel]
-pub fn mt_scan_max_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_max_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -465,7 +465,7 @@ pub fn mt_scan_max_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: 
 // Identity element is +∞; out-of-range loads are padded with +∞.
 
 #[kernel]
-pub fn mt_scan_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -527,7 +527,7 @@ pub fn mt_scan_min<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
 // `out[0] = +∞`,  `out[i] = min(v[0], …, v[i-1])`  (exclusive min prefix).
 
 #[kernel]
-pub fn mt_scan_min_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
+pub fn ffai_scan_min_exclusive<T>(inp: Tensor<T>, out: Tensor<T>, #[constexpr] n: u32) {
     let row = program_id::<1>();
     let lid = tid;
     let ns = n_simd;
@@ -637,12 +637,12 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1.0, 8.0])]
     fn test_scan_sum(dt: DType) -> TestSetup {
-        scan_setup(mt_scan::kernel_ir_for(dt), 4, 1024, &small, 0.0, |a, b| a + b, false, dt)
+        scan_setup(ffai_scan::kernel_ir_for(dt), 4, 1024, &small, 0.0, |a, b| a + b, false, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1.0, 8.0])]
     fn test_scan_exclusive(dt: DType) -> TestSetup {
         scan_setup(
-            mt_scan_exclusive::kernel_ir_for(dt),
+            ffai_scan_exclusive::kernel_ir_for(dt),
             4,
             1024,
             &small,
@@ -654,12 +654,12 @@ pub mod kernel_tests {
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 1.0])]
     fn test_scan_prod(dt: DType) -> TestSetup {
-        scan_setup(mt_scan_prod::kernel_ir_for(dt), 4, 1024, &near1, 1.0, |a, b| a * b, false, dt)
+        scan_setup(ffai_scan_prod::kernel_ir_for(dt), 4, 1024, &near1, 1.0, |a, b| a * b, false, dt)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 1.0])]
     fn test_scan_prod_exclusive(dt: DType) -> TestSetup {
         scan_setup(
-            mt_scan_prod_exclusive::kernel_ir_for(dt),
+            ffai_scan_prod_exclusive::kernel_ir_for(dt),
             4,
             1024,
             &near1,
@@ -672,7 +672,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_scan_max(dt: DType) -> TestSetup {
         scan_setup(
-            mt_scan_max::kernel_ir_for(dt),
+            ffai_scan_max::kernel_ir_for(dt),
             4,
             1024,
             &spread,
@@ -685,7 +685,7 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-3)]
     fn test_scan_min(dt: DType) -> TestSetup {
         scan_setup(
-            mt_scan_min::kernel_ir_for(dt),
+            ffai_scan_min::kernel_ir_for(dt),
             4,
             1024,
             &spread,
@@ -706,7 +706,7 @@ pub mod kernel_benches {
 
     const SCAN_ROWS: usize = 4096;
     const SCAN_N: usize = 1024;
-    // Legacy `tol=1e-3` floor for the scan family. MT accumulates the running
+    // Legacy `tol=1e-3` floor for the scan family. FFAI accumulates the running
     // prefix in f32; MLX's `contiguous_scan` accumulates in the output dtype
     // `U` (lossy for f16/bf16), so the two legitimately drift by more than 1
     // ULP over a 1024-element row.
@@ -731,11 +731,11 @@ pub mod kernel_benches {
     /// correctness comparison.
     ///
     /// `contiguous_scan` indexes the row it scans via `gid.y` (so the dispatch
-    /// puts rows on the Y axis, matching MT's `grid_3d(1, rows, 1, …)`), reads
+    /// puts rows on the Y axis, matching FFAI's `grid_3d(1, rows, 1, …)`), reads
     /// `in[buffer(0)]`, writes `out[buffer(1)]`, and takes `axis_size` as a
-    /// `size_t` (8-byte) scalar — unlike MT's `u32` `n` constexpr.
+    /// `size_t` (8-byte) scalar — unlike FFAI's `u32` `n` constexpr.
     ///
-    /// `inp` is shared by name with the reference (the runner injects the MT
+    /// `inp` is shared by name with the reference (the runner injects the FFAI
     /// bytes), so both kernels scan identical data. The input uses
     /// `InputDomain::Tiny` (~1e-4..1.6e-3) so the running sum over a 1024-element
     /// row stays small (≈1.6 max) and finite in f16/bf16.
@@ -754,7 +754,7 @@ pub mod kernel_benches {
                     format!("contig_scan_inclusive_sum_{tn}_{tn}"),
                     include_str!(concat!(env!("OUT_DIR"), "/metal/scan.metal")),
                 )
-                // in[0] shared by name with the MT `inp` above (placeholder).
+                // in[0] shared by name with the FFAI `inp` above (placeholder).
                 .buffer(BenchBuffer::zeros("inp", rows * n, dt))
                 .buffer(BenchBuffer::zeros("out", rows * n, dt).output())
                 // axis_size is `size_t` (8 bytes) = N.
@@ -766,7 +766,7 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_scan_sum(dt: DType) -> BenchSetup { sb_sum_ref(mt_scan::kernel_ir_for(dt), dt) }
+    fn bench_scan_sum(dt: DType) -> BenchSetup { sb_sum_ref(ffai_scan::kernel_ir_for(dt), dt) }
 
     macro_rules! sbench {
         ($name:ident, $kernel:ident) => {
@@ -774,11 +774,11 @@ pub mod kernel_benches {
             fn $name(dt: DType) -> BenchSetup { sb($kernel::kernel_ir_for(dt), dt) }
         };
     }
-    sbench!(bench_scan_excl, mt_scan_exclusive);
-    sbench!(bench_scan_prod, mt_scan_prod);
-    sbench!(bench_scan_prod_excl, mt_scan_prod_exclusive);
-    sbench!(bench_scan_max, mt_scan_max);
-    sbench!(bench_scan_max_excl, mt_scan_max_exclusive);
-    sbench!(bench_scan_min, mt_scan_min);
-    sbench!(bench_scan_min_excl, mt_scan_min_exclusive);
+    sbench!(bench_scan_excl, ffai_scan_exclusive);
+    sbench!(bench_scan_prod, ffai_scan_prod);
+    sbench!(bench_scan_prod_excl, ffai_scan_prod_exclusive);
+    sbench!(bench_scan_max, ffai_scan_max);
+    sbench!(bench_scan_max_excl, ffai_scan_max_exclusive);
+    sbench!(bench_scan_min, ffai_scan_min);
+    sbench!(bench_scan_min_excl, ffai_scan_min_exclusive);
 }

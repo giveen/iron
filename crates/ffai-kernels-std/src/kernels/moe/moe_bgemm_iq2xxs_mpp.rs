@@ -6,7 +6,7 @@
 //! expert's weight is read+dequanted ONCE and reused across all the tokens
 //! routed to it — the amortization that makes MoE prefill fast.
 //!
-//! Structure is identical to `moe_mpp::mt_moe_gather_qmm_mma_int4_bm16_mpp`
+//! Structure is identical to `moe_mpp::ffai_moe_gather_qmm_mma_int4_bm16_mpp`
 //! (BM=16 / BN=32 / BK=16 coop-tile MMA, contiguous-expert sub-run walk);
 //! ONLY the weight-staging loop differs — int4 nibble unpack → IQ2_XXS
 //! grid+sign dequant (the same formula as the gemv, see
@@ -22,7 +22,7 @@ use ffai_kernels::kernel;
 
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_moe_gather_bgemm_iq2xxs_mpp<T>(
+pub fn ffai_moe_gather_bgemm_iq2xxs_mpp<T>(
     x: Tensor<T>,
     qs: Tensor<u32>,
     d_f32: Tensor<f32>,
@@ -154,7 +154,7 @@ pub fn mt_moe_gather_bgemm_iq2xxs_mpp<T>(
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_moe_gather_bgemm_iq2xxs_mpp;
+    use super::ffai_moe_gather_bgemm_iq2xxs_mpp;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_bgemm_iq2xxs_mpp(dt: DType) -> BenchSetup {
@@ -163,7 +163,7 @@ pub mod kernel_benches {
         let n_out = 2048usize;
         let t_rows = 256usize;
         let nblk = n_out * k_in / 256;
-        BenchSetup::new(mt_moe_gather_bgemm_iq2xxs_mpp::kernel_ir_for(dt))
+        BenchSetup::new(ffai_moe_gather_bgemm_iq2xxs_mpp::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("x", t_rows * k_in, dt))
             .buffer(BenchBuffer::random("qs", n_experts * nblk * 16, DType::U32))

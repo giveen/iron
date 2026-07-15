@@ -1,9 +1,9 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! `mt_qmm_nax` — production int4 quantized matmul via `mpp::tensor_ops::matmul2d`.
+//! `ffai_qmm_nax` — production int4 quantized matmul via `mpp::tensor_ops::matmul2d`.
 //!
 //! This is the MPP (MetalPerformancePrimitives) counterpart of
-//! `mt_qmm_mma` (the simdgroup-ladder variant). It mirrors the same
+//! `ffai_qmm_mma` (the simdgroup-ladder variant). It mirrors the same
 //! algorithm — int4 weights dequantized into threadgroup memory once
 //! per K-block, then a per-simdgroup matmul against the fp T X-tile —
 //! but replaces the manual 8×8 `simdgroup_matmul` ladder with one
@@ -11,7 +11,7 @@
 //!
 //! Expressed entirely in the `#[kernel]` DSL via the `coop_tile_*`
 //! intrinsics — no `Op::InlineMsl`. Algorithmically identical to
-//! `mt_qmm_mma_mpp`; the two co-exist so consumers can pick the
+//! `ffai_qmm_mma_mpp`; the two co-exist so consumers can pick the
 //! `_nax` vs `_mpp` name in their own dispatch tables.
 //!
 //! ## bf16 staging
@@ -33,10 +33,10 @@
 use ffai_kernels::kernel;
 
 /// MPP int4 quantized matmul `Out = X · dequant(W)`. Same shape as
-/// `mt_qmm_mma_mpp`; both kernels co-exist for naming compatibility.
+/// `ffai_qmm_mma_mpp`; both kernels co-exist for naming compatibility.
 #[kernel]
 #[allow(clippy::too_many_arguments)]
-pub fn mt_qmm_nax<T>(
+pub fn ffai_qmm_nax<T>(
     w: Tensor<u32>,
     scales: Tensor<T>,
     biases: Tensor<T>,
@@ -131,8 +131,8 @@ mod tests {
     #[test]
     fn kernel_ir_constructs_and_uses_coop_tile_ops() {
         for dt in [DType::F32, DType::F16, DType::BF16] {
-            let k = mt_qmm_nax::kernel_ir_for(dt);
-            assert_eq!(k.name, "mt_qmm_nax");
+            let k = ffai_qmm_nax::kernel_ir_for(dt);
+            assert_eq!(k.name, "ffai_qmm_nax");
             assert_eq!(k.params.len(), 5);
             assert_eq!(k.constexprs.len(), 3);
 
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn bf16_stages_through_half() {
-        let k = mt_qmm_nax::kernel_ir_for(DType::BF16);
+        let k = ffai_qmm_nax::kernel_ir_for(DType::BF16);
         let setup = std::iter::once(&k.body)
             .chain(k.blocks.values())
             .flat_map(|b| b.ops.iter())
@@ -161,40 +161,40 @@ mod tests {
     #[test]
     fn codegen_emits_mpp_include_and_kernel_decl() {
         for (dt, t_name) in [(DType::F32, "float"), (DType::F16, "half"), (DType::BF16, "half")] {
-            let mut k = mt_qmm_nax::kernel_ir_for(dt);
+            let mut k = ffai_qmm_nax::kernel_ir_for(dt);
             let suffix = match dt {
                 DType::F32 => "f32",
                 DType::F16 => "f16",
                 DType::BF16 => "bf16",
                 _ => unreachable!(),
             };
-            k.name = format!("mt_qmm_nax_{suffix}");
+            k.name = format!("ffai_qmm_nax_{suffix}");
             let msl = MslGenerator::default().generate(&k).expect("codegen");
             assert!(
                 msl.contains("MetalPerformancePrimitives/MetalPerformancePrimitives.h"),
                 "MPP include missing:\n{msl}"
             );
             assert!(msl.contains("mpp::tensor_ops::matmul2d_descriptor"));
-            assert!(msl.contains(&format!("kernel void mt_qmm_nax_{suffix}")));
+            assert!(msl.contains(&format!("kernel void ffai_qmm_nax_{suffix}")));
             assert!(msl.contains(&format!("threadgroup {t_name} Xs")));
         }
     }
 }
 
-/// New-syntax correctness + benchmark for `mt_qmm_nax` (MPP/NAX tensor-core
+/// New-syntax correctness + benchmark for `ffai_qmm_nax` (MPP/NAX tensor-core
 /// quantized matmul). The dequant-then-matmul math is identical to the
 /// `quantized` qmm-MMA family (group_size 64 baked), so this reuses the
 /// shared CPU oracle / bench builder rather than restating them.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::mt_qmm_nax;
+    use super::ffai_qmm_nax;
     use crate::kernels::gemm::quantized::kernel_tests::qx_setup;
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_qmm_nax(dt: DType) -> TestSetup {
         qx_setup(
-            mt_qmm_nax::kernel_ir_for(dt),
+            ffai_qmm_nax::kernel_ir_for(dt),
             32,
             64,
             512,
@@ -208,17 +208,17 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmark for `mt_qmm_nax`.
+/// New-syntax benchmark for `ffai_qmm_nax`.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::mt_qmm_nax;
+    use super::ffai_qmm_nax;
     use crate::kernels::gemm::quantized::kernel_benches::qmb;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_qmm_nax(dt: DType) -> BenchSetup {
         qmb(
-            mt_qmm_nax::kernel_ir_for(dt),
+            ffai_qmm_nax::kernel_ir_for(dt),
             32,
             4096,
             4096,

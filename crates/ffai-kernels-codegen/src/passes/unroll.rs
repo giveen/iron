@@ -551,7 +551,7 @@ mod tests {
         // iteration's `kernel.blocks.remove(bid)` finds nothing.
         //
         // The old code used `.unwrap()` there and panicked. Regression
-        // test for `mt_affine_quantize_int8` / `mt_rope_f16`: build a
+        // test for `ffai_affine_quantize_int8` / `ffai_rope_f16`: build a
         // kernel where block `b1` contains a loop whose body is `b2`,
         // so unrolling `b1` removes `b2` before the loop reaches it.
         let mut k = Kernel::new("nested_block_unroll");
