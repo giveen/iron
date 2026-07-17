@@ -91,6 +91,10 @@ pub mod kernel_tests {
     /// DeepSeek-V3 shape — same router pattern at a different expert count.
     #[test_kernel(dtypes = [f32], tol = [2e-4])]
     fn test_router_sigmoid_bias_dsv3(_dt: DType) -> TestSetup { setup(256) }
+
+    /// Hy3 / hy_v3 shape — 192 routed experts (config `num_experts`).
+    #[test_kernel(dtypes = [f32], tol = [2e-4])]
+    fn test_router_sigmoid_bias_hy3(_dt: DType) -> TestSetup { setup(192) }
 }
 
 pub mod kernel_benches {

@@ -7,5 +7,6 @@
 //! Migrated from the legacy `mlx/` (`fft`) + `ffai/` split.
 
 pub mod cache;
+pub mod compact_kv;
 pub mod fft;
 pub mod update_many;

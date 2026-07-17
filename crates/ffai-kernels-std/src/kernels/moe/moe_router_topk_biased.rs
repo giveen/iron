@@ -1,7 +1,10 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! DeepSeek V4 router top-K selection — GPU-side, so the per-layer MoE
-//! routing never round-trips to the CPU.
+//! DeepSeek V4 / NemotronH-style router top-K selection — GPU-side, so the
+//! per-layer MoE routing never round-trips to the CPU.
+//!
+//! Also the selection half of the candidate **Hy3** path when combined with
+//! `ffai_moe_sigmoid_bias` (192 experts, top-8). See `docs/specs/HY3_MOE_PREP.md`.
 //!
 //! DSv4 selects the top-K experts by the **biased** sqrtsoftplus score
 //! and weights them by the **unbiased** score, renormalised to sum to 1.
@@ -101,6 +104,63 @@ pub fn ffai_remap_u32(
     }
 }
 
+pub mod kernel_tests {
+    use ffai_kernels::{test::*, test_kernel};
+
+    use super::ffai_moe_router_topk_biased;
+    use crate::utils::{pack_f32, unpack_f32};
+
+    fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+    /// Top-k by `score_biased`; weights = renorm of `score_unbiased` on chosen.
+    fn topk_biased_oracle(
+        biased: &[f32],
+        unbiased: &[f32],
+        n_experts: usize,
+        k: usize,
+    ) -> (Vec<u32>, Vec<f32>) {
+        let mut order: Vec<usize> = (0..n_experts).collect();
+        // Descending biased score; smaller index wins ties (matches kernel simd_min on ties).
+        order.sort_by(|&a, &b| biased[b].partial_cmp(&biased[a]).unwrap().then(a.cmp(&b)));
+        let chosen = &order[..k];
+        let sum: f32 = chosen.iter().map(|&e| unbiased[e]).sum();
+        let idx: Vec<u32> = chosen.iter().map(|&e| e as u32).collect();
+        let w: Vec<f32> = chosen.iter().map(|&e| unbiased[e] / sum).collect();
+        (idx, w)
+    }
+
+    fn setup(dt: DType, n_experts: usize, k: usize) -> TestSetup {
+        // Well-separated biased scores so selection is dtype-stable.
+        let biased_f: Vec<f32> =
+            (0..n_experts).map(|e| ((e * 7 + 3) % n_experts) as f32 * 0.5 + 0.1).collect();
+        // Unbiased must be positive for a clean renorm (sigmoid range).
+        let unbiased_f: Vec<f32> =
+            (0..n_experts).map(|e| 0.05 + ((e * 5 + 1) % n_experts) as f32 * 0.01).collect();
+        let biased = unpack_f32(&pack_f32(&biased_f, dt), dt);
+        let unbiased = unpack_f32(&pack_f32(&unbiased_f, dt), dt);
+        let (idx, w) = topk_biased_oracle(&biased, &unbiased, n_experts, k);
+        TestSetup::new(ffai_moe_router_topk_biased::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .input(TestBuffer::from_vec("score_biased", pack_f32(&biased_f, dt), dt))
+            .input(TestBuffer::from_vec("score_unbiased", pack_f32(&unbiased_f, dt), dt))
+            .input(TestBuffer::zeros("indices_out", k, DType::U32))
+            .input(TestBuffer::zeros("weights_out", k, dt))
+            .constexpr("n_experts", n_experts as u32)
+            .constexpr("k", k as u32)
+            .expect(TestBuffer::from_vec("indices_out", u32_bytes(&idx), DType::U32))
+            .expect(TestBuffer::from_vec("weights_out", pack_f32(&w, dt), dt))
+            .grid_3d(1, 1, 1, [32, 1, 1])
+    }
+
+    /// DeepSeek-V4 / Nemotron-ish default bench shape.
+    #[test_kernel(dtypes = [f32], tol = [1e-4])]
+    fn test_moe_router_topk_biased_dsv4(dt: DType) -> TestSetup { setup(dt, 256, 6) }
+
+    /// Hy3 / hy_v3 — 192 experts, top-8.
+    #[test_kernel(dtypes = [f32], tol = [1e-4])]
+    fn test_moe_router_topk_biased_hy3(dt: DType) -> TestSetup { setup(dt, 192, 8) }
+}
+
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
@@ -118,6 +178,24 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("weights_out", k, dt).output())
             .constexpr("n_experts", n_experts as u32)
             .constexpr("k", k as u32)
+            .grid_3d(1, 1, 1, [32, 1, 1])
+            .bytes_moved((2 * n_experts * dt.size_bytes()) as u64)
+    }
+
+    /// Hy3 decode-shaped router selection (192 experts, top-8, 1 token row).
+    #[bench(dtypes = [f32])]
+    fn bench_moe_router_topk_biased_hy3(dt: DType) -> BenchSetup {
+        let n_experts = 192usize;
+        let k = 8usize;
+        BenchSetup::new(ffai_moe_router_topk_biased::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("score_biased", n_experts, dt))
+            .buffer(BenchBuffer::random("score_unbiased", n_experts, dt))
+            .buffer(BenchBuffer::zeros("indices_out", k, DType::U32).output())
+            .buffer(BenchBuffer::zeros("weights_out", k, dt).output())
+            .constexpr("n_experts", n_experts as u32)
+            .constexpr("k", k as u32)
+            .with_shape_label(format!("hy3 E{n_experts} k{k} {}", crate::utils::dtype_label(dt)))
             .grid_3d(1, 1, 1, [32, 1, 1])
             .bytes_moved((2 * n_experts * dt.size_bytes()) as u64)
     }

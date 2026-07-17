@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! MPP-backed MoE grouped BGEMM, BM=16 — `ffai_moe_gather_qmm_mma_int{4,8}_bm16_mpp`.
+//! MPP-backed MoE grouped BGEMM, BM=16 — `ffai_moe_gather_qmm_mma_int{2,4,8}_bm16_mpp`.
 //!
 //! Routes the per-tile matmul through Apple's MetalPerformancePrimitives
 //! `mpp::tensor_ops::matmul2d` (cooperative-tensor path, 1 simdgroup). The int4
@@ -35,15 +35,14 @@
 
 use ffai_kernels::kernel;
 
-/// MPP MoE grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup. `BITS` ∈ {4, 8}
-/// selects the weight precision; produces `ffai_moe_gather_qmm_mma_int4_bm16_mpp`
-/// and `_int8_bm16_mpp`.
+/// MPP MoE grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup. `BITS` ∈ {2, 4, 8}
+/// selects the weight precision; produces `ffai_moe_gather_qmm_mma_int{2,4,8}_bm16_mpp`.
 ///
 /// Params: `x [m_total, k_in]`, `w [n_experts, n_out, k_in*BITS/32]`
 /// (`32/BITS` codes packed per uint32, LSB-first), `scales`/`biases
 /// [n_experts, n_out, k_in/group]`, `indices [m_total]` (per-row expert id),
 /// `out [m_total, n_out]`.
-#[kernel(variants(BITS = [4, 8], suffix = "int{BITS}_bm16_mpp"))]
+#[kernel(variants(BITS = [2, 4, 8], suffix = "int{BITS}_bm16_mpp"))]
 #[allow(clippy::too_many_arguments)]
 pub fn ffai_moe_gather_qmm_mma<T>(
     x: Tensor<T>,
@@ -247,7 +246,7 @@ mod tests {
     }
 }
 
-/// New-syntax correctness tests for the MPP MoE BGEMM (BM=16), int4 + int8.
+/// New-syntax correctness tests for the MPP MoE BGEMM (BM=16), int2/4/8.
 /// Oracle is the clean per-row-`indices` dequant-then-grouped-matmul: each row
 /// `t` resolves its expert from `indices[t]`, dequantizes that expert's weight
 /// (`32/BITS` codes/u32, per-group scale/bias), and dots against the row's
@@ -259,14 +258,31 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm16_mpp, ffai_moe_gather_qmm_mma_int8_bm16_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm16_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm16_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm16_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{
         MmaTestShape,
+        int2_indexed_setup,
         int4_indexed_setup,
         int8_indexed_setup,
     };
 
     // Clean tile: BM=16 → ceil(64/16)=4 m-tiles, BN=32 → 64/32=2 n-tiles.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_moe_gather_qmm_mma_int2_bm16_mpp(dt: DType) -> TestSetup {
+        int2_indexed_setup(
+            ffai_moe_gather_qmm_mma_int2_bm16_mpp::kernel_ir_for(dt),
+            MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
+            32, // bn
+            16, // bm
+            32, // tpg
+            dt,
+        )
+    }
+
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> TestSetup {
         int4_indexed_setup(
@@ -292,13 +308,36 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmarks for the MPP MoE BGEMM (BM=16), int4 + int8.
-/// Qwen3.6-A3B-ish.
+/// New-syntax benchmarks for the MPP MoE BGEMM (BM=16), int2/4/8.
+/// Qwen3.6-A3B-ish (int4/8); Hy3-ish for int2.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm16_mpp, ffai_moe_gather_qmm_mma_int8_bm16_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm16_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm16_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm16_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_mma_int2_bm16_mpp(dt: DType) -> BenchSetup {
+        int4_mma_bench(
+            ffai_moe_gather_qmm_mma_int2_bm16_mpp::kernel_ir_for(dt),
+            MmaBenchShape {
+                bits: 2,
+                bn: 32,
+                bm: 16,
+                tpg: 32,
+                m_total: 1024,
+                n_out: 1536,
+                k_in: 4096,
+                n_experts: 192,
+                group_size: 64,
+            },
+            dt,
+        )
+    }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> BenchSetup {

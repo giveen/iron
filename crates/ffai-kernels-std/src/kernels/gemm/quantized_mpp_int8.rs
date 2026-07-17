@@ -23,7 +23,7 @@
 //! - **Grid: `[n/32, m/32, 1]`** — `tgid_x` = N-block, `tgid_y` = M-block.
 //! - **2×2 warp grid**: each SG owns a 16×16 sub-tile.
 //! - **TG row stride = BK + 4 (skew) = 36** — bank-conflict avoidance.
-//! - **Group size baked at 32** — natural int8 group size.
+//! - **Group size** = `k / gs_per_row` (caller-supplied; Hy3 uses 64, Qwen often 32).
 //! - **`KernelMode::Reduction`**.
 //!
 //! ## bf16 staging
@@ -36,7 +36,8 @@ use ffai_kernels::kernel;
 /// MPP int8 quantized matmul `Out = X · dequant(W)`. Params:
 ///   `w [n, k/4]` int8 packed (4 bytes/u32),
 ///   `scales`/`biases [n, k/group_size]` (T),
-///   `x [m, k]` (T), `out [m, n]` (T). group_size = 32.
+///   `x [m, k]` (T), `out [m, n]` (T).
+///   `gs_per_row = k / group_size` (group_size must divide k and BK=32).
 #[kernel]
 #[allow(clippy::too_many_arguments)]
 pub fn ffai_qmm_mma_mpp_int8<T>(
@@ -84,6 +85,8 @@ pub fn ffai_qmm_mma_mpp_int8<T>(
     let x_ws_base = x_m_row * 36u32 + x_k_base; // shared by Xs / Ws stages
     // int8: 4 bytes per u32 → packs_per_row = k/4.
     let packs_per_row = k / 4u32;
+    // group_size derived from gs_per_row so gs=32 and gs=64 both work.
+    let group_size = k / gs_per_row;
     // Per-row W addressing (N-direction). Same pattern as int4.
     let wn_plus_wr = w_n_base + x_m_row;
     let sb_base = wn_plus_wr * gs_per_row;
@@ -113,7 +116,7 @@ pub fn ffai_qmm_mma_mpp_int8<T>(
             // Group index: each pack covers 4 consecutive K-elements.
             // k_off = start K-element for this pack (absolute within W row).
             let k_off = kb + x_k_quad * 8u32 + _pi * 4u32;
-            let g = k_off / 32u32; // group_size = 32 (baked)
+            let g = k_off / group_size;
             let sb_off = sb_base + g;
             let scale = load(scales[sb_off]).cast::<f32>();
             let bias = load(biases[sb_off]).cast::<f32>();
@@ -240,6 +243,23 @@ pub mod kernel_tests {
             512,
             8,
             32,
+            true,
+            [2, 1, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
+
+    /// Hy3 int8 projections use group_size=64 (gs_per_row = k/64).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_qmm_mma_mpp_int8_gs64(dt: DType) -> TestSetup {
+        qx_setup(
+            ffai_qmm_mma_mpp_int8::kernel_ir_for(dt),
+            32,
+            64,
+            512,
+            8,
+            64,
             true,
             [2, 1, 1],
             [128, 1, 1],

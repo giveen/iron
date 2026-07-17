@@ -280,6 +280,18 @@ pub fn ffai_cast_f32_bf16(src: Tensor<f32>, mut dst: Tensor<bf16>, #[constexpr] 
     }
 }
 
+/// Elementwise dtype cast bf16 → f16. Hy3 checkpoints ship some quantized
+/// scales/biases in bf16; the Metal MPP int2 gather kernels only accept
+/// f16/f32 activations, so the loader promotes bf16 → f16 once at load time
+/// via this kernel rather than every decode step.
+#[kernel]
+pub fn ffai_cast_bf16_to_f16(src: Tensor<bf16>, mut dst: Tensor<f16>, #[constexpr] n: u32) {
+    let i = program_id::<0>();
+    if i < n {
+        store(dst[i], load(src[i]).cast::<f16>());
+    }
+}
+
 pub mod kernel_tests {
     use ffai_kernels::{core::ir::Kernel, test::*, test_kernel};
 
@@ -296,6 +308,20 @@ pub mod kernel_tests {
     fn ge_one() -> Vec<f32> { (0..N).map(|i| (i % 17) as f32 * 0.12 + 1.0).collect() }
     // Offset to dodge .5 boundaries where round-half-even vs -away disagree.
     fn round_safe() -> Vec<f32> { (0..N).map(|i| (i % 23) as f32 * 0.137 - 1.5).collect() }
+
+    /// bf16 → f16 narrowing cast (Hy3 loader promotion path).
+    #[test_kernel(dtypes = [f32], tol = [0.0])]
+    fn test_cast_bf16_to_f16(_dt: DType) -> TestSetup {
+        let a = signed();
+        let src_bf16 = unpack_f32(&pack_f32(&a, DType::BF16), DType::BF16);
+        let expected = unpack_f32(&pack_f32(&src_bf16, DType::F16), DType::F16);
+        TestSetup::new(ffai_cast_bf16_to_f16::kernel_ir())
+            .input(TestBuffer::from_vec("src", pack_f32(&src_bf16, DType::BF16), DType::BF16))
+            .input(TestBuffer::zeros("dst", a.len(), DType::F16))
+            .constexpr("n", a.len() as u32)
+            .expect(TestBuffer::from_vec("dst", pack_f32(&expected, DType::F16), DType::F16))
+            .grid_1d(a.len(), 256)
+    }
 
     fn un<F: Fn(f32) -> f32>(kernel: Kernel, a: &[f32], op: F, dt: DType) -> TestSetup {
         let a_dt = unpack_f32(&pack_f32(a, dt), dt);
@@ -528,6 +554,16 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_cast_to_f32(dt: DType) -> BenchSetup {
         cast_b(ffai_cast_to_f32::kernel_ir_for(dt), dt)
+    }
+    #[bench(dtypes = [f32])]
+    fn bench_cast_bf16_to_f16(_dt: DType) -> BenchSetup {
+        let n = 64 * 1024 * 1024usize;
+        BenchSetup::new(ffai_cast_bf16_to_f16::kernel_ir())
+            .buffer(BenchBuffer::random("src", n, DType::BF16))
+            .buffer(BenchBuffer::zeros("dst", n, DType::F16).output())
+            .constexpr("n", n as u32)
+            .grid_1d(n, 256)
+            .bytes_moved((n * (DType::BF16.size_bytes() + DType::F16.size_bytes())) as u64)
     }
     #[bench(dtypes = [f16, bf16])]
     fn bench_silu_cast_to_f32(dt: DType) -> BenchSetup {

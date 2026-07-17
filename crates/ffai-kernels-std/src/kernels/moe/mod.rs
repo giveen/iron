@@ -7,6 +7,9 @@
 //! BGEMM/GEMV, batched Q4 gather), and the down-projection combine. Migrated
 //! from the legacy `mlx/` + `ffai/` split.
 //!
+//! **Hy3 (`hy_v3`) prep** — shape tests/benches for 192 experts / top-8 and the
+//! router-path checklist live in `docs/specs/HY3_MOE_PREP.md`.
+//!
 //! Filenames keep the `moe_` prefix so they match their kernel names
 //! (`ffai_moe_*`); the two files whose kernels are format-prefixed instead
 //! (`block_scaled_moe`, `dequant_gemv_expert_indexed*`) match those. The
@@ -14,6 +17,8 @@
 //! format-axis fold (plan §7) is deferred.
 
 // Routing — top-k expert selection, permute/unpermute, router pre-scores.
+pub mod moe_compact_active;
+pub mod moe_densify_remap;
 pub mod moe_gather_qmm;
 pub mod moe_permute;
 pub mod moe_router_sigmoid_bias;
@@ -21,15 +26,18 @@ pub mod moe_router_sqrtsoftplus;
 pub mod moe_router_topk;
 pub mod moe_router_topk_biased;
 pub mod moe_sigmoid_bias;
+pub mod moe_sigmoid_bias_rows;
 
 // MPP grouped BGEMM (one ABI, tile-geometry / bit-width variants; shared
 // test/bench helpers in `moe_mpp_shared`).
 pub mod moe_mpp;
+pub mod moe_mpp_active;
 pub mod moe_mpp_block_scaled;
 pub mod moe_mpp_bm64;
 pub mod moe_mpp_bm64_block_scaled;
 pub mod moe_mpp_bm8;
 pub mod moe_mpp_bm8_block_scaled;
+pub mod moe_mpp_expert_grid;
 pub mod moe_mpp_shared;
 
 // GGUF-format per-expert matmul / matvec (q2k, iq2xxs, q4).

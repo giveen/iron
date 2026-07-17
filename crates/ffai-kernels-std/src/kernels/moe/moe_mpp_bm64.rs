@@ -35,10 +35,10 @@
 
 use ffai_kernels::kernel;
 
-/// MPP MoE grouped BGEMM, BM=BN=64 / BK=32, 4 simdgroups (2×2). `BITS` ∈ {4, 8}
-/// → `ffai_moe_gather_qmm_mma_int4_bm64_mpp` / `_int8_bm64_mpp`. Same weight-unpack
+/// MPP MoE grouped BGEMM, BM=BN=64 / BK=32, 4 simdgroups (2×2). `BITS` ∈ {2, 4, 8}
+/// → `ffai_moe_gather_qmm_mma_int{2,4,8}_bm64_mpp`. Same weight-unpack
 /// fold as `moe_mpp` (`32/BITS` codes/u32), here over a BK=32 slice.
-#[kernel(variants(BITS = [4, 8], suffix = "int{BITS}_bm64_mpp"))]
+#[kernel(variants(BITS = [2, 4, 8], suffix = "int{BITS}_bm64_mpp"))]
 #[allow(clippy::too_many_arguments)]
 pub fn ffai_moe_gather_qmm_mma<T>(
     x: Tensor<T>,
@@ -226,14 +226,31 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm64_mpp, ffai_moe_gather_qmm_mma_int8_bm64_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm64_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm64_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm64_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{
         MmaTestShape,
+        int2_indexed_setup,
         int4_indexed_setup,
         int8_indexed_setup,
     };
 
     // BN=64 → 64/64=1 n-tile, BM=64 → ceil(64/64)=1 m-tile.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_moe_gather_qmm_mma_int2_bm64_mpp(dt: DType) -> TestSetup {
+        int2_indexed_setup(
+            ffai_moe_gather_qmm_mma_int2_bm64_mpp::kernel_ir_for(dt),
+            MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
+            64,
+            64,
+            128,
+            dt,
+        )
+    }
+
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm64_mpp(dt: DType) -> TestSetup {
         int4_indexed_setup(
@@ -259,12 +276,35 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmarks for the MPP MoE BGEMM (BM=BN=64), int4 + int8.
+/// New-syntax benchmarks for the MPP MoE BGEMM (BM=BN=64), int2/4/8.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm64_mpp, ffai_moe_gather_qmm_mma_int8_bm64_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm64_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm64_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm64_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_mma_int2_bm64_mpp(dt: DType) -> BenchSetup {
+        int4_mma_bench(
+            ffai_moe_gather_qmm_mma_int2_bm64_mpp::kernel_ir_for(dt),
+            MmaBenchShape {
+                bits: 2,
+                bn: 64,
+                bm: 64,
+                tpg: 128,
+                m_total: 1024,
+                n_out: 1536,
+                k_in: 4096,
+                n_experts: 192,
+                group_size: 64,
+            },
+            dt,
+        )
+    }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4_bm64_mpp(dt: DType) -> BenchSetup {

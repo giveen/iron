@@ -2,13 +2,13 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Shared test/bench helpers for the MPP MoE grouped BGEMM family.
 //!
-//! Every MPP MoE kernel (`moe_mpp{,_bm8,_bm64}`, each a `variants(BITS=[4,8])`
-//! pair) shares one ABI — `x, w, scales, biases, indices, out` plus the four
+//! Every MPP MoE kernel (`moe_mpp{,_bm8,_bm64}`, each a `variants(BITS=[2,4,8])`
+//! set) shares one ABI — `x, w, scales, biases, indices, out` plus the four
 //! `{m_total, n_out, k_in, group_size}` constexprs — and the same math:
 //! per-row expert routing via `indices[t]`, dequant-then-grouped-matmul.
-//! Only the tile geometry (BM/BN/BK, SG count) differs per file; the int4/int8
+//! Only the tile geometry (BM/BN/BK, SG count) differs per file; the int2/4/8
 //! weight bit-width is folded onto the `BITS` axis within each file. These
-//! helpers centralise the int4 and int8 dequant oracles, the per-variant
+//! helpers centralise the affine dequant oracles, the per-variant
 //! `TestSetup`, and the per-variant `BenchSetup` so each kernel file stays a
 //! thin shape-binding wrapper.
 
@@ -20,6 +20,61 @@ use ffai_kernels::{
 use crate::utils::{pack_f32, unpack_f32};
 
 fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+/// Pack a row of int2 codes into u32s (16 codes per u32, LSB-first).
+fn pack_int2_row(weights: &[u32]) -> Vec<u32> {
+    weights
+        .chunks_exact(16)
+        .map(|chunk| {
+            let mut packed = 0u32;
+            for (i, &q) in chunk.iter().enumerate() {
+                packed |= (q & 0x3) << (i * 2);
+            }
+            packed
+        })
+        .collect()
+}
+
+/// Per-row-`indices` int2 dequant-then-matmul reference (affine `s*q+b`).
+/// `weight_packed` stacks `[n_experts, n_out, k_in/16]` int2 codes.
+#[allow(clippy::too_many_arguments)]
+fn cpu_gather_qmm_int2_indexed(
+    x: &[f32],
+    weight_packed: &[u32],
+    scales: &[f32],
+    biases: &[f32],
+    indices: &[u32],
+    m_total: usize,
+    k_in: usize,
+    n_out: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    let weight_stride_m = k_in / 16;
+    let groups_per_row = k_in / group_size;
+    let mut out = vec![0.0f32; m_total * n_out];
+    for row in 0..m_total {
+        let expert = indices[row] as usize;
+        for n in 0..n_out {
+            let weight_row_base = expert * n_out * weight_stride_m + n * weight_stride_m;
+            let scale_row_base = expert * n_out * groups_per_row + n * groups_per_row;
+            let x_row_base = row * k_in;
+            let mut acc = 0.0f32;
+            for pack_idx in 0..(k_in / 16) {
+                let packed = weight_packed[weight_row_base + pack_idx];
+                let k_first = pack_idx * 16;
+                let g = k_first / group_size;
+                let scale = scales[scale_row_base + g];
+                let bias = biases[scale_row_base + g];
+                for bit in 0..16 {
+                    let q = ((packed >> (bit * 2)) & 0x3) as f32;
+                    acc += (q * scale + bias) * x[x_row_base + k_first + bit];
+                }
+            }
+            out[row * n_out + n] = acc;
+        }
+    }
+    out
+}
 
 /// Pack a row of int4 codes into u32s (8 nibbles per u32, LSB-first).
 fn pack_int4_row(weights: &[u32]) -> Vec<u32> {
@@ -144,6 +199,83 @@ pub struct MmaTestShape {
     pub n_out: usize,
     pub k_in: usize,
     pub group_size: usize,
+}
+
+/// Build a `TestSetup` for an int2 indexed-MMA/MPP kernel (affine oQ2).
+/// Same ABI/dispatch as [`int4_indexed_setup`]; weight packing is 16 codes/u32.
+/// Evenly spreads rows across `n_experts` (requires `m_total % n_experts == 0`).
+pub fn int2_indexed_setup(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, .. } = shape;
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+    int2_indexed_setup_with_indices(kernel, shape, bn, bm, tpg, dt, &indices)
+}
+
+/// Like [`int2_indexed_setup`] but with an explicit expert-sorted `indices`
+/// (length `m_total`). Use for multi-chunk / empty-expert coverage.
+pub fn int2_indexed_setup_with_indices(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+    indices: &[u32],
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+    assert_eq!(indices.len(), m_total);
+
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0x3;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int2_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    let expected = cpu_gather_qmm_int2_indexed(
+        &x,
+        &weight_packed,
+        &s,
+        &b,
+        indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(indices), DType::U32))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
 }
 
 /// Build a `TestSetup` for an int4 indexed-MMA/MPP kernel. `bn`/`bm` give the

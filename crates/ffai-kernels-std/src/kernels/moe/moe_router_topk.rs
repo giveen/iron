@@ -268,4 +268,30 @@ pub mod kernel_benches {
             .grid_3d(n_rows as u32, 1, 1, [32, 1, 1])
             .bytes_moved(bytes as u64)
     }
+
+    /// Softmax-router bench at Hy3 width (E=192, k=8). Hy3 itself uses a
+    /// sigmoid+bias scorer (`ffai_moe_sigmoid_bias` / `ffai_moe_router_sigmoid_bias`);
+    /// this keeps the shared top-k geometry warm for prefill-scale BT.
+    #[bench(dtypes = [f32])]
+    fn bench_moe_router_topk_hy3_width(dt: DType) -> BenchSetup {
+        let n_rows = 512usize;
+        let n_experts = 192usize;
+        let k = 8usize;
+        let sz = dt.size_bytes();
+        let bytes = n_rows * n_experts * sz + n_rows * k * 4 + n_rows * k * sz;
+        BenchSetup::new(ffai_moe_router_topk::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("router_logits", n_rows * n_experts, dt))
+            .buffer(BenchBuffer::zeros("indices_out", n_rows * k, DType::U32).output())
+            .buffer(BenchBuffer::zeros("weights_out", n_rows * k, dt).output())
+            .constexpr("n_experts", n_experts as u32)
+            .constexpr("k", k as u32)
+            .constexpr("norm_topk_prob", 1u32)
+            .with_shape_label(format!(
+                "hy3width BT{n_rows} E{n_experts} k{k} {}",
+                crate::utils::dtype_label(dt)
+            ))
+            .grid_3d(n_rows as u32, 1, 1, [32, 1, 1])
+            .bytes_moved(bytes as u64)
+    }
 }

@@ -36,9 +36,10 @@
 use ffai_kernels::kernel;
 
 /// MPP MoE grouped BGEMM, BM=8 / BN=32 / BK=16, one simdgroup, direct-input
-/// `matmul2d`. `BITS` ∈ {4, 8} → `ffai_moe_gather_qmm_mma_int4_bm8_mpp` /
-/// `_int8_bm8_mpp`. Same weight-unpack fold as `moe_mpp` (`32/BITS` codes/u32).
-#[kernel(variants(BITS = [4, 8], suffix = "int{BITS}_bm8_mpp"))]
+/// `matmul2d`. `BITS` ∈ {2, 4, 8} → `ffai_moe_gather_qmm_mma_int{2,4,8}_bm8_mpp`.
+/// Same weight-unpack fold as `moe_mpp` (`32/BITS` codes/u32). BM=8 helps
+/// short expert runs (Hy3 decode/short prefill: few rows per expert).
+#[kernel(variants(BITS = [2, 4, 8], suffix = "int{BITS}_bm8_mpp"))]
 #[allow(clippy::too_many_arguments)]
 pub fn ffai_moe_gather_qmm_mma<T>(
     x: Tensor<T>,
@@ -211,7 +212,7 @@ mod tests {
     }
 }
 
-/// New-syntax correctness tests for the MPP MoE BGEMM (BM=8), int4 + int8.
+/// New-syntax correctness tests for the MPP MoE BGEMM (BM=8), int2/4/8.
 /// Shares the per-row-`indices` dequant-then-matmul oracle with the BM=16
 /// sibling; only the m-tile height (BM=8 → ceil(M/8) m-tiles) differs.
 ///
@@ -219,14 +220,31 @@ mod tests {
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm8_mpp, ffai_moe_gather_qmm_mma_int8_bm8_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm8_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm8_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm8_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{
         MmaTestShape,
+        int2_indexed_setup,
         int4_indexed_setup,
         int8_indexed_setup,
     };
 
     // BM=8 → ceil(64/8)=8 m-tiles, BN=32 → 64/32=2 n-tiles.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_moe_gather_qmm_mma_int2_bm8_mpp(dt: DType) -> TestSetup {
+        int2_indexed_setup(
+            ffai_moe_gather_qmm_mma_int2_bm8_mpp::kernel_ir_for(dt),
+            MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
+            32,
+            8,
+            32,
+            dt,
+        )
+    }
+
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm8_mpp(dt: DType) -> TestSetup {
         int4_indexed_setup(
@@ -252,12 +270,36 @@ pub mod kernel_tests {
     }
 }
 
-/// New-syntax benchmarks for the MPP MoE BGEMM (BM=8), int4 + int8.
+/// New-syntax benchmarks for the MPP MoE BGEMM (BM=8), int2/4/8.
 pub mod kernel_benches {
     use ffai_kernels::{bench, test::*};
 
-    use super::{ffai_moe_gather_qmm_mma_int4_bm8_mpp, ffai_moe_gather_qmm_mma_int8_bm8_mpp};
+    use super::{
+        ffai_moe_gather_qmm_mma_int2_bm8_mpp,
+        ffai_moe_gather_qmm_mma_int4_bm8_mpp,
+        ffai_moe_gather_qmm_mma_int8_bm8_mpp,
+    };
     use crate::kernels::moe::moe_mpp_shared::{MmaBenchShape, int4_mma_bench};
+
+    /// Hy3 short-run shape: few rows/expert → BM=8 fills better than BM=16.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_mma_int2_bm8_mpp(dt: DType) -> BenchSetup {
+        int4_mma_bench(
+            ffai_moe_gather_qmm_mma_int2_bm8_mpp::kernel_ir_for(dt),
+            MmaBenchShape {
+                bits: 2,
+                bn: 32,
+                bm: 8,
+                tpg: 32,
+                m_total: 1024,
+                n_out: 1536,
+                k_in: 4096,
+                n_experts: 192,
+                group_size: 64,
+            },
+            dt,
+        )
+    }
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_mma_int4_bm8_mpp(dt: DType) -> BenchSetup {
