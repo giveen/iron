@@ -360,6 +360,37 @@ pub mod kernel_tests {
             .grid_1d(n, 256)
     }
 
+    // sigmoid_row_fma_residual:
+    //   out[r,h] = residual[r,h] + base[r,h] + sigmoid(gate[r]) * value[r,h].
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
+    fn test_sigmoid_row_fma_residual(dt: DType) -> TestSetup {
+        let (t, hidden) = (4usize, 64usize);
+        let n = t * hidden;
+        let gate_f: Vec<f32> = (0..t).map(|r| (r as f32) * 0.7 - 1.0).collect();
+        let value_f: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.013).sin()).collect();
+        let base_f: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.007).cos()).collect();
+        let residual_f: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.011).sin() * 0.5).collect();
+        let gate = unpack_f32(&pack_f32(&gate_f, dt), dt);
+        let value = unpack_f32(&pack_f32(&value_f, dt), dt);
+        let base = unpack_f32(&pack_f32(&base_f, dt), dt);
+        let residual = unpack_f32(&pack_f32(&residual_f, dt), dt);
+        let expected: Vec<f32> = (0..n)
+            .map(|i| {
+                let g = 1.0f32 / (1.0f32 + (-gate[i / hidden]).exp());
+                residual[i] + base[i] + g * value[i]
+            })
+            .collect();
+        TestSetup::new(ffai_sigmoid_row_fma_residual::kernel_ir_for(dt))
+            .input(TestBuffer::from_vec("gate", pack_f32(&gate_f, dt), dt))
+            .input(TestBuffer::from_vec("value", pack_f32(&value_f, dt), dt))
+            .input(TestBuffer::from_vec("base", pack_f32(&base_f, dt), dt))
+            .input(TestBuffer::from_vec("residual", pack_f32(&residual_f, dt), dt))
+            .input(TestBuffer::zeros("out", n, dt))
+            .constexpr("hidden", hidden as u32)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_1d(n, 256)
+    }
+
     // ── Exact ops (bit-exact in every dtype) ──────────────────────────────
     macro_rules! exact_test {
         ($name:ident, $kernel:ident, $input:ident, $op:expr) => {
@@ -613,6 +644,24 @@ pub mod kernel_benches {
             .bytes_moved(((3 * n + t) * dt.size_bytes()) as u64)
     }
 
+    // sigmoid_row_fma_residual:
+    //   out = residual + base + sigmoid(gate[row]) · value. Same T×hidden
+    // prefill shape; +1 residual read vs the non-residual form.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sigmoid_row_fma_residual(dt: DType) -> BenchSetup {
+        let (t, hidden) = (2048usize, 2048usize);
+        let n = t * hidden;
+        BenchSetup::new(ffai_sigmoid_row_fma_residual::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("gate", t, dt))
+            .buffer(BenchBuffer::random("value", n, dt))
+            .buffer(BenchBuffer::random("base", n, dt))
+            .buffer(BenchBuffer::random("residual", n, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .constexpr("hidden", hidden as u32)
+            .grid_1d(n, 256)
+            .bytes_moved(((4 * n + t) * dt.size_bytes()) as u64)
+    }
+
     // sigmoid_scalar_fma: out[i] = base[i] + sigmoid(gate[0]) * value[i].
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sigmoid_scalar_fma(dt: DType) -> BenchSetup {
@@ -817,6 +866,39 @@ pub fn ffai_sigmoid_row_fma<T>(
     let v = load(value[idx]).cast::<f32>();
     let b = load(base[idx]).cast::<f32>();
     store(out[idx], (b + g * v).cast::<T>());
+}
+
+/// Row-broadcast sigmoid FMA WITH residual add — the T-batched form of
+/// `ffai_sigmoid_scalar_fma_residual`. Computes
+///   `out[r*h+h] = residual[r*h+h] + base[r*h+h] + sigmoid(gate[r]) * value[r*h+h]`
+/// over a `[T, hidden]` layout. Used by Qwen3.6-A3B's post-MoE-FFN
+/// prefill site to collapse:
+///   1. `ffai_sigmoid_row_fma(gate, sharedOut, routed)` → ffnOut
+///   2. `ffai_add(postMix, ffnOut)`                     → result
+/// into one dispatch per MoE layer. Saves one full `[T, hidden]` DRAM
+/// roundtrip on the intermediate `ffnOut` plus one dispatch per layer
+/// (×40 layers). At T=2048 × hidden=2048 that is ~16 MB of traffic and
+/// one encode round-trip avoided per MoE layer.
+///
+/// Same precision contract as `ffai_sigmoid_row_fma`: model dtype `T` on
+/// the read+write boundary, fp32 sigmoid + FMA internally.
+#[kernel]
+pub fn ffai_sigmoid_row_fma_residual<T>(
+    gate: Tensor<T>,
+    value: Tensor<T>,
+    base: Tensor<T>,
+    residual: Tensor<T>,
+    out: Tensor<T>,
+    #[constexpr] hidden: u32,
+) {
+    let idx = program_id(0);
+    let row = idx / hidden;
+    let gx = load(gate[row]).cast::<f32>();
+    let g = 1.0f32 / (1.0f32 + exp(0.0f32 - gx));
+    let v = load(value[idx]).cast::<f32>();
+    let b = load(base[idx]).cast::<f32>();
+    let r = load(residual[idx]).cast::<f32>();
+    store(out[idx], (r + b + g * v).cast::<T>());
 }
 
 /// Scalar-broadcast FMA. Computes
