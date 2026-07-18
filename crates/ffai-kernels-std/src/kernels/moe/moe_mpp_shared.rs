@@ -3,7 +3,7 @@
 //! Shared test/bench helpers for the MPP MoE grouped BGEMM family.
 //!
 //! Every MPP MoE kernel (`moe_mpp{,_bm8,_bm64}`, each a `variants(BITS=[2,4,8])`
-//! set) shares one ABI — `x, w, scales, biases, indices, out` plus the four
+//! set) shares one ABI — `x, w, scales, biases, indices, x_rows, out` plus the four
 //! `{m_total, n_out, k_in, group_size}` constexprs — and the same math:
 //! per-row expert routing via `indices[t]`, dequant-then-grouped-matmul.
 //! Only the tile geometry (BM/BN/BK, SG count) differs per file; the int2/4/8
@@ -269,6 +269,11 @@ pub fn int2_indexed_setup_with_indices(
         .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
         .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
         .input(TestBuffer::from_vec("indices", u32_bytes(indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
         .input(TestBuffer::zeros("out", m_total * n_out, dt))
         .constexpr("m_total", m_total as u32)
         .constexpr("n_out", n_out as u32)
@@ -332,6 +337,82 @@ pub fn int4_indexed_setup(
         .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
         .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
         .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+}
+
+/// Like [`int4_indexed_setup`] but with a NON-identity `x_rows` mapping:
+/// `x` is the unpermuted token table and `x_rows[i]` points row `i` of the
+/// expert-sorted output at its source token (here: a reversal, so any
+/// indexing bug that survives the identity tests fails loudly). Exercises
+/// the gather-fusion contract the identity setups cannot.
+pub fn int4_indexed_setup_xrows_reversed(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+    let x_rows: Vec<u32> = (0..m_total as u32).rev().collect();
+
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0xf;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int4_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    // Oracle sees the EFFECTIVE per-row activations: row i reads x[x_rows[i]].
+    let mut x_eff = vec![0.0f32; m_total * k_in];
+    for (i, &src) in x_rows.iter().enumerate() {
+        let src = src as usize;
+        x_eff[i * k_in..(i + 1) * k_in].copy_from_slice(&x[src * k_in..(src + 1) * k_in]);
+    }
+    let expected = cpu_gather_qmm_int4_indexed(
+        &x_eff,
+        &weight_packed,
+        &s,
+        &b,
+        &indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec("x_rows", u32_bytes(&x_rows), DType::U32))
         .input(TestBuffer::zeros("out", m_total * n_out, dt))
         .constexpr("m_total", m_total as u32)
         .constexpr("n_out", n_out as u32)
@@ -398,6 +479,11 @@ pub fn int8_indexed_setup(
         .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
         .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
         .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
         .input(TestBuffer::zeros("out", m_total * n_out, dt))
         .constexpr("m_total", m_total as u32)
         .constexpr("n_out", n_out as u32)
@@ -440,6 +526,8 @@ pub fn int4_mma_bench(kernel: Kernel, shape: MmaBenchShape, dt: DType) -> BenchS
         .buffer(BenchBuffer::random("scales", n_experts * n_out * groups_per_row, dt))
         .buffer(BenchBuffer::random("biases", n_experts * n_out * groups_per_row, dt))
         .buffer(BenchBuffer::zeros("indices", m_total, DType::U32))
+        // Identity x_rows: pre-gathered X path (row i reads x[i, :]).
+        .buffer(BenchBuffer::zeros("x_rows", m_total, DType::U32))
         .buffer(BenchBuffer::zeros("out", m_total * n_out, dt).output())
         .constexpr("m_total", m_total as u32)
         .constexpr("n_out", n_out as u32)

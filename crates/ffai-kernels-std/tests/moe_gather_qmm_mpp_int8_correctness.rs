@@ -125,6 +125,8 @@ fn run_mpp_int8(
     buffers.insert("scales".into(), pack_bytes(scales, dt));
     buffers.insert("biases".into(), pack_bytes(biases, dt));
     buffers.insert("indices".into(), indices.iter().flat_map(|i| i.to_le_bytes()).collect());
+    let x_rows: Vec<u32> = (0..t_rows as u32).collect();
+    buffers.insert("x_rows".into(), x_rows.iter().flat_map(|i| i.to_le_bytes()).collect());
     buffers.insert("out".into(), pack_bytes(&vec![0.0_f32; t_rows * n_out], dt));
     buffers.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
     buffers.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());

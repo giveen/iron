@@ -135,6 +135,8 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_matches_m1_clean_tile() {
         buffers.insert("scales".into(), pack_bytes(&scales, Dt::F32));
         buffers.insert("biases".into(), pack_bytes(&biases, Dt::F32));
         buffers.insert("indices".into(), indices.iter().flat_map(|i| i.to_le_bytes()).collect());
+        let x_rows: Vec<u32> = (0..t_rows as u32).collect();
+        buffers.insert("x_rows".into(), x_rows.iter().flat_map(|i| i.to_le_bytes()).collect());
         buffers.insert("out".into(), pack_bytes(&vec![0.0_f32; t_rows * n_out], Dt::F32));
         buffers.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
         buffers.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
@@ -268,6 +270,8 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_bf16_matches_m1_clean_tile() {
         buffers.insert("scales".into(), pack_bytes(&scales, Dt::Bf16));
         buffers.insert("biases".into(), pack_bytes(&biases, Dt::Bf16));
         buffers.insert("indices".into(), indices.iter().flat_map(|i| i.to_le_bytes()).collect());
+        let x_rows: Vec<u32> = (0..t_rows as u32).collect();
+        buffers.insert("x_rows".into(), x_rows.iter().flat_map(|i| i.to_le_bytes()).collect());
         buffers.insert("out".into(), pack_bytes(&vec![0.0_f32; t_rows * n_out], Dt::Bf16));
         buffers.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
         buffers.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());

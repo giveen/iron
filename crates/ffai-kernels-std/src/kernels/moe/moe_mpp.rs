@@ -38,7 +38,10 @@ use ffai_kernels::kernel;
 /// MPP MoE grouped BGEMM, BM=16 / BN=32 / BK=16, one simdgroup. `BITS` ∈ {2, 4, 8}
 /// selects the weight precision; produces `ffai_moe_gather_qmm_mma_int{2,4,8}_bm16_mpp`.
 ///
-/// Params: `x [m_total, k_in]`, `w [n_experts, n_out, k_in*BITS/32]`
+/// Params: `x [n_x_rows, k_in]` (either already-gathered `m_total` rows or
+/// the unpermuted token table), `x_rows [m_total]` maps each expert-sorted
+/// output row → row of `x` (identity when `x` is pre-gathered; source-token
+/// ids when skipping the host gather), `w [n_experts, n_out, k_in*BITS/32]`
 /// (`32/BITS` codes packed per uint32, LSB-first), `scales`/`biases
 /// [n_experts, n_out, k_in/group]`, `indices [m_total]` (per-row expert id),
 /// `out [m_total, n_out]`.
@@ -50,6 +53,7 @@ pub fn ffai_moe_gather_qmm_mma<T>(
     scales: Tensor<T>,
     biases: Tensor<T>,
     indices: Tensor<u32>,
+    x_rows: Tensor<u32>,
     mut out: Tensor<T>,
     #[constexpr] m_total: u32,
     #[constexpr] n_out: u32,
@@ -123,7 +127,10 @@ pub fn ffai_moe_gather_qmm_mma<T>(
                     let gr = m_tile_base + mr;
                     let in_run = (mr >= sub_offset) & (mr < sub_end) & (gr < m_total);
                     let safe_g = select(in_run, gr, 0u32);
-                    let xv = load(x[safe_g * k_in + kb + kc]).cast::<f32>();
+                    // `x_rows` maps expert-sorted row → activation row. Identity
+                    // when X is pre-gathered; source-token when gather is fused.
+                    let x_row = load(x_rows[safe_g]);
+                    let xv = load(x[x_row * k_in + kb + kc]).cast::<f32>();
                     threadgroup_store("xs", mr * 16u32 + kc, select(in_run, xv, 0.0f32));
                 }
                 // Dequant W[expert, n_tile_base..+32, kb..kb+16] → ws.
@@ -195,8 +202,9 @@ mod tests {
         for dt in [DType::F32, DType::F16, DType::BF16] {
             let k = ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt);
             assert_eq!(k.name, "ffai_moe_gather_qmm_mma_int4_bm16_mpp");
-            assert_eq!(k.params.len(), 6);
-            assert!(k.params[5].is_output);
+            // 7 params since x_rows (index 5); out moved to index 6.
+            assert_eq!(k.params.len(), 7);
+            assert!(k.params[6].is_output);
             assert_eq!(k.constexprs.len(), 4);
             // No raw inline MSL — the matmul is CoopTile* ops.
             let all_ops =
@@ -267,6 +275,7 @@ pub mod kernel_tests {
         MmaTestShape,
         int2_indexed_setup,
         int4_indexed_setup,
+        int4_indexed_setup_xrows_reversed,
         int8_indexed_setup,
     };
 
@@ -286,6 +295,21 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_moe_gather_qmm_mma_int4_bm16_mpp(dt: DType) -> TestSetup {
         int4_indexed_setup(
+            ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
+            MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
+            32, // bn
+            16, // bm
+            32, // tpg
+            dt,
+        )
+    }
+
+    /// Non-identity x_rows (reversed): x stays the unpermuted token table
+    /// and the kernel gathers through the mapping — the fusion contract the
+    /// identity setups cannot catch.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_moe_gather_qmm_mma_int4_bm16_mpp_xrows(dt: DType) -> TestSetup {
+        int4_indexed_setup_xrows_reversed(
             ffai_moe_gather_qmm_mma_int4_bm16_mpp::kernel_ir_for(dt),
             MmaTestShape { n_experts: 4, m_total: 64, n_out: 64, k_in: 64, group_size: 32 },
             32, // bn
