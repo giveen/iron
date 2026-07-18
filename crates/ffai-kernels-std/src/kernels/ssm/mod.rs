@@ -15,5 +15,7 @@ pub mod gated_delta_prep_chunk;
 pub mod gated_delta_qknorm_prepass;
 pub mod gated_delta_replay;
 pub mod gated_delta_wy;
+pub mod gated_delta_wy_plan;
+pub mod gated_delta_wy_scan;
 pub mod scan;
 pub mod ssm_replay;

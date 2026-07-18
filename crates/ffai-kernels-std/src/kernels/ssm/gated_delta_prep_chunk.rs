@@ -494,4 +494,34 @@ pub mod kernel_benches {
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
+
+    // Same shape as `bench_gated_delta_prep_chunk` but T=2048 — a fair
+    // comparison point against the `ffai_gdn_wy_plan`/`ffai_gdn_wy_scan`
+    // two-kernel pipeline's own T=2048 production benches (the T=64 bench
+    // above is comparable work only at chunk granularity, not full-prefill).
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gated_delta_prep_chunk_t2048(dt: DType) -> BenchSetup {
+        let (b, t, hv, hk, dv, dk) = (1usize, 2048usize, 16usize, 8usize, 128usize, 128usize);
+        let n_total = b * hv;
+        let conv_w = 2 * hk * dk + hv * dv;
+        BenchSetup::new(ffai_gated_delta_prep_chunk::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
+            .buffer(BenchBuffer::random("a_log", hv, dt))
+            .buffer(BenchBuffer::random("dt_bias", hv, dt))
+            .buffer(BenchBuffer::random("a_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("b_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("q_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("k_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("state_in", n_total * dv * dk, dt))
+            .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
+            .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
+            .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .constexpr("dk", dk as u32)
+            .constexpr("dv", dv as u32)
+            .constexpr("hv", hv as u32)
+            .constexpr("hk", hk as u32)
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
+    }
 }
