@@ -196,7 +196,9 @@ fn run_gpu(
     kernel.mode = KernelMode::Reduction;
 
     let result = ctx
-        .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [dv, n_total, 1], [32, 1, 1])
+        .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [dv.div_ceil(4), n_total, 1], [
+            128, 1, 1,
+        ])
         .expect("ffai_gated_delta_prep_chunk dispatch");
 
     let y = unpack_bytes(result.outputs.get("y").expect("y"), dt);
