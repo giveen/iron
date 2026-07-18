@@ -1226,11 +1226,12 @@ impl DslBodyParser {
 
         // GPU built-in scalars available in every kernel preamble.
         // Emitted as Op::Load { src: "<name>", indices: [] } so the MSL emitter
-        // outputs `auto vN = tid;` (or lsize, tgid_x/y/z, simd_lane, simd_id, n_simd).
-        if matches!(
-            name.as_str(),
-            "tid" | "lsize" | "tgid_x" | "tgid_y" | "tgid_z" | "simd_lane" | "simd_id" | "n_simd"
-        ) {
+        // outputs `auto vN = tid;` (or lsize, tgid_x/y/z, tid_x/y/z, simd_lane,
+        // simd_id, n_simd). This list must stay in sync with what the MSL
+        // codegen actually recognizes as a bare scalar identifier (see
+        // `emit_block.rs`'s `Op::Load` arm and `kernel_uses_identifier` /
+        // `kernel_uses_program_id_axis` in `msl/mod.rs`).
+        if BUILTIN_SCALARS.contains(&name.as_str()) {
             let result = self.alloc_vid();
             let n = name.clone();
             self.push_op(
@@ -1243,7 +1244,40 @@ impl DslBodyParser {
             return result;
         }
 
-        0
+        // Not a let-binding, loop variable, mutable local, #[constexpr]
+        // param, or built-in scalar — this identifier was never declared.
+        //
+        // Previously this fell through to `ValueId::new(0)`: "whatever the
+        // first SSA value happens to be in this kernel" (frequently
+        // `tgid_x`/`tid`, since those are usually computed first). That
+        // silently produced a *compiling* kernel with systematically wrong
+        // behavior — reproduced in the wild by writing bare `sg` without
+        // `let sg = simd_group_id();`, which lowered to `tgid_x` and only
+        // surfaced via a GPU oracle mismatch after a scalar bisect. Fail
+        // loudly instead, with a spanned error naming the exact token.
+        let mut known: Vec<String> = self.bindings.keys().cloned().collect();
+        known.extend(self.constexpr_names.iter().cloned());
+        known.extend(self.param_names.iter().cloned());
+        known.extend(self.mut_locals.iter().cloned());
+        known.extend(BUILTIN_SCALARS.iter().map(|s| s.to_string()));
+
+        let msg = match closest_match(&name, &known) {
+            Some(close) => format!(
+                "undeclared identifier `{name}` inside #[kernel] body — did you mean \
+                 `{close}`? Bare identifiers must be a `let`-bound local, a loop \
+                 variable, a `mut` local, a #[constexpr] parameter, a tensor \
+                 parameter, or one of the DSL built-in scalars ({}).",
+                BUILTIN_SCALARS.join(", "),
+            ),
+            None => format!(
+                "undeclared identifier `{name}` inside #[kernel] body. Bare \
+                 identifiers must be a `let`-bound local, a loop variable, a \
+                 `mut` local, a #[constexpr] parameter, a tensor parameter, or one \
+                 of the DSL built-in scalars ({}).",
+                BUILTIN_SCALARS.join(", "),
+            ),
+        };
+        self.push_error_value(syn::Error::new_spanned(path, msg))
     }
 
     fn parse_literal(&mut self, lit: &syn::ExprLit) -> u32 {
@@ -2025,6 +2059,70 @@ impl DslBodyParser {
 
 // ---- Helpers ----------------------------------------------------------------
 
+/// GPU built-in scalars resolvable as a bare identifier (no `let`-binding
+/// required) inside a `#[kernel]` body. Kept as the single source of truth
+/// for both `resolve_path`'s allowlist and its "undeclared identifier" error
+/// message / typo-suggestion candidate set. Must stay in sync with what the
+/// MSL codegen recognizes as a bare-scalar `Op::Load` source — see
+/// `emit_block.rs`'s `Op::Load` arm and `kernel_uses_identifier` /
+/// `kernel_uses_program_id_axis` in `msl/mod.rs`.
+const BUILTIN_SCALARS: &[&str] = &[
+    "tid",
+    "lsize",
+    "tgid_x",
+    "tgid_y",
+    "tgid_z",
+    "tid_x",
+    "tid_y",
+    "tid_z",
+    "simd_lane",
+    "simd_id",
+    "n_simd",
+];
+
+/// Find the closest name to `target` among `candidates` within a small edit
+/// distance, for "did you mean `x`?" typo suggestions on undeclared
+/// identifiers. Not perf-sensitive (proc-macro compile time, small inputs).
+fn closest_match(target: &str, candidates: &[String]) -> Option<String> {
+    // Scale the acceptance threshold with the target's length: for a short
+    // identifier like `sg` (len 2), a distance-3 match is nearly any other
+    // short name in scope and is more noise than signal; for longer names
+    // a couple of edits is still clearly "the same word, mistyped".
+    let threshold = match target.chars().count() {
+        0..=3 => 1,
+        4..=5 => 2,
+        _ => 3,
+    };
+    let mut best: Option<(usize, &String)> = None;
+    for candidate in candidates {
+        if candidate == target {
+            continue;
+        }
+        let distance = edit_distance(target, candidate);
+        if distance <= threshold && best.as_ref().is_none_or(|&(best_d, _)| distance < best_d) {
+            best = Some((distance, candidate));
+        }
+    }
+    best.map(|(_, s)| s.clone())
+}
+
+/// Levenshtein edit distance between two strings.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
 fn expr_to_path_string(expr: &Expr) -> String {
     if let Expr::Path(path) = expr { path_to_string(&path.path) } else { String::new() }
 }
@@ -2351,6 +2449,67 @@ mod tests {
         assert!(!tokens.contains("KernelCall"), "typo should not produce KernelCall: {tokens}");
         // Should contain a compile_error diagnostic.
         assert!(tokens.contains("compile_error"), "{tokens}");
+    }
+
+    #[test]
+    fn undeclared_bare_identifier_emits_compile_error() {
+        // Regression test for the real-world bug: using `sg` without first
+        // writing `let sg = simd_group_id();` used to silently resolve to
+        // `ValueId::new(0)` — the kernel's first SSA value (often `tgid_x`)
+        // — and compile clean into a systematically wrong kernel. It must
+        // now fail loudly at macro-expansion time instead.
+        let body: Block = parse_quote!({
+            let y = sg;
+        });
+
+        let tokens =
+            DslBodyParser::parse_with_type_vars(&body, &[], &[], &Default::default()).to_string();
+
+        assert!(tokens.contains("compile_error"), "{tokens}");
+        assert!(tokens.contains("undeclared identifier"), "{tokens}");
+        assert!(tokens.contains("sg"), "{tokens}");
+        // Must NOT silently fall back to referencing ValueId 0.
+        assert!(
+            !tokens.contains("ValueId :: new (0 u32) . push_op"),
+            "should not silently alias to the first SSA value: {tokens}"
+        );
+    }
+
+    #[test]
+    fn undeclared_identifier_suggests_closest_declared_name() {
+        // A likely typo of a declared name should get a "did you mean"
+        // hint naming the close match, not just a bare "undeclared" error.
+        let body: Block = parse_quote!({
+            let count = 4;
+            // `cout` is one edit from `count` (and not a dictionary word
+            // the typos CI check rewrites, unlike e.g. `coutn`).
+            let total = cout + 1;
+        });
+
+        let tokens =
+            DslBodyParser::parse_with_type_vars(&body, &[], &[], &Default::default()).to_string();
+
+        assert!(tokens.contains("compile_error"), "{tokens}");
+        assert!(tokens.contains("did you mean"), "{tokens}");
+        assert!(tokens.contains("count"), "{tokens}");
+    }
+
+    #[test]
+    fn all_builtin_scalars_resolve_without_error() {
+        // Every name in BUILTIN_SCALARS must still resolve to an Op::Load,
+        // not the new "undeclared identifier" error, i.e. the allowlist
+        // used by the diagnostic matches the allowlist actually consulted
+        // for resolution.
+        for name in BUILTIN_SCALARS {
+            let ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+            let body: Block = syn::parse_quote!({
+                let v = #ident;
+            });
+            let tokens = DslBodyParser::parse_with_type_vars(&body, &[], &[], &Default::default())
+                .to_string();
+            assert!(!tokens.contains("compile_error"), "builtin `{name}` errored: {tokens}");
+            assert!(tokens.contains("Op :: Load"), "builtin `{name}` didn't load: {tokens}");
+        }
     }
 
     #[test]

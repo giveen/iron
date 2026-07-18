@@ -1,0 +1,5 @@
+error: undeclared identifier `sg` inside #[kernel] body. Bare identifiers must be a `let`-bound local, a loop variable, a `mut` local, a #[constexpr] parameter, a tensor parameter, or one of the DSL built-in scalars (tid, lsize, tgid_x, tgid_y, tgid_z, tid_x, tid_y, tid_z, simd_lane, simd_id, n_simd).
+  --> tests/error/undeclared_identifier.rs:15:21
+   |
+15 |     store(out[idx], sg);
+   |                     ^^
