@@ -36,10 +36,12 @@
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
 //!   - `y`            : Tensor<T> [B, T, Hv, Dv]
 //!
-//! ## DISPATCH INVARIANTS (identical to `ffai_gated_delta_prep_step`)
+//! ## DISPATCH INVARIANTS
 //!
-//! - **Mode: Reduction.** Each TG is one simdgroup (32 threads).
-//! - **Grid: `[Dv, B·Hv, 1]`, TG: `[32, 1, 1]`.**
+//! - **Mode: Reduction.** TG packs **4 simdgroups** (128 threads) — one SG
+//!   per `dv` slot inside the TG (matches reference Metal GDN `(32,4,1)`).
+//! - **Grid: `[ceil(Dv/4), B·Hv, 1]`, TG: `[128, 1, 1]`.**
+//!   `dv_idx = tgid_x·4 + simd_group_id`, `dk_idx = simd_lane`.
 //! - **`Dk % 32 == 0`.** Each lane owns `n_per_t = Dk / 32` slots.
 //! - **Hv divisible by Hk.** GQA: `hk_idx = hv_idx / (Hv/Hk)`.
 //! - **`t_len` is runtime u32** so a single PSO compiles for every chunk size.
@@ -84,9 +86,11 @@ pub fn ffai_gated_delta_prep_chunk<T>(
     #[constexpr] hv: u32,
     #[constexpr] hk: u32,
 ) {
-    let dv_idx = tgid_x;
+    // 4 SGs per TG pack 4 Dv slots (reference Metal GDN geometry).
+    let sg = simd_group_id();
+    let dk_idx = simd_lane;
+    let dv_idx = tgid_x * 4u32 + sg;
     let n = tgid_y;
-    let dk_idx = tid;
     // GQA decomposition.
     let hv_idx = n - (n / hv) * hv;
     let b = n / hv;
@@ -95,71 +99,74 @@ pub fn ffai_gated_delta_prep_chunk<T>(
     let n_per_t = dk / 32u32;
     let t_total = load(t_len[0]);
     let stride_b = 2u32 * hk * dk + hv * dv;
-    // Per-layer constants (loaded once per TG).
-    let a_log_val = load(a_log[hv_idx]).cast::<f32>();
-    let dt_bias_val = load(dt_bias[hv_idx]).cast::<f32>();
-    let exp_a_log = exp(a_log_val);
-    let state_base = n * dv * dk + dv_idx * dk;
-    // ─── Load state into per-lane registers ONCE — persists across the T-loop.
-    stack_alloc("state_reg", 8u32, "f32");
-    for i in range(0u32, n_per_t, 1u32) {
-        let s_idx = n_per_t * dk_idx + i;
-        let val = load(state_in[state_base + s_idx]).cast::<f32>();
-        stack_store("state_reg", i, val);
-    }
-    // k_cache holds this token's k_normed (read once in Phase 1, reused in
-    // Phase 2's rank-1 update without a second load).
-    stack_alloc("k_cache", 8u32, "f32");
-    // ─── Inner T-loop: recurrence per token ──────────────────────────────
-    for t in range(0u32, t_total, 1u32) {
-        let bt = b * t_total + t;
-        let conv_base = bt * stride_b;
-        let v_off = conv_base + 2u32 * hk * dk + hv_idx * dv;
-        let qk_off = (bt * hk + hk_idx) * dk;
-        let gbeta_idx = bt * hv + hv_idx;
-        // ─── g / beta ──────────────────────────────────────────────────
-        let a_raw_val = load(a_raw[gbeta_idx]).cast::<f32>();
-        let b_raw_val = load(b_raw[gbeta_idx]).cast::<f32>();
-        let pre_softplus = a_raw_val + dt_bias_val;
-        let dt_val = log(exp(pre_softplus) + 1.0f32);
-        let g_val = exp(0.0f32 - exp_a_log * dt_val);
-        let beta_val = 1.0f32 / (1.0f32 + exp(0.0f32 - b_raw_val));
-        // v: one read per Dv slot per token.
-        let v_val = load(conv_out[v_off + dv_idx]).cast::<f32>();
-        // ─── Phase 1: decay state + accumulate kv_mem; cache k_normed ────
-        let mut kv_mem = 0.0f32;
+    // Partial last TG when Dv % 4 != 0: idle SGs must not touch state/y.
+    if dv_idx < dv {
+        // Per-layer constants (loaded once per active SG).
+        let a_log_val = load(a_log[hv_idx]).cast::<f32>();
+        let dt_bias_val = load(dt_bias[hv_idx]).cast::<f32>();
+        let exp_a_log = exp(a_log_val);
+        let state_base = n * dv * dk + dv_idx * dk;
+        // ─── Load state into per-lane registers ONCE — persists across T.
+        stack_alloc("state_reg", 8u32, "f32");
         for i in range(0u32, n_per_t, 1u32) {
             let s_idx = n_per_t * dk_idx + i;
-            let s_old = stack_load("state_reg", i);
-            let s_decayed = s_old * g_val;
-            stack_store("state_reg", i, s_decayed);
-            let k_normed_val = load(k_normed[qk_off + s_idx]).cast::<f32>();
-            stack_store("k_cache", i, k_normed_val);
-            kv_mem = kv_mem + s_decayed * k_normed_val;
+            let val = load(state_in[state_base + s_idx]).cast::<f32>();
+            stack_store("state_reg", i, val);
         }
-        let kv_mem_sum = simd_sum(kv_mem);
-        let delta = (v_val - kv_mem_sum) * beta_val;
-        // ─── Phase 2: rank-1 update + output projection ──────────────────
-        let mut out_acc = 0.0f32;
+        // k_cache holds this token's k_normed (read once in Phase 1, reused in
+        // Phase 2's rank-1 update without a second load).
+        stack_alloc("k_cache", 8u32, "f32");
+        // ─── Inner T-loop: recurrence per token ──────────────────────────
+        for t in range(0u32, t_total, 1u32) {
+            let bt = b * t_total + t;
+            let conv_base = bt * stride_b;
+            let v_off = conv_base + 2u32 * hk * dk + hv_idx * dv;
+            let qk_off = (bt * hk + hk_idx) * dk;
+            let gbeta_idx = bt * hv + hv_idx;
+            // ─── g / beta ──────────────────────────────────────────────
+            let a_raw_val = load(a_raw[gbeta_idx]).cast::<f32>();
+            let b_raw_val = load(b_raw[gbeta_idx]).cast::<f32>();
+            let pre_softplus = a_raw_val + dt_bias_val;
+            let dt_val = log(exp(pre_softplus) + 1.0f32);
+            let g_val = exp(0.0f32 - exp_a_log * dt_val);
+            let beta_val = 1.0f32 / (1.0f32 + exp(0.0f32 - b_raw_val));
+            // v: one read per Dv slot per token.
+            let v_val = load(conv_out[v_off + dv_idx]).cast::<f32>();
+            // ─── Phase 1: decay state + accumulate kv_mem; cache k ─────
+            let mut kv_mem = 0.0f32;
+            for i in range(0u32, n_per_t, 1u32) {
+                let s_idx = n_per_t * dk_idx + i;
+                let s_old = stack_load("state_reg", i);
+                let s_decayed = s_old * g_val;
+                stack_store("state_reg", i, s_decayed);
+                let k_normed_val = load(k_normed[qk_off + s_idx]).cast::<f32>();
+                stack_store("k_cache", i, k_normed_val);
+                kv_mem = kv_mem + s_decayed * k_normed_val;
+            }
+            let kv_mem_sum = simd_sum(kv_mem);
+            let delta = (v_val - kv_mem_sum) * beta_val;
+            // ─── Phase 2: rank-1 update + output projection ───────────
+            let mut out_acc = 0.0f32;
+            for i in range(0u32, n_per_t, 1u32) {
+                let s_idx = n_per_t * dk_idx + i;
+                let s_decayed = stack_load("state_reg", i);
+                let k_normed_val = stack_load("k_cache", i);
+                let s_new = s_decayed + k_normed_val * delta;
+                stack_store("state_reg", i, s_new);
+                let q_normed_val = load(q_normed[qk_off + s_idx]).cast::<f32>();
+                out_acc = out_acc + s_new * q_normed_val;
+            }
+            let out_sum = simd_sum(out_acc);
+            // ─── Phase 3: lane 0 writes y[t, n, dv_idx] ───────────────
+            if dk_idx == 0u32 {
+                store(y[(bt * hv + hv_idx) * dv + dv_idx], out_sum.cast::<T>());
+            }
+        }
+        // ─── Write final state ONCE at the end ──────────────────────────
         for i in range(0u32, n_per_t, 1u32) {
             let s_idx = n_per_t * dk_idx + i;
-            let s_decayed = stack_load("state_reg", i);
-            let k_normed_val = stack_load("k_cache", i);
-            let s_new = s_decayed + k_normed_val * delta;
-            stack_store("state_reg", i, s_new);
-            let q_normed_val = load(q_normed[qk_off + s_idx]).cast::<f32>();
-            out_acc = out_acc + s_new * q_normed_val;
+            store(state_out[state_base + s_idx], stack_load("state_reg", i).cast::<T>());
         }
-        let out_sum = simd_sum(out_acc);
-        // ─── Phase 3: lane 0 writes y[t, n, dv_idx] ──────────────────────
-        if dk_idx == 0u32 {
-            store(y[(bt * hv + hv_idx) * dv + dv_idx], out_sum.cast::<T>());
-        }
-    }
-    // ─── Write final state ONCE at the end ──────────────────────────────
-    for i in range(0u32, n_per_t, 1u32) {
-        let s_idx = n_per_t * dk_idx + i;
-        store(state_out[state_base + s_idx], stack_load("state_reg", i).cast::<T>());
     }
 }
 
@@ -189,7 +196,7 @@ mod tests {
 /// resident across its inner T-loop. Same un-clamped softplus as the kernel;
 /// inputs are dtype-rounded.
 ///
-/// Grid (Reduction, 1 simdgroup per TG): `grid_3d(dv, b*hv, 1, [32,1,1])`;
+/// Grid (Reduction, 4 SGs/TG): `grid_3d(ceil(dv/4), b*hv, 1, [128,1,1])`;
 /// `t_len` is a runtime u32 scalar buffer.
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
@@ -414,7 +421,7 @@ pub mod kernel_tests {
             .constexpr("hk", hk as u32)
             .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
             .expect(TestBuffer::from_vec("state_out", pack_f32(&state_exp, dt), dt))
-            .grid_3d(dv as u32, n_total as u32, 1, [32, 1, 1])
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
     }
 
     // GQA (Hv = 2·Hk), T=4 tokens with state carryover, weighted RMSNorm.
@@ -460,11 +467,11 @@ pub mod kernel_benches {
 
     use super::ffai_gated_delta_prep_chunk;
 
-    // Grid `[dv, b*hv, 1]`, TG `[32,1,1]`, Reduction. conv_out gains a T
-    // dimension: `[B, T, 2·Hk·Dk + Hv·Dv]`. `t_len` is a runtime u32 scalar.
+    // Grid `[ceil(dv/4), b*hv, 1]`, TG `[128,1,1]` (4 SGs). Production
+    // Qwen3.6 shape: Dv=128, Hv=16, Dk=128/256, T chunk 64+.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_gated_delta_prep_chunk(dt: DType) -> BenchSetup {
-        let (b, t, hv, hk, dv, dk) = (1usize, 64usize, 4usize, 2usize, 8usize, 64usize);
+        let (b, t, hv, hk, dv, dk) = (1usize, 64usize, 16usize, 8usize, 128usize, 128usize);
         let n_total = b * hv;
         let conv_w = 2 * hk * dk + hv * dv;
         BenchSetup::new(ffai_gated_delta_prep_chunk::kernel_ir_for(dt))
@@ -484,7 +491,7 @@ pub mod kernel_benches {
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
-            .grid_3d(dv as u32, n_total as u32, 1, [32, 1, 1])
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
 }
