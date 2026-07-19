@@ -5,11 +5,13 @@
 //! decode step (`ffai_ssm_step`, + `_a2d` for 2-D A_log, + `_grouped` for the
 //! MLX-aligned reduction form), the SSD chunked-scan ops (`ffai_ssd_*`), Mamba
 //! input-projection split + gated group RMSNorm, the gated-delta-net family
-//! (+ prep / chunk / wy / replay), and record/replay. Migrated from `ffai/`.
+//! (+ prep / chunk / gate-beta / wy / replay), and record/replay. Migrated
+//! from `ffai/`.
 //! (The depthwise causal conv1d that precedes the scan lives in
 //! `convolution/conv1d_causal.rs`.)
 
 pub mod gated_delta;
+pub mod gated_delta_gate_beta;
 pub mod gated_delta_prep;
 pub mod gated_delta_prep_chunk;
 pub mod gated_delta_qknorm_prepass;

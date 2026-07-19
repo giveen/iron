@@ -241,6 +241,49 @@ pub mod kernel_tests {
             dt,
         )
     }
+
+    /// `test_qmm_mma_mpp` above only ever exercises `tgid_y == 0` (M=32,
+    /// a single M-tile) — added while landing the Swift-side batched-
+    /// prefill dispatch (`Ops.dispatchQmmMma`'s bits=4 MPP arm), which
+    /// routes production M=128+ shapes through here and needed multi-
+    /// M-tile coverage confirmed before shipping. Passes clean
+    /// (err=9.78e-9 @ f32) — `tgid_y > 0` was already correct, this just
+    /// closes a coverage gap.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_qmm_mma_mpp_multi_m_tile(dt: DType) -> TestSetup {
+        qx_setup(
+            ffai_qmm_mma_mpp::kernel_ir_for(dt),
+            128,
+            64,
+            512,
+            4,
+            64,
+            true,
+            [2, 4, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
+
+    /// Qwen3.6-A3B-class production shape (`hidden=2048`, M=128 — a
+    /// realistic batched-prefill chunk). Same coverage rationale as
+    /// `test_qmm_mma_mpp_multi_m_tile` above, at the actual dims the
+    /// Swift-side dispatch uses group_size=64 for.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_qmm_mma_mpp_prod_shape(dt: DType) -> TestSetup {
+        qx_setup(
+            ffai_qmm_mma_mpp::kernel_ir_for(dt),
+            128,
+            2048,
+            2048,
+            4,
+            64,
+            true,
+            [64, 4, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
 }
 
 /// New-syntax benchmark for `ffai_qmm_mma_mpp`.
