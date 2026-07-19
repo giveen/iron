@@ -381,4 +381,41 @@ pub mod kernel_benches {
             // 4 * H * Nkv * D * Nq (multi-query d256: Nq=n_query, Nkv=base_kv+n_query)
             .flops(4 * (n_q_heads as u64) * (n_kv as u64) * (head_dim as u64) * (n_query as u64))
     }
+
+    // Append-shape bench: matches `ffai_sdpa_prefill_qtiled_d256`'s bench
+    // shape exactly (1024-token chunk landing on an 8192 prefix, causal,
+    // GQA 32/8, the real Qwen3.6-A3B config) so `ffaik bench --diff` can
+    // compare this (legacy, one threadgroup per query row, no K/V reuse
+    // across rows) kernel against the Q-tiled one at a realistic
+    // prefill-append shape, not just the tiny n_query=8 default above
+    // (which predates the append-regime attribution and never exercised
+    // the bandwidth-reuse gap).
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_sdpa_multi_d256_append_shape(dt: DType) -> BenchSetup {
+        let (n_q_heads, n_kv_heads, head_dim) = (32usize, 8usize, 256usize);
+        let (base_kv, n_query) = (8192usize, 1024usize);
+        let kv_stride = base_kv + n_query;
+        let heads_per_group = n_q_heads / n_kv_heads;
+        let scale = 1.0f32 / (head_dim as f32).sqrt();
+        let n_kv = base_kv + n_query;
+        let bytes = (2 * n_query * n_q_heads * head_dim + 2 * n_kv_heads * n_kv * head_dim)
+            * dt.size_bytes();
+        BenchSetup::new(ffai_sdpa_multi_d256::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("q", n_query * n_q_heads * head_dim, dt))
+            .buffer(BenchBuffer::random("k", n_kv_heads * kv_stride * head_dim, dt))
+            .buffer(BenchBuffer::random("v", n_kv_heads * kv_stride * head_dim, dt))
+            .buffer(BenchBuffer::zeros("out", n_query * n_q_heads * head_dim, dt).output())
+            .constexpr("head_dim", head_dim as u32)
+            .constexpr("n_q_heads", n_q_heads as u32)
+            .constexpr("base_kv", base_kv as u32)
+            .constexpr("n_query", n_query as u32)
+            .constexpr("kv_stride", kv_stride as u32)
+            .constexpr("heads_per_group", heads_per_group as u32)
+            .constexpr("causal", 1u32)
+            .constexpr("scale", scale)
+            .grid_3d((n_q_heads * n_query) as u32, 1, 1, [1024, 1, 1])
+            .bytes_moved(bytes as u64)
+            .flops(4 * (n_q_heads as u64) * (n_kv as u64) * (head_dim as u64) * (n_query as u64))
+    }
 }
