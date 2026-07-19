@@ -425,3 +425,170 @@ fn moe_gather_qmm_mma_int4_bm64_mpp_bf16_matches_m1_clean_tile() {
     assert_eq!(nan_count, 0, "MPP BM=64 bf16 kernel produced non-finite values");
     assert!(cos >= 0.997, "MPP MoE BM=64 bf16 vs m1 cosine = {cos:.6} (want ≥ 0.997)");
 }
+
+/// Skewed routing: uneven per-expert row counts, including empty experts and
+/// one very heavy expert, with run boundaries that do not land on a 64-row
+/// tile edge. The clean-tile / multi-tile cases above only exercise evenly
+/// divided sub-runs (t_rows/n_experts each). Real top-k routing over many
+/// experts is nothing like that, and the sub_offset/sub_end probe inside a
+/// BM=64 tile is exactly the code path that ragged boundaries stress.
+///
+/// n_experts=8, m_total=250 (not a multiple of 64 → 4 m-tiles, last one
+/// partial), n_out=128 (2 n-tiles), k_in=128. Row counts per expert:
+/// [1, 0, 130, 0, 5, 40, 0, 74], with three empty experts, one heavy expert
+/// spanning tiles 0-2, several short runs, and no boundary aligned to 64.
+#[test]
+fn moe_gather_qmm_mma_int4_bm64_mpp_matches_m1_skewed_ragged() {
+    let _g = gpu_lock();
+    let Some(_ctx) = skip_unless_apple10("bm64_mpp_skewed_ragged") else { return };
+    let n_experts = 8usize;
+    let k_in = 128usize;
+    let n_out = 128usize;
+    let group_size = 64usize;
+
+    let counts: [usize; 8] = [1, 0, 130, 0, 5, 40, 0, 74];
+    assert_eq!(counts.iter().sum::<usize>(), 250);
+    let t_rows = 250usize;
+    let mut indices: Vec<u32> = Vec::with_capacity(t_rows);
+    for (e, &c) in counts.iter().enumerate() {
+        indices.extend(std::iter::repeat(e as u32).take(c));
+    }
+    assert_eq!(indices.len(), t_rows);
+    eprintln!("[skewed] counts={counts:?} m_total={t_rows}");
+
+    let total_weights = n_experts * n_out * k_in;
+    let weight_unpacked: Vec<u32> =
+        (0..total_weights).map(|i| ((i as u32) * 13 + 9) & 0xf).collect();
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int4_row).collect();
+    let groups_total = n_experts * n_out * (k_in / group_size);
+    let scales: Vec<f32> =
+        (0..groups_total).map(|i| 0.005 + 0.001 * (i as f32 * 0.05).sin()).collect();
+    let biases: Vec<f32> =
+        (0..groups_total).map(|i| -0.02 + 0.005 * (i as f32 * 0.09).cos()).collect();
+    let x: Vec<f32> = (0..t_rows * k_in).map(|i| 0.05 * (i as f32 * 0.019).sin()).collect();
+
+    let mut expert_offsets: Vec<u32> = vec![0; n_experts + 1];
+    for (e_idx, off) in expert_offsets.iter_mut().enumerate().take(n_experts + 1) {
+        *off = indices
+            .iter()
+            .position(|&e| e as usize >= e_idx)
+            .map(|p| p as u32)
+            .unwrap_or(t_rows as u32);
+    }
+    expert_offsets[n_experts] = t_rows as u32;
+
+    // ── Reference: scalar m1 ─────────────────────────────────────────────
+    let y_m1 = {
+        let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        buffers.insert("x".into(), pack_bytes(&x, Dt::F32));
+        buffers.insert(
+            "weight_packed".into(),
+            weight_packed.iter().flat_map(|w| w.to_le_bytes()).collect(),
+        );
+        buffers.insert("scales".into(), pack_bytes(&scales, Dt::F32));
+        buffers.insert("biases".into(), pack_bytes(&biases, Dt::F32));
+        buffers.insert(
+            "expert_offsets".into(),
+            expert_offsets.iter().flat_map(|o| o.to_le_bytes()).collect(),
+        );
+        buffers.insert("out".into(), pack_bytes(&vec![0.0_f32; t_rows * n_out], Dt::F32));
+        buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
+        buffers.insert("m_out".into(), (n_out as u32).to_le_bytes().to_vec());
+        buffers.insert("n_experts".into(), (n_experts as u32).to_le_bytes().to_vec());
+        buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
+        let ctx = Context::new().unwrap();
+        let mut k = ffai_moe_gather_qmm_int4::kernel_ir_for(Dt::F32.to_dtype());
+        k.mode = KernelMode::Reduction;
+        let r = ctx
+            .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [n_out, t_rows, 1], [32, 1, 1])
+            .unwrap();
+        unpack_bytes(r.outputs.get("out").unwrap(), Dt::F32)
+    };
+
+    // ── Under test: BM=64 MPP MoE kernel ─────────────────────────────────
+    let y_mpp = {
+        let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        buffers.insert("x".into(), pack_bytes(&x, Dt::F32));
+        buffers.insert("w".into(), weight_packed.iter().flat_map(|w| w.to_le_bytes()).collect());
+        buffers.insert("scales".into(), pack_bytes(&scales, Dt::F32));
+        buffers.insert("biases".into(), pack_bytes(&biases, Dt::F32));
+        buffers.insert("indices".into(), indices.iter().flat_map(|i| i.to_le_bytes()).collect());
+        buffers.insert("out".into(), pack_bytes(&vec![0.0_f32; t_rows * n_out], Dt::F32));
+        buffers.insert("m_total".into(), (t_rows as u32).to_le_bytes().to_vec());
+        buffers.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
+        buffers.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
+        buffers.insert("group_size".into(), (group_size as u32).to_le_bytes().to_vec());
+        let ctx = Context::new().unwrap();
+        let mut k =
+            moe_mpp_bm64::ffai_moe_gather_qmm_mma_int4_bm64_mpp::kernel_ir_for(Dt::F32.to_dtype());
+        k.mode = KernelMode::Reduction;
+        let r = ctx
+            .dispatch_with_grid(
+                &k,
+                &buffers,
+                &BTreeMap::new(),
+                [n_out.div_ceil(64), t_rows.div_ceil(64), 1],
+                [128, 1, 1],
+            )
+            .unwrap();
+        unpack_bytes(r.outputs.get("out").unwrap(), Dt::F32)
+    };
+
+    // Per-row diagnostics so a real bug localizes to a tile/expert instead
+    // of hiding inside an aggregate cosine (aggregate cosine over 250 rows
+    // can stay high even if a handful of rows near a tile boundary are
+    // wrong (the round-3 gate lesson): a wrong offset can give high cosine
+    // but wrong values on the affected rows).
+    let mut worst = 0.0f32;
+    let mut worst_row = 0usize;
+    let mut bad_rows = 0usize;
+    for row in 0..t_rows {
+        let mut row_max = 0.0f32;
+        for c in 0..n_out {
+            let dlt = (y_m1[row * n_out + c] - y_mpp[row * n_out + c]).abs();
+            if dlt > row_max {
+                row_max = dlt;
+            }
+        }
+        if row_max > 5e-4 {
+            bad_rows += 1;
+            eprintln!(
+                "[skewed diff] row={row:>3} expert={} tile={} pos={:>2} row_max={row_max:.4e}",
+                indices[row],
+                row / 64,
+                row % 64
+            );
+        }
+        if row_max > worst {
+            worst = row_max;
+            worst_row = row;
+        }
+    }
+
+    let mut dot = 0.0_f64;
+    let mut na = 0.0_f64;
+    let mut nb = 0.0_f64;
+    let mut nan_count = 0usize;
+    for (a, b) in y_m1.iter().zip(&y_mpp) {
+        if !a.is_finite() || !b.is_finite() {
+            nan_count += 1;
+            continue;
+        }
+        dot += (*a as f64) * (*b as f64);
+        na += (*a as f64) * (*a as f64);
+        nb += (*b as f64) * (*b as f64);
+    }
+    let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
+    eprintln!(
+        "[skewed] bad_rows={bad_rows}/{t_rows} worst={worst:.4e} @row={worst_row} cos={cos:.6}"
+    );
+    assert_eq!(nan_count, 0, "MPP BM=64 kernel produced non-finite values (skewed)");
+    assert!(
+        worst < 5e-4,
+        "bm64 diverges from m1 on skewed/ragged routing: worst |diff|={worst:.4e} @row={worst_row} (expert={}, tile={})",
+        indices[worst_row],
+        worst_row / 64
+    );
+    assert!(cos >= 0.999, "MPP MoE BM=64 vs m1 cosine = {cos:.6} (want ≥ 0.999) (skewed)");
+}
