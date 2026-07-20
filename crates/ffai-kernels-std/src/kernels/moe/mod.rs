@@ -39,6 +39,8 @@ pub mod moe_mpp_bm8;
 pub mod moe_mpp_bm8_block_scaled;
 pub mod moe_mpp_expert_grid;
 pub mod moe_mpp_shared;
+pub mod moe_mpp_tileplan;
+pub mod moe_tile_plan_builder;
 
 // GGUF-format per-expert matmul / matvec (q2k, iq2xxs, q4).
 pub mod moe_bgemm_iq2xxs_bm64;
