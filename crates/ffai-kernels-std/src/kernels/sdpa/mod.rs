@@ -33,6 +33,7 @@ pub mod sdpa_multi;
 pub mod sdpa_multi_d256;
 pub mod sdpa_prefill_d512_sink;
 pub mod sdpa_prefill_mma_d256;
+pub mod sdpa_prefill_mma_d256_bk16;
 pub mod sdpa_prefill_qtiled_d256;
 pub mod sdpa_rel_pos_conformer;
 pub mod sdpa_vector;
