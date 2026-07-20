@@ -133,6 +133,32 @@ pub fn ffai_conv1d_causal_step_silu_cast_many<T>(
     store(state_out[2u32 * conv_dim + d], s2.cast::<T>());
 }
 
+#[cfg(test)]
+mod dump_audit {
+    use ffai_kernels::core::{DType, ir::KernelMode};
+
+    use super::*;
+
+    /// F-85 constexpr-codegen audit, developer aid. `t_len` is
+    /// `#[constexpr]` and is the T-sweep loop bound directly (`for r in
+    /// range(0, t_len, 1)`), so this loop cannot be unrolled by the Metal
+    /// compiler. Unlike `ffai_gated_delta_prep_chunk`'s `state_reg`, though,
+    /// the rolling conv state here (`s0`/`s1`/`s2`) is three named scalar
+    /// `let mut` bindings, never a `stack_alloc` array, so there is nothing
+    /// for the loop's non-unrolled status to prevent register-promoting.
+    /// This dump confirms `s0`/`s1`/`s2` compile to plain scalar locals
+    /// inside the loop body, not indexed memory.
+    /// `cargo test -p ffai-kernels-std --lib --release -- kernels::convolution::conv1d_causal_step_silu_cast_many::dump_audit::dump --nocapture`
+    #[test]
+    fn dump() {
+        use ffai_kernels::codegen::msl::MslGenerator;
+        let mut k = ffai_conv1d_causal_step_silu_cast_many::kernel_ir_for(DType::F32);
+        k.mode = KernelMode::Grid3D;
+        let msl = MslGenerator::default().generate(&k).expect("codegen");
+        println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
+    }
+}
+
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 

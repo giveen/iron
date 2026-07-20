@@ -2956,6 +2956,35 @@ pub fn ffai_moe_gather_qmm_mma_int4_bm16<T>(
     }
 }
 
+#[cfg(test)]
+mod dump_audit_bm16 {
+    use ffai_kernels::core::{DType, ir::KernelMode};
+
+    use super::*;
+
+    /// F-85 constexpr-codegen audit, developer aid. `k_in` is
+    /// `#[constexpr]` and directly bounds the K-block loop
+    /// (`for kb in range(0, k_in, 32)`), matching MLX's `k_in` values of
+    /// 2048 (hidden) and 512 (moe_intermediate) at this model's shape, so
+    /// this loop cannot be unrolled by the Metal compiler either. This
+    /// differs from `ffai_gated_delta_prep_chunk`'s `state_reg`: the
+    /// loop-carried accumulation here (`c_f00`/`c_f01`/`c_f10`/`c_f11`) is
+    /// `simdgroup_alloc` matrix-register state, and the per-iteration
+    /// staging (`xs`/`ws`) is threadgroup memory, not a per-lane
+    /// `stack_alloc` array. This dump checks whether the K-block loop not
+    /// unrolling costs anything beyond the (much smaller) generic loop-
+    /// overhead / instruction-scheduling effect the GDN fix hinges on.
+    /// `cargo test -p ffai-kernels-std --lib --release -- kernels::moe::moe_gather_qmm::dump_audit_bm16::dump --nocapture`
+    #[test]
+    fn dump() {
+        use ffai_kernels::codegen::msl::MslGenerator;
+        let mut k = ffai_moe_gather_qmm_mma_int4_bm16::kernel_ir_for(DType::F16);
+        k.mode = KernelMode::SimdGroup2D;
+        let msl = MslGenerator::default().generate(&k).expect("codegen");
+        println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
+    }
+}
+
 // ── ffai_moe_gather_qmm_mma_int2_bm16 ────────────────────────────────────────
 //
 // Half-height MMA grouped quantized matmul — BM=16 variant of

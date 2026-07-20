@@ -283,6 +283,32 @@ pub fn ffai_batched_qkv_qmm_fast<T>(
     }
 }
 
+#[cfg(test)]
+mod dump_audit {
+    use ffai_kernels::core::{DType, ir::KernelMode};
+
+    use super::*;
+
+    /// F-85 constexpr-codegen audit, developer aid, dumps the generated MSL
+    /// so the `accs[4]` accumulator's register-promotion status can be read
+    /// directly instead of inferred from the DSL source. `accs` is touched
+    /// only inside `range(0u32, 4u32, 1u32)` (a Rust-level literal bound, not
+    /// derived from any `#[constexpr]` param), so it should already unroll
+    /// and register-promote regardless of `in_dim`'s constexpr-lowered-to-
+    /// runtime status. This differs from `ffai_gated_delta_prep_chunk`'s
+    /// `state_reg`, whose touching loop bound (`n_per_t`) is itself
+    /// constexpr-derived.
+    /// `cargo test -p ffai-kernels-std --lib --release -- kernels::gemm::batched_qkv_qmm::dump_audit::dump --nocapture`
+    #[test]
+    fn dump() {
+        use ffai_kernels::codegen::msl::MslGenerator;
+        let mut k = ffai_batched_qkv_qmm_fast::kernel_ir_for(DType::F32);
+        k.mode = KernelMode::Reduction;
+        let msl = MslGenerator::default().generate(&k).expect("codegen");
+        println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
+    }
+}
+
 pub mod kernel_tests {
     use ffai_kernels::{test::*, test_kernel};
 
