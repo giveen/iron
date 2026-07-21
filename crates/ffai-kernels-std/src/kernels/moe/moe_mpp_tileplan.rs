@@ -206,7 +206,23 @@ mod tests {
 /// `(tile_expert, tile_row_start, tile_row_count)`, one entry per tile,
 /// concatenated in ascending expert order. Experts with `counts[e] == 0`
 /// contribute zero tiles (never an under-filled placeholder).
+///
+/// Thin BM=16 wrapper over `build_tile_plan_with_bm` - see that function's
+/// doc comment for the general (BM-parameterized) version this and the
+/// coop-core gather sibling (`moe_gather_qmm_coop.rs`, BM=32) both share.
 pub fn build_tile_plan(counts: &[usize]) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    build_tile_plan_with_bm(counts, 16)
+}
+
+/// General tile-plan builder, parameterized by tile height `bm`. Emits
+/// `ceil(count[e] / bm)` tiles per non-empty expert `e`, concatenated in
+/// ascending expert order - same algorithm as `build_tile_plan`, just with
+/// the tile-height constant lifted to a parameter so a sibling GEMM at a
+/// different BM (the coop-core gather kernel, BM=32) can share one
+/// definition of "how tiles map to experts" instead of hand-duplicating
+/// the loop with a different literal.
+pub fn build_tile_plan_with_bm(counts: &[usize], bm: usize) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    assert!(bm > 0, "tile height must be positive");
     let mut tile_expert = Vec::new();
     let mut tile_row_start = Vec::new();
     let mut tile_row_count = Vec::new();
@@ -214,7 +230,7 @@ pub fn build_tile_plan(counts: &[usize]) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
     for (e, &c) in counts.iter().enumerate() {
         let mut done = 0usize;
         while done < c {
-            let n = (c - done).min(16);
+            let n = (c - done).min(bm);
             tile_expert.push(e as u32);
             tile_row_start.push((row_base + done) as u32);
             tile_row_count.push(n as u32);
@@ -227,7 +243,7 @@ pub fn build_tile_plan(counts: &[usize]) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
 
 #[cfg(test)]
 mod tile_plan_tests {
-    use super::build_tile_plan;
+    use super::{build_tile_plan, build_tile_plan_with_bm};
 
     #[test]
     fn empty_experts_contribute_no_tiles() {
@@ -245,6 +261,32 @@ mod tile_plan_tests {
         assert_eq!(total_rows as usize, counts.iter().sum::<usize>());
         // First tile is expert 0 at row 0.
         assert_eq!((te[0], trs[0], trc[0]), (0, 0, 1));
+    }
+
+    #[test]
+    fn build_tile_plan_is_the_bm16_case_of_the_general_builder() {
+        let counts = [1usize, 0, 130, 0, 5, 40, 0, 74];
+        assert_eq!(build_tile_plan(&counts), build_tile_plan_with_bm(&counts, 16));
+    }
+
+    #[test]
+    fn bm32_halves_tile_count_on_large_runs_and_handles_short_runs() {
+        // Same fixture as `empty_experts_contribute_no_tiles`, at bm=32:
+        // ceil(1/32)+ceil(130/32)+ceil(5/32)+ceil(40/32)+ceil(74/32)
+        //   = 1 + 5 + 1 + 2 + 3 = 12  (vs 19 at bm=16)
+        let counts = [1usize, 0, 130, 0, 5, 40, 0, 74];
+        let (te, trs, trc) = build_tile_plan_with_bm(&counts, 32);
+        assert_eq!(te.len(), 12);
+        assert_eq!(trs.len(), 12);
+        assert_eq!(trc.len(), 12);
+        assert!(trc.iter().all(|&c| (1..=32).contains(&c)));
+        let total_rows: u32 = trc.iter().sum();
+        assert_eq!(total_rows as usize, counts.iter().sum::<usize>());
+        assert_eq!((te[0], trs[0], trc[0]), (0, 0, 1));
+        // Expert 2 (count=130) spans ceil(130/32)=5 tiles, last one short.
+        let e2_tiles: Vec<u32> =
+            te.iter().zip(&trc).filter(|&(&e, _)| e == 2).map(|(_, &c)| c).collect();
+        assert_eq!(e2_tiles, vec![32, 32, 32, 32, 2]);
     }
 }
 
@@ -318,5 +360,139 @@ pub mod kernel_benches {
             .grid_3d(n_out as u32 / 32, num_tiles as u32, 1, [32, 1, 1])
             .bytes_moved(bytes as u64)
             .flops(2 * m_total as u64 * n_out as u64 * k_in as u64)
+    }
+
+    /// F-85 isolated GO/NO-GO comparison sweep for the coop-core gather
+    /// variant (`moe_gather_qmm_coop.rs`): the SAME production leg shapes,
+    /// target mTotal values, and `moe_mpp_shared::zipfish_counts` seeds as
+    /// that kernel's `bench_moe_gather_qmm_coop_isolated_*` sweep, run
+    /// against THIS kernel (the BM=16 production default) so `ffaik bench
+    /// --match-name isolated` reports both sides of the comparison at
+    /// identical routing skew. Not the production shape-smoke bench above
+    /// (`bench_moe_gather_qmm_mma_int4_bm16_mpp_tileplan`, single-expert,
+    /// dispatch-shape-only) - this is the actual A/B fixture.
+    #[allow(clippy::too_many_arguments)]
+    fn isolated_cmp_bench(
+        dt: DType,
+        m_total: usize,
+        n_out: usize,
+        k_in: usize,
+        n_experts: usize,
+        group_size: usize,
+        seed: u64,
+        label: &str,
+    ) -> BenchSetup {
+        let groups_per_row = k_in / group_size;
+        let words_per_row = k_in / 8; // int4: 8 nibbles/u32
+        let sz = dt.size_bytes();
+        let bytes = n_experts * n_out * words_per_row * 4
+            + 2 * n_experts * n_out * groups_per_row * sz
+            + m_total * k_in * sz
+            + m_total * n_out * sz;
+        let counts = crate::kernels::moe::moe_mpp_shared::zipfish_counts(m_total, n_experts, seed);
+        let (tile_expert, tile_row_start, tile_row_count) = build_tile_plan(&counts);
+        let num_tiles = tile_expert.len();
+
+        BenchSetup::new(ffai_moe_gather_qmm_mma_int4_bm16_mpp_tileplan::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("x", m_total * k_in, dt))
+            .buffer(BenchBuffer::random("w", n_experts * n_out * words_per_row, DType::U32))
+            .buffer(BenchBuffer::random("scales", n_experts * n_out * groups_per_row, dt))
+            .buffer(BenchBuffer::random("biases", n_experts * n_out * groups_per_row, dt))
+            .buffer(BenchBuffer::from_vec("tile_expert", u32_bytes(&tile_expert), DType::U32))
+            .buffer(BenchBuffer::from_vec("tile_row_start", u32_bytes(&tile_row_start), DType::U32))
+            .buffer(BenchBuffer::from_vec("tile_row_count", u32_bytes(&tile_row_count), DType::U32))
+            .buffer(BenchBuffer::from_vec(
+                "x_rows",
+                u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+                DType::U32,
+            ))
+            .buffer(BenchBuffer::zeros("out", m_total * n_out, dt).output())
+            .constexpr("n_out", n_out as u32)
+            .constexpr("k_in", k_in as u32)
+            .constexpr("group_size", group_size as u32)
+            .with_shape_label(format!(
+                "{label} M{m_total} N{n_out} K{k_in} E{n_experts} tiles{num_tiles} {}",
+                crate::utils::dtype_label(dt)
+            ))
+            .grid_3d(n_out as u32 / 32, num_tiles as u32, 1, [32, 1, 1])
+            .bytes_moved(bytes as u64)
+            .flops(2 * m_total as u64 * n_out as u64 * k_in as u64)
+    }
+
+    // ── gate/up leg (K=2048, N=512) ─────────────────────────────────────
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t4096_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 512, 2048, 256, 64, 0x9E37_0001, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t4096_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 512, 2048, 256, 64, 0x9E37_0002, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t4096_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 512, 2048, 256, 64, 0x9E37_0003, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t16384_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 512, 2048, 256, 64, 0x9E37_0001, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t16384_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 512, 2048, 256, 64, 0x9E37_0002, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t16384_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 512, 2048, 256, 64, 0x9E37_0003, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t32768_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 512, 2048, 256, 64, 0x9E37_0001, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t32768_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 512, 2048, 256, 64, 0x9E37_0002, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_gate_up_t32768_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 512, 2048, 256, 64, 0x9E37_0003, "gate_up")
+    }
+
+    // ── down leg (K=512, N=2048) ────────────────────────────────────────
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t4096_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 2048, 512, 256, 64, 0x85EB_0001, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t4096_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 2048, 512, 256, 64, 0x85EB_0002, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t4096_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 4096, 2048, 512, 256, 64, 0x85EB_0003, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t16384_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 2048, 512, 256, 64, 0x85EB_0001, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t16384_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 2048, 512, 256, 64, 0x85EB_0002, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t16384_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 16384, 2048, 512, 256, 64, 0x85EB_0003, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t32768_s0(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 2048, 512, 256, 64, 0x85EB_0001, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t32768_s1(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 2048, 512, 256, 64, 0x85EB_0002, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_bm16_isolated_down_t32768_s2(dt: DType) -> BenchSetup {
+        isolated_cmp_bench(dt, 32768, 2048, 512, 256, 64, 0x85EB_0003, "down")
     }
 }

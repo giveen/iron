@@ -542,3 +542,37 @@ pub fn int4_mma_bench(kernel: Kernel, shape: MmaBenchShape, dt: DType) -> BenchS
         // MoE gather_qmm indexed: 2 * m_total * n_out * k_in (dense-equivalent FLOPs)
         .flops(2 * m_total as u64 * n_out as u64 * k_in as u64)
 }
+
+/// Zipf-ish per-expert row counts summing to `m_total` across `n_experts`,
+/// seeded so a given `(m_total, n_experts, seed)` triple is reproducible.
+/// Shared by the tile-plan GEMM isolated benches (BM=16 production default
+/// and the coop-core gather variant under evaluation against it) so both
+/// sides of a comparison see the IDENTICAL routing skew at a given shape -
+/// a fairness requirement for the isolated bench, not just a convenience.
+pub fn zipfish_counts(m_total: usize, n_experts: usize, seed: u64) -> Vec<usize> {
+    let mut weights: Vec<f64> = (0..n_experts)
+        .map(|e| {
+            let jitter = 1.0
+                + 0.4
+                    * (((e as u64).wrapping_mul(2654435761).wrapping_add(seed) % 1000) as f64
+                        / 1000.0
+                        - 0.5);
+            jitter / ((e + 1) as f64)
+        })
+        .collect();
+    let total_w: f64 = weights.iter().sum();
+    for w in &mut weights {
+        *w /= total_w;
+    }
+    let mut counts: Vec<usize> = weights.iter().map(|w| (w * m_total as f64) as usize).collect();
+    let assigned: usize = counts.iter().sum();
+    // Dump any rounding remainder onto the heaviest expert so
+    // `sum(counts) == m_total` exactly.
+    if assigned < m_total {
+        counts[0] += m_total - assigned;
+    } else if assigned > m_total {
+        let over = assigned - m_total;
+        counts[0] = counts[0].saturating_sub(over);
+    }
+    counts
+}
