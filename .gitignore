@@ -2,6 +2,10 @@
 target/
 Cargo.lock
 
+# Local ffaik/__ffai_runner install dir (see project_runner.rs resolution
+# order) - build artifacts, not source.
+bin/
+
 # Cached vendored sources (fetched at build time by build.rs)
 .cache/
 

@@ -24,6 +24,7 @@ pub mod steel;
 // Integer-quantized matmul / matvec (MLX int2..int8 weights).
 pub mod dequant_gemv;
 pub mod quantized;
+pub mod quantized_coop;
 pub mod quantized_mma_dynamic_m;
 pub mod quantized_mpp;
 pub mod quantized_mpp_int8;
