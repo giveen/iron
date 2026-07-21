@@ -29,6 +29,7 @@ pub mod moe_router_topk;
 pub mod moe_router_topk_biased;
 pub mod moe_sigmoid_bias;
 pub mod moe_sigmoid_bias_rows;
+pub mod moe_sort_plan_counting;
 
 // MPP grouped BGEMM (one ABI, tile-geometry / bit-width variants; shared
 // test/bench helpers in `moe_mpp_shared`).
