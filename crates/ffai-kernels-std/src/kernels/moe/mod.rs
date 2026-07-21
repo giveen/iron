@@ -21,6 +21,7 @@ pub mod moe_compact_active;
 pub mod moe_densify_remap;
 pub mod moe_gather_qmm;
 pub mod moe_gather_qmm_coop;
+pub mod moe_gather_qmm_coop_paired;
 pub mod moe_permute;
 pub mod moe_router_sigmoid_bias;
 pub mod moe_router_sqrtsoftplus;
@@ -43,6 +44,9 @@ pub mod moe_mpp_shared;
 pub mod moe_mpp_tileplan;
 pub mod moe_tile_plan_builder;
 pub mod moe_tile_plan_builder_bm32;
+pub mod moe_tile_plan_builder_bm32_own;
+pub mod moe_tile_plan_builder_bm32_paired;
+pub mod moe_tile_plan_builder_paired;
 
 // GGUF-format per-expert matmul / matvec (q2k, iq2xxs, q4).
 pub mod moe_bgemm_iq2xxs_bm64;

@@ -451,7 +451,7 @@ fn moe_gather_qmm_mma_int4_bm64_mpp_matches_m1_skewed_ragged() {
     let t_rows = 250usize;
     let mut indices: Vec<u32> = Vec::with_capacity(t_rows);
     for (e, &c) in counts.iter().enumerate() {
-        indices.extend(std::iter::repeat(e as u32).take(c));
+        indices.extend(std::iter::repeat_n(e as u32, c));
     }
     assert_eq!(indices.len(), t_rows);
     eprintln!("[skewed] counts={counts:?} m_total={t_rows}");

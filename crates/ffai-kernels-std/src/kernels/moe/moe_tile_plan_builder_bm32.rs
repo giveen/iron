@@ -53,6 +53,26 @@
 //!   in-range weight memory for these tiles, it just does redundant work)
 //!   and `tile_row_count = 0`, which the GEMM kernel's `mr < row_count`
 //!   tail mask turns into a dispatched-but-inert tile.
+//!
+//! ## Indirect-dispatch real tile count (F-85 idle-tile-cost follow-up)
+//!
+//! Two extra scalar outputs, `tile_count_gateup` / `tile_count_down`, feed
+//! `MTLDispatchThreadgroupsIndirectArguments` for `ffai_moe_gather_qmm_coop`'s
+//! gate/up and down dispatches respectively - the two legs differ only in
+//! `n_out`, so each needs its own indirect-args triple; the caller writes
+//! the `n_out_tiles`/`z=1` words of each triple once, host-side, at
+//! buffer-alloc time, and only the middle word (this kernel's real tile
+//! count) is device-computed. Both outputs receive the SAME value (the
+//! real tile count does not depend on `n_out`), written by exactly one
+//! lane (`e == n_experts - 1`) as `tile_offset + num_tiles` - that lane's
+//! own exclusive prefix sum plus its own tile contribution equals the
+//! INCLUSIVE total over every expert, no extra scan needed. A single flat
+//! `if` (not nested inside the tile-emission loop above, and not an
+//! if/else) storing to two DIFFERENT tensors - the same shape the BM=32
+//! paired builder's own indirect-dispatch pair count uses (see
+//! `moe_tile_plan_builder_bm32_paired.rs`), chosen there specifically to
+//! avoid the documented nested-if-else codegen bug that drops an inner
+//! guard when two arms of one if/else store to different tensors.
 
 use ffai_kernels::kernel;
 
@@ -65,6 +85,8 @@ pub fn ffai_moe_build_tile_plan_bm32(
     mut tile_expert: Tensor<u32>,
     mut tile_row_start: Tensor<u32>,
     mut tile_row_count: Tensor<u32>,
+    mut tile_count_gateup: Tensor<u32>,
+    mut tile_count_down: Tensor<u32>,
     #[constexpr] m_total: u32,
     #[constexpr] n_experts: u32,
 ) {
@@ -130,6 +152,17 @@ pub fn ffai_moe_build_tile_plan_bm32(
         store(tile_row_start[idx], start);
         store(tile_row_count[idx], rc);
     }
+
+    // Indirect-dispatch real tile count - see module doc. `tile_offset` at
+    // the LAST lane is the exclusive prefix sum over all experts < e;
+    // adding this lane's own `num_tiles` makes it the inclusive total over
+    // every expert, i.e. the real tile count the GEMM must dispatch.
+    let real_tile_count = tile_offset + num_tiles;
+    let is_last_lane = select(e == (n_experts - 1u32), 1u32, 0u32);
+    if is_last_lane == 1u32 {
+        store(tile_count_gateup[0], real_tile_count);
+        store(tile_count_down[0], real_tile_count);
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +224,8 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("tile_expert", capacity, DType::U32).output())
             .buffer(BenchBuffer::zeros("tile_row_start", capacity, DType::U32).output())
             .buffer(BenchBuffer::zeros("tile_row_count", capacity, DType::U32).output())
+            .buffer(BenchBuffer::zeros("tile_count_gateup", 1, DType::U32).output())
+            .buffer(BenchBuffer::zeros("tile_count_down", 1, DType::U32).output())
             .constexpr("m_total", m_total as u32)
             .constexpr("n_experts", n_experts as u32)
             .with_shape_label(format!("M{m_total} E{n_experts} cap{capacity}"))

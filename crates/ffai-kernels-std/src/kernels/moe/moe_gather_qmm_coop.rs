@@ -659,6 +659,22 @@ pub mod kernel_benches {
     fn bench_moe_gather_qmm_coop_isolated_gate_up_t4096_s2(dt: DType) -> BenchSetup {
         moe_coop_bench(dt, 4096, 512, 2048, 256, 64, 0x9E37_0003, "gate_up")
     }
+    // mTotal=8192 - added for the F-85 tile-pairing lever's isolated
+    // GO/NO-GO sweep (moe_gather_qmm_coop_paired.rs), which targets
+    // {4096, 8192, 16384, 32768}; not originally in this kernel's own
+    // sweep. Bench-only addition, no functional change to this kernel.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_gate_up_t8192_s0(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 512, 2048, 256, 64, 0x9E37_0001, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_gate_up_t8192_s1(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 512, 2048, 256, 64, 0x9E37_0002, "gate_up")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_gate_up_t8192_s2(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 512, 2048, 256, 64, 0x9E37_0003, "gate_up")
+    }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_coop_isolated_gate_up_t16384_s0(dt: DType) -> BenchSetup {
         moe_coop_bench(dt, 16384, 512, 2048, 256, 64, 0x9E37_0001, "gate_up")
@@ -696,6 +712,19 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_coop_isolated_down_t4096_s2(dt: DType) -> BenchSetup {
         moe_coop_bench(dt, 4096, 2048, 512, 256, 64, 0x85EB_0003, "down")
+    }
+    // mTotal=8192 - see the gate/up leg's identical note above.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_down_t8192_s0(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 2048, 512, 256, 64, 0x85EB_0001, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_down_t8192_s1(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 2048, 512, 256, 64, 0x85EB_0002, "down")
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_moe_gather_qmm_coop_isolated_down_t8192_s2(dt: DType) -> BenchSetup {
+        moe_coop_bench(dt, 8192, 2048, 512, 256, 64, 0x85EB_0003, "down")
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_moe_gather_qmm_coop_isolated_down_t16384_s0(dt: DType) -> BenchSetup {

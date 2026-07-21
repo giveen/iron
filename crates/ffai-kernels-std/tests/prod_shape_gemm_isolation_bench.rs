@@ -69,7 +69,7 @@ impl SplitMix64 {
 
 /// Same Zipf(s=1.0) skewed-routing model as `smallm_occupancy_microbench.rs`
 /// - returns per-expert counts (sorted-ascending layout every gather-GEMM
-/// kernel expects is implicit in `build_tile_plan`, which only needs counts).
+///   kernel expects is implicit in `build_tile_plan`, which only needs counts).
 fn skewed_counts(t: usize, topk: usize, n_experts: usize, seed: u64) -> Vec<usize> {
     let mut rng = SplitMix64(seed);
     let weights: Vec<f64> = (0..n_experts).map(|e| 1.0 / (e as f64 + 1.0)).collect();
