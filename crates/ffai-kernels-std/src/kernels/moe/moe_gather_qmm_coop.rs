@@ -428,8 +428,8 @@ pub mod kernel_tests {
         let mut tile_expert_by_row = vec![0u32; m_total];
         for (e, &c) in counts.iter().enumerate() {
             let start: usize = counts[..e].iter().sum();
-            for r in start..start + c {
-                tile_expert_by_row[r] = e as u32;
+            for slot in tile_expert_by_row.iter_mut().skip(start).take(c) {
+                *slot = e as u32;
             }
         }
 
