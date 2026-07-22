@@ -187,6 +187,16 @@ pub fn ffai_gdn_wy_plan<T>(
     threadgroup_alloc("tg_cache", 4096u32, f16); // [64, 64] QKT-lower / KKT-upper
     threadgroup_alloc("Xs", 2048u32, f16); // MMA staging (q/k slices)
     threadgroup_alloc("OutScratch", 512u32, f32); // one 16×32 f32 C-tile
+    // Private per-lane f32 accumulators for the two forward-substitution
+    // solves (steps 2, 5), see the precision note at those steps. Lane
+    // `d` (`d < dk` or `d < dv`) is the ONLY reader/writer of its own
+    // `[C]` column across the whole row-sequential recurrence, so this
+    // can live in per-lane stack storage instead of threadgroup memory:
+    // zero additional TG-budget cost (stack storage isn't threadgroup-
+    // resident, unlike `tg_solve`), and it removes the f16 round-trip
+    // that was happening between every row of the recurrence.
+    stack_alloc("p_priv", 64u32, "f32");
+    stack_alloc("u_priv", 64u32, "f32");
     // KKT/QKT GEMM: 16×32×32 tiles (the same M/N/K shape every proven MMA
     // kernel in this codebase uses), tb=true (B = k slice in its natural
     // [rows, Dk-slice] layout, which is [N, K] for these Gram products).
@@ -321,17 +331,54 @@ pub fn ffai_gdn_wy_plan<T>(
     // symmetric). Lane d owns column d for EVERY row t, so p[j,d] reads
     // are same-lane writes — **no barrier inside the loop at all** (the
     // v1 kernel needed 2 per row for its cooperative row cache).
+    //
+    // Accumulates in the private `p_priv` f32 stack, NOT `tg_solve`
+    // (f16): real chunks with correlated/near-rank-deficient K (organic
+    // model activations, unlike near-orthogonal random test vectors)
+    // drive `p` to large intermediate magnitudes; rounding each row's
+    // `p[t,d]` to f16 before the NEXT row reads it back compounds across
+    // up to 64 sequential row-dependencies and was blowing up to inf/NaN
+    // by T~4K. `p_priv` never round-trips through f16 during the
+    // recurrence itself, only the converged result is downcast once,
+    // below, for steps 3/4's MMA reads (which need an f16, threadgroup-
+    // shared operand; the MMA op itself isn't the unstable part).
+    //
+    // Kahan-compensated accumulation on top of the f32 upgrade above:
+    // plain f32 alone still loses low-order bits summing up to 63 terms
+    // of widely-varying magnitude (the low-rank-correlated-K regime this
+    // solve is ill-conditioned for produces exactly that: a handful of
+    // large terms followed by many small ones whose sum matters). `comp`
+    // tracks the rounding error dropped by each `accum + y` and folds it
+    // back into the next term before it's lost, at the cost of ~4 extra
+    // scalar FLOPs per inner-loop step (no extra memory traffic, no
+    // change to loop trip count or TG/grid geometry, so it does not
+    // touch the occupancy-limited paths a prior campaign already found
+    // fragile). `comp` resets every row `t`, it is a per-row rounding
+    // ledger, not part of the row-to-row recurrence `p_priv` carries.
     for t in range(0u32, c, 1u32) {
         let t_abs = chunk_start + t;
         for d in range(lane, dk, 512u32) {
             let mut accum = load(k[(t_abs * hk + hk_idx) * dk + d]).cast::<f32>();
+            let mut comp = 0.0f32;
             for j in range(0u32, t, 1u32) {
                 let beta_j = threadgroup_load("tg_beta", j);
                 let kkt_tj = threadgroup_load("tg_cache", j * 64u32 + t).cast::<f32>();
-                let p_jd = threadgroup_load("tg_solve", j * 128u32 + d).cast::<f32>();
-                accum = accum - beta_j * kkt_tj * p_jd;
+                let p_jd = stack_load("p_priv", j);
+                let term = beta_j * kkt_tj * p_jd;
+                let y = (0.0f32 - term) - comp;
+                let t_sum = accum + y;
+                comp = (t_sum - accum) - y;
+                accum = t_sum;
             }
-            threadgroup_store("tg_solve", t * 128u32 + d, accum.cast::<f16>());
+            stack_store("p_priv", t, accum);
+        }
+    }
+    // One-time downcast of the converged f32 solve into the f16
+    // MMA-staging buffer (see precision note above), not a per-row
+    // round-trip, so it doesn't compound.
+    for d in range(lane, dk, 512u32) {
+        for t in range(0u32, c, 1u32) {
+            threadgroup_store("tg_solve", t * 128u32 + d, stack_load("p_priv", t).cast::<f16>());
         }
     }
     threadgroup_barrier();
@@ -473,7 +520,10 @@ pub fn ffai_gdn_wy_plan<T>(
     // ── Step 5: solve (I+A) u = beta⊙V, A[t,j]=beta_t*Gamma[t,j]*KKT[t,j].
     // `tg_solve` is fully drained of `p` by steps 3–4 above (the barrier
     // right before this comment is what makes that safe); overwrite with
-    // `u`. Same barrier-free column-ownership structure as step 2.
+    // `u`. Same barrier-free column-ownership structure as step 2, same
+    // private-f32-accumulator precision fix (see step 2's note): `u_priv`
+    // carries the row-to-row recurrence, `tg_solve` only receives the
+    // converged one-time downcast for steps 6/7's MMA reads.
     for t in range(0u32, c, 1u32) {
         let t_abs = chunk_start + t;
         let beta_t = threadgroup_load("tg_beta", t);
@@ -481,16 +531,27 @@ pub fn ffai_gdn_wy_plan<T>(
         for d in range(lane, dv, 512u32) {
             let v_td = load(v[(t_abs * hv + hv_idx) * dv + d]).cast::<f32>();
             let mut accum = beta_t * v_td;
+            let mut comp = 0.0f32;
             for j in range(0u32, t, 1u32) {
                 let l_j = threadgroup_load("tg_big_g", j);
                 let kkt_tj = threadgroup_load("tg_cache", j * 64u32 + t).cast::<f32>();
-                let uv_jd = threadgroup_load("tg_solve", j * 128u32 + d).cast::<f32>();
+                let uv_jd = stack_load("u_priv", j);
                 // Γ[t,j] = G_t/G_j = exp(L_t − L_j) — see step 1's
                 // log-space rationale (the direct ratio NaNs on
-                // production gate magnitudes).
-                accum = accum - beta_t * exp(l_t - l_j) * kkt_tj * uv_jd;
+                // production gate magnitudes). Kahan-compensated, same
+                // rationale as step 2's solve above.
+                let term = beta_t * exp(l_t - l_j) * kkt_tj * uv_jd;
+                let y = (0.0f32 - term) - comp;
+                let t_sum = accum + y;
+                comp = (t_sum - accum) - y;
+                accum = t_sum;
             }
-            threadgroup_store("tg_solve", t * 128u32 + d, accum.cast::<f16>());
+            stack_store("u_priv", t, accum);
+        }
+    }
+    for d in range(lane, dv, 512u32) {
+        for t in range(0u32, c, 1u32) {
+            threadgroup_store("tg_solve", t * 128u32 + d, stack_load("u_priv", t).cast::<f16>());
         }
     }
     threadgroup_barrier();
