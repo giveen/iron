@@ -24,7 +24,7 @@
 
 mod common;
 
-use common::{Dt, gpu_lock};
+use common::{Dt, SplitMix64, gpu_lock};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::{
     gemm::quantized_mpp::ffai_qmm_mma_mpp,
@@ -54,21 +54,6 @@ fn pack_f32(vals: &[f32], dt: Dt) -> Vec<u8> {
         Dt::F16 => vals.iter().flat_map(|v| half::f16::from_f32(*v).to_le_bytes()).collect(),
         Dt::Bf16 => vals.iter().flat_map(|v| half::bf16::from_f32(*v).to_le_bytes()).collect(),
     }
-}
-
-/// Tiny deterministic PRNG (splitmix64) - no workspace `rand` dependency,
-/// and a fixed seed keeps the skewed-routing fixture reproducible across
-/// runs so successive bench invocations are comparable.
-struct SplitMix64(u64);
-impl SplitMix64 {
-    fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        z ^ (z >> 31)
-    }
-    fn next_f64(&mut self) -> f64 { (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64) }
 }
 
 /// Build a realistic skewed top-`topk`-of-`n_experts` routing fixture:

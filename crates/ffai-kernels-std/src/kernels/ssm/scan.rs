@@ -1352,3 +1352,47 @@ pub fn ffai_ssd_g4_cs(
         }
     }
 }
+
+// Regression lock for the whole-tree nested-if-conversion audit (F-85
+// review): `ffai_mamba_split_proj`/`ffai_mamba_split_conv` desugar their
+// `else if` chain into a nested if/else whose inner branch stores to two
+// DIFFERENT tensors, same shape as the documented if-conversion Diamond
+// bug (`moe_tile_plan_builder_bm32.rs` module docs) where positionally-
+// paired no-result ops in both arms get inlined unconditionally, silently
+// dropping the guard. These two kernels currently survive only because
+// the inner arms' index arithmetic pushes the op count over the
+// profitability cap (see `if_conversion.rs::MAX_DIAMOND_OPS`) - a
+// fragile margin, not a structural guarantee. This test locks the
+// current safe shape (both nested `Op::If`s still present after the
+// standard pass pipeline) so a future change to the arithmetic, the
+// cost heuristic, or the pass itself trips a loud failure here instead
+// of silently corrupting `xbc_out`/`dt_out` (or `b_out`/`c_out`) writes.
+#[cfg(test)]
+mod if_conversion_regression {
+    use ffai_kernels::core::ir::Op;
+
+    use super::{ffai_mamba_split_conv, ffai_mamba_split_proj};
+
+    fn count_ifs_after_passes(mut k: ffai_kernels::core::Kernel) -> usize {
+        ffai_kernels::codegen::passes::run_passes_with_stats(
+            &mut k,
+            &ffai_kernels::codegen::passes::standard_pipeline(),
+        )
+        .expect("pass pipeline");
+        std::iter::once(&k.body)
+            .chain(k.blocks.values())
+            .flat_map(|b| b.ops.iter())
+            .filter(|op| matches!(op, Op::If { .. }))
+            .count()
+    }
+
+    #[test]
+    fn split_proj_keeps_both_nested_ifs() {
+        assert_eq!(count_ifs_after_passes(ffai_mamba_split_proj::kernel_ir_for()), 2);
+    }
+
+    #[test]
+    fn split_conv_keeps_both_nested_ifs() {
+        assert_eq!(count_ifs_after_passes(ffai_mamba_split_conv::kernel_ir_for()), 2);
+    }
+}

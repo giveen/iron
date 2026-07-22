@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use common::gpu_lock;
 use ffai_kernels::{Context, DispatchSpec, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::{
+    moe_mpp_shared::zipfish_counts,
     moe_permute::ffai_moe_sort_plan,
     moe_sort_plan_counting::{
         ffai_moe_sort_plan_hist,
@@ -30,32 +31,6 @@ use ffai_kernels_std::kernels::moe::{
 };
 
 fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
-
-fn zipf_counts(m_total: usize, n_experts: usize, seed: u64) -> Vec<usize> {
-    let mut weights: Vec<f64> = (0..n_experts)
-        .map(|e| {
-            let jitter = 1.0
-                + 0.4
-                    * (((e as u64).wrapping_mul(2654435761).wrapping_add(seed) % 1000) as f64
-                        / 1000.0
-                        - 0.5);
-            jitter / ((e + 1) as f64)
-        })
-        .collect();
-    let total_w: f64 = weights.iter().sum();
-    for w in &mut weights {
-        *w /= total_w;
-    }
-    let mut counts: Vec<usize> = weights.iter().map(|w| (w * m_total as f64) as usize).collect();
-    let assigned: usize = counts.iter().sum();
-    if assigned < m_total {
-        counts[0] += m_total - assigned;
-    } else if assigned > m_total {
-        let over = assigned - m_total;
-        counts[0] = counts[0].saturating_sub(over);
-    }
-    counts
-}
 
 fn shuffled_ids(counts: &[usize], seed: u64) -> Vec<u32> {
     let mut ids = Vec::new();
@@ -220,7 +195,8 @@ fn isolated_bench_old_vs_counting_sort() {
         } else {
             10
         };
-        let counts = zipf_counts(m_total, n_experts, 0x5EED_0002u64.wrapping_add(m_total as u64));
+        let counts =
+            zipfish_counts(m_total, n_experts, 0x5EED_0002u64.wrapping_add(m_total as u64));
         let ids = shuffled_ids(&counts, 0x1357_9BDFu64.wrapping_add(m_total as u64));
 
         let us_old = time_original(&ctx, &ids, k, iters);
@@ -243,7 +219,7 @@ fn block_size_sweep_at_production_scale() {
     let n_experts = 256usize;
     let m_total = 4096usize;
     let iters = 40;
-    let counts = zipf_counts(m_total, n_experts, 0xC0FF_EE01);
+    let counts = zipfish_counts(m_total, n_experts, 0xC0FF_EE01);
     let ids = shuffled_ids(&counts, 0xFACE_B00C);
 
     eprintln!("\n=== block_size sweep at mTotal={m_total} ===");

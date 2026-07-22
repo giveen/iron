@@ -246,6 +246,38 @@ pub fn naive_sdpa_causal_prefix_f32(
 /// exercises the encode kernel's rotation matmul stage that an identity
 /// Π leaves dormant.
 ///
+/// SplitMix64 core step, a cheap deterministic PRNG with no workspace
+/// `rand` dependency. Shared by every fixture generator across the
+/// integration/bench suites that needs a reproducible RNG stream (skewed
+/// MoE routing counts, organic/low-rank GDN input fixtures, ...), so a
+/// fixed seed keeps a fixture reproducible across runs and across the
+/// suites that independently need "the same kind of" random data.
+pub fn splitmix64_next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
+/// `splitmix64_next`, mapped to `[0, 1)` as `f32`, the call style used
+/// by fixture generators that thread a bare `&mut u64` seed through
+/// several columns of a row rather than owning a `SplitMix64` struct.
+pub fn uniform01_f32(state: &mut u64) -> f32 {
+    (splitmix64_next(state) >> 11) as f32 / (1u64 << 53) as f32
+}
+
+/// `SplitMix64` as an owned-state struct, the call style used by
+/// fixture generators that build one `rng` and thread it by `&mut self`
+/// across a loop body.
+pub struct SplitMix64(pub u64);
+impl SplitMix64 {
+    pub fn next_u64(&mut self) -> u64 { splitmix64_next(&mut self.0) }
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+    }
+}
+
 /// The `±1` sign flips are derived deterministically from a small LCG
 /// seeded by `seed`, so the rotation is reproducible across runs.
 pub fn srht_rotation(dim: usize, seed: u64) -> Vec<f32> {

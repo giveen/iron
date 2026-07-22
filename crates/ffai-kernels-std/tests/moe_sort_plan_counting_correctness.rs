@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use common::gpu_lock;
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::moe::{
+    moe_mpp_shared::zipfish_counts,
     moe_permute::ffai_moe_sort_plan,
     moe_sort_plan_counting::{
         ffai_moe_sort_plan_hist,
@@ -181,32 +182,6 @@ fn shuffled_ids(counts: &[usize], seed: u64) -> Vec<u32> {
     ids
 }
 
-fn zipf_counts(m_total: usize, n_experts: usize, seed: u64) -> Vec<usize> {
-    let mut weights: Vec<f64> = (0..n_experts)
-        .map(|e| {
-            let jitter = 1.0
-                + 0.4
-                    * (((e as u64).wrapping_mul(2654435761).wrapping_add(seed) % 1000) as f64
-                        / 1000.0
-                        - 0.5);
-            jitter / ((e + 1) as f64)
-        })
-        .collect();
-    let total_w: f64 = weights.iter().sum();
-    for w in &mut weights {
-        *w /= total_w;
-    }
-    let mut counts: Vec<usize> = weights.iter().map(|w| (w * m_total as f64) as usize).collect();
-    let assigned: usize = counts.iter().sum();
-    if assigned < m_total {
-        counts[0] += m_total - assigned;
-    } else if assigned > m_total {
-        let over = assigned - m_total;
-        counts[0] = counts[0].saturating_sub(over);
-    }
-    counts
-}
-
 /// Checks the counting-sort pipeline against both oracles for one
 /// `(ids, k, n_experts, block_size)` fixture.
 fn check_case(ids: &[u32], k: usize, n_experts: usize, block_size: usize, label: &str) {
@@ -254,7 +229,7 @@ fn uniform_routing_production_scale() {
 fn zipf_skewed_routing() {
     for &t in &[512usize, 4096] {
         let m_total = t * K;
-        let counts = zipf_counts(m_total, N_EXPERTS, 0x5EED_0001);
+        let counts = zipfish_counts(m_total, N_EXPERTS, 0x5EED_0001);
         let ids = shuffled_ids(&counts, 0x1234_5678);
         check_case(&ids, K, N_EXPERTS, BLOCK_SIZE, &format!("zipf T={t}"));
     }
@@ -315,7 +290,7 @@ fn production_scale_uniform_and_zipf() {
         let ids: Vec<u32> = (0..m_total).map(|i| ((i * 2654435761) % N_EXPERTS) as u32).collect();
         check_case(&ids, K, N_EXPERTS, BLOCK_SIZE, &format!("production uniform T={t}"));
 
-        let counts = zipf_counts(m_total, N_EXPERTS, 0x9E37_0001u64.wrapping_add(t as u64));
+        let counts = zipfish_counts(m_total, N_EXPERTS, 0x9E37_0001u64.wrapping_add(t as u64));
         let zids = shuffled_ids(&counts, 0x2468_ACE0u64.wrapping_add(t as u64));
         check_case(&zids, K, N_EXPERTS, BLOCK_SIZE, &format!("production zipf T={t}"));
     }
@@ -329,7 +304,7 @@ fn deterministic_repeat_dispatch() {
     // cheapest possible guard against a regression that introduces one).
     let _g = gpu_lock();
     let ctx = Context::new().expect("Context");
-    let counts = zipf_counts(4096, N_EXPERTS, 0x42);
+    let counts = zipfish_counts(4096, N_EXPERTS, 0x42);
     let ids = shuffled_ids(&counts, 0x99);
     let (se1, st1, ip1) = run_counting_sort(&ctx, &ids, K, N_EXPERTS, BLOCK_SIZE);
     let (se2, st2, ip2) = run_counting_sort(&ctx, &ids, K, N_EXPERTS, BLOCK_SIZE);

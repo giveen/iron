@@ -26,7 +26,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{Dt, gpu_lock, max_abs_diff, pack_bytes, unpack_bytes};
+use common::{Dt, gpu_lock, max_abs_diff, pack_bytes, uniform01_f32, unpack_bytes};
 use ffai_kernels::{Context, core::ir::KernelMode};
 use ffai_kernels_std::kernels::ssm::{
     gated_delta_wy::ffai_gated_delta_wy_chunk,
@@ -123,23 +123,17 @@ fn organic_inputs(
     g_hi: f32,
     seed: u64,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-    fn splitmix64(state: &mut u64) -> u64 {
-        *state = state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = *state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        z ^ (z >> 31)
-    }
-    fn uniform01(state: &mut u64) -> f32 { (splitmix64(state) >> 11) as f32 / (1u64 << 53) as f32 }
     let mut s = seed;
     let kscale = (2.0_f32 / dk as f32).sqrt();
-    let q: Vec<f32> = (0..t * hk * dk).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * kscale).collect();
-    let k: Vec<f32> = (0..t * hk * dk).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * kscale).collect();
-    let v: Vec<f32> = (0..t * hv * dv).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * 0.3).collect();
-    let g: Vec<f32> = (0..t * hv).map(|_| g_lo + (g_hi - g_lo) * uniform01(&mut s)).collect();
-    let beta: Vec<f32> = (0..t * hv).map(|_| 0.25 + 0.7 * uniform01(&mut s)).collect();
+    let q: Vec<f32> =
+        (0..t * hk * dk).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * kscale).collect();
+    let k: Vec<f32> =
+        (0..t * hk * dk).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * kscale).collect();
+    let v: Vec<f32> = (0..t * hv * dv).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * 0.3).collect();
+    let g: Vec<f32> = (0..t * hv).map(|_| g_lo + (g_hi - g_lo) * uniform01_f32(&mut s)).collect();
+    let beta: Vec<f32> = (0..t * hv).map(|_| 0.25 + 0.7 * uniform01_f32(&mut s)).collect();
     let state: Vec<f32> =
-        (0..hv * dv * dk).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * 0.1).collect();
+        (0..hv * dv * dk).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * 0.1).collect();
     (q, k, v, g, beta, state)
 }
 
@@ -169,21 +163,15 @@ fn low_rank_correlated_inputs(
     g_hi: f32,
     seed: u64,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-    fn splitmix64(state: &mut u64) -> u64 {
-        *state = state.wrapping_add(0x9E3779B97F4A7C15);
-        let mut z = *state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-        z ^ (z >> 31)
-    }
-    fn uniform01(state: &mut u64) -> f32 { (splitmix64(state) >> 11) as f32 / (1u64 << 53) as f32 }
     let mut s = seed;
     let kscale = (2.0_f32 / dk as f32).sqrt();
 
     // `rank` shared basis directions per (k-head, v-head) group, reused
     // across every token: this is what collapses KKT's effective rank.
-    let basis_k: Vec<f32> = (0..hk * rank * dk).map(|_| uniform01(&mut s) * 2.0 - 1.0).collect();
-    let basis_q: Vec<f32> = (0..hk * rank * dk).map(|_| uniform01(&mut s) * 2.0 - 1.0).collect();
+    let basis_k: Vec<f32> =
+        (0..hk * rank * dk).map(|_| uniform01_f32(&mut s) * 2.0 - 1.0).collect();
+    let basis_q: Vec<f32> =
+        (0..hk * rank * dk).map(|_| uniform01_f32(&mut s) * 2.0 - 1.0).collect();
 
     let mut q = vec![0.0_f32; t * hk * dk];
     let mut k = vec![0.0_f32; t * hk * dk];
@@ -205,18 +193,18 @@ fn low_rank_correlated_inputs(
             }
             let noise = 0.02_f32;
             for d in 0..dk {
-                let nk = uniform01(&mut s) * 2.0 - 1.0;
-                let nq = uniform01(&mut s) * 2.0 - 1.0;
+                let nk = uniform01_f32(&mut s) * 2.0 - 1.0;
+                let nq = uniform01_f32(&mut s) * 2.0 - 1.0;
                 k[(tt * hk + h) * dk + d] = (acc_k[d] + noise * nk) * kscale;
                 q[(tt * hk + h) * dk + d] = (acc_q[d] + noise * nq) * kscale;
             }
         }
     }
-    let v: Vec<f32> = (0..t * hv * dv).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * 0.3).collect();
-    let g: Vec<f32> = (0..t * hv).map(|_| g_lo + (g_hi - g_lo) * uniform01(&mut s)).collect();
-    let beta: Vec<f32> = (0..t * hv).map(|_| 0.25 + 0.7 * uniform01(&mut s)).collect();
+    let v: Vec<f32> = (0..t * hv * dv).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * 0.3).collect();
+    let g: Vec<f32> = (0..t * hv).map(|_| g_lo + (g_hi - g_lo) * uniform01_f32(&mut s)).collect();
+    let beta: Vec<f32> = (0..t * hv).map(|_| 0.25 + 0.7 * uniform01_f32(&mut s)).collect();
     let state: Vec<f32> =
-        (0..hv * dv * dk).map(|_| (uniform01(&mut s) * 2.0 - 1.0) * 0.1).collect();
+        (0..hv * dv * dk).map(|_| (uniform01_f32(&mut s) * 2.0 - 1.0) * 0.1).collect();
     (q, k, v, g, beta, state)
 }
 
