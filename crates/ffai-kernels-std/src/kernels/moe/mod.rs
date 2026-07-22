@@ -46,8 +46,12 @@ pub mod moe_mpp_tileplan;
 pub mod moe_tile_plan_builder;
 pub mod moe_tile_plan_builder_bm32;
 pub mod moe_tile_plan_builder_bm32_own;
+pub mod moe_tile_plan_builder_bm32_own_parallel;
 pub mod moe_tile_plan_builder_bm32_paired;
+pub mod moe_tile_plan_builder_bm32_parallel;
 pub mod moe_tile_plan_builder_paired;
+pub mod moe_tile_plan_builder_parallel;
+pub mod moe_tile_plan_expert_counts;
 
 // GGUF-format per-expert matmul / matvec (q2k, iq2xxs, q4).
 pub mod moe_bgemm_iq2xxs_bm64;
