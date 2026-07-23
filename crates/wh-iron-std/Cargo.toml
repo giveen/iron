@@ -3,7 +3,7 @@ name = "wh-iron-std"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Iron Kernels kernel standard library — benchmark metadata and type definitions"
+description = "Iron kernel standard library — benchmark metadata and type definitions"
 publish = true
 
 build = "bin/build.rs"

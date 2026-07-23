@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Iron Kernels proc macros: `#[kernel]`, `#[bench]`, `#[test_kernel]`, `shape!`, `tile!`.
+//! Iron proc macros: `#[kernel]`, `#[bench]`, `#[test_kernel]`, `shape!`, `tile!`.
 //!
 //! Each macro lives in its own submodule; this file is a thin routing layer.
 //! Kernel authors never need to look here — see `specs/TOOLCHAIN_DESIGN.md`.
@@ -82,7 +82,7 @@ pub fn strided(_attr: TokenStream, item: TokenStream) -> TokenStream { item }
 // #[kernel]
 // ---------------------------------------------------------------------------
 
-/// Marks a function as a Iron Kernels kernel.
+/// Marks a function as a Iron kernel.
 ///
 /// Use the separate `#[bench]` and `#[test_kernel]` attributes for
 /// benchmark and correctness-test registration.

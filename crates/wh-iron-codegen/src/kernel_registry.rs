@@ -17,7 +17,7 @@ use wh_iron_core::{DType, ir::Kernel};
 // KernelEntry
 // ---------------------------------------------------------------------------
 
-/// Registry entry for a Iron Kernels kernel available for cross-kernel inlining.
+/// Registry entry for a Iron kernel available for cross-kernel inlining.
 ///
 /// Each `#[kernel]` macro auto-submits one of these via `inventory::submit!`.
 /// [`KernelInlinePass`](crate::passes::KernelInlinePass) calls [`all_kernels`]

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Numeric types supported in Iron Kernels kernels.
+//! Numeric types supported in Iron kernels.
 
 use std::{fmt, str::FromStr};
 

@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea or enhancement for Iron Kernels
+about: Suggest an idea or enhancement for Iron
 title: 'feat: '
 labels: feature
 assignees: ''

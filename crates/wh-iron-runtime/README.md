@@ -1,12 +1,12 @@
 # wh-iron-runtime
 
-GPU runtime dispatch for Iron Kernels kernels across backends. Compiles generated
+GPU runtime dispatch for Iron kernels across backends. Compiles generated
 target source into pipeline state objects / modules, dispatches compute kernels,
 and returns output buffers to the host. **Metal (Apple) is the default**;
 `device/{cuda,hip,vulkan}/` add NVIDIA / AMD / portable devices behind the
 `cuda` / `hip` / `vulkan` Cargo features.
 
-This crate is the bottom of the Iron Kernels stack. It owns the device abstraction
+This crate is the bottom of the Iron stack. It owns the device abstraction
 (`device/` — `metal_device.rs` plus the feature-gated cuda/hip/vulkan devices),
 the dispatch strategies (`dispatch/` — single, chained, buffer-plan, validate),
 and the compilation / PSO caches (`cache/`). Kernel execution flows through its

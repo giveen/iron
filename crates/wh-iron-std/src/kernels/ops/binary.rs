@@ -261,7 +261,7 @@ pub mod kernel_benches {
     /// (`binary_vv`, 1 element/thread). Both inputs are seeded with the
     /// `Positive` pattern (safe for every op — no div-by-zero, no `pow` of a
     /// negative, no overflow) and shared by name with the reference, so the A/B
-    /// checks Iron Kernels and MLX agree. `tol_floor` lifts the tolerance for ops
+    /// checks Iron and MLX agree. `tol_floor` lifts the tolerance for ops
     /// that legitimately diverge by > 1 ULP (`pow`/`atan2`/`logaddexp`).
     ///
     /// `names` are the Iron kernel's param names (vector_add uses a/b/c; atan2 uses

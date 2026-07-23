@@ -8,7 +8,7 @@
 //!   Grid: [ceil(N/TPG), 1, 1] × [TPG, 1, 1]
 //!   Algorithm: dst[i] = cond[i] != 0 ? a[i] : b[i]  (one thread per element)
 //!
-//! Iron Kernels: iron_select — same algorithm via #[kernel] DSL.
+//! Iron: iron_select — same algorithm via #[kernel] DSL.
 //!   KernelMode::Elementwise
 
 use wh_iron::kernel;

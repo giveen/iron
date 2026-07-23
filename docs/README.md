@@ -1,6 +1,6 @@
-# Iron Kernels Documentation
+# Iron Documentation
 
-Table of contents for the Iron Kernels docs. The top-level [`README`](../README.md) is the curated landing page; this index lists every page so you can jump straight to a topic. New contributors (and their agents) should read [Getting started](getting-started.md) → [Developing](developing.md) → [Testing](testing.md) before opening a PR.
+Table of contents for the Iron docs. The top-level [`README`](../README.md) is the curated landing page; this index lists every page so you can jump straight to a topic. New contributors (and their agents) should read [Getting started](getting-started.md) → [Developing](developing.md) → [Testing](testing.md) before opening a PR.
 
 ## Getting started
 

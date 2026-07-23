@@ -1,13 +1,13 @@
 # wh-iron-codegen
 
-Multi-backend GPU code generator for Iron Kernels kernels. Takes algorithm IR from
+Multi-backend GPU code generator for Iron kernels. Takes algorithm IR from
 `wh-iron-core`, applies backend-independent optimization passes, then lowers
 through a `CodegenBackend` to the target source. **Metal (MSL) is the default and
 most mature backend**; `backend.rs` also defines the `Target` enum
 (`Metal` / `Cuda` / `Hip` / `Spirv`), the `TargetProfile` (lane width, MMA
 strategy), and the `cuda` / `hip` / `spirv` generators.
 
-This crate is the middle of the Iron Kernels compiler stack: it receives `Kernel`
+This crate is the middle of the Iron compiler stack: it receives `Kernel`
 IR nodes, lowers tile-level ops into thread-mapped, vectorized target source, and
 exposes the per-backend generators (`msl::MslGenerator`, `cuda::CudaGenerator`, …)
 for both programmatic use and the `iron inspect` / `iron build` CLI flows.

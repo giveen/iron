@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Iron Kernels facade crate.
+//! Iron facade crate.
 //!
 //! `wh-iron` re-exports the DSL macros, compile-time placeholder types, IR/codegen crates,
 //! and runtime entry points used to define and launch `#[kernel]` functions.

@@ -1,4 +1,4 @@
-# Iron Kernels Kernel Style Guide
+# Iron Kernel Style Guide
 
 The authority on **how to write one kernel** in `wh-iron-std` — file shape,
 naming, the `#[kernel(variants(...))]` axis, shared primitives, the CPU oracle,

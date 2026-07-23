@@ -10,7 +10,7 @@
 //!
 //! ## Why It Matters
 //!
-//! Iron Kernels emits MSL source with `auto` variables.  The Metal compiler
+//! Iron emits MSL source with `auto` variables.  The Metal compiler
 //! handles register allocation, but shorter live ranges in the IR correlate
 //! with lower register pressure in the generated code.  On M3+, the OMU can
 //! exploit lower register pressure for higher occupancy.

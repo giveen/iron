@@ -9,7 +9,7 @@ Short terms used throughout the docs and the codebase:
 | Term | Meaning |
 |---|---|
 | **DSL** | Domain-specific language — the Rust-embedded language you write inside a `#[kernel]` function. |
-| **IR** | Intermediate representation — Iron Kernels's typed kernel graph (`Kernel` / `Op`), produced by the proc-macro and consumed by the codegen. |
+| **IR** | Intermediate representation — Iron's typed kernel graph (`Kernel` / `Op`), produced by the proc-macro and consumed by the codegen. |
 | **MSL** | Metal Shading Language — Apple's C++-based GPU shader language, and the codegen's final output. |
 | **Kernel** | A GPU compute function; in this repo, a Rust `fn` annotated with `#[kernel]`. |
 | **Threadgroup** | A block of GPU threads that share threadgroup memory and can synchronise with a barrier. |
@@ -25,14 +25,14 @@ The workspace is seven crates, layered from the shared data model up to the CLI 
 | Crate | What it is |
 |---|---|
 | [`wh-iron-core`](../crates/wh-iron-core/README.md) | The shared data model — the `Kernel` / `Op` IR types, `DType`, `Shape`, and error types. Pure data structures with no logic, so every layer above can speak the same vocabulary. Used by **every** other crate. |
-| [`wh-iron-macros`](../crates/wh-iron-macros/README.md) | The compiler front end — the `#[kernel]` proc-macro and its body parser, which turn a Rust function into Iron Kernels IR at compile time. Owns the DSL grammar and its compile-error diagnostics. Used by **`wh-iron`** (re-exported as the public `#[kernel]` attribute). |
-| [`wh-iron-codegen`](../crates/wh-iron-codegen/README.md) | The optimizing compiler — lowers Iron Kernels IR through the [14-pass pipeline](#debugging-a-kernel) and emits MSL. The largest crate; owns every pass and the MSL emitter. Used by **`wh-iron-runtime`**, **`wh-iron-std`**, and **`wh-iron-cli`**. |
+| [`wh-iron-macros`](../crates/wh-iron-macros/README.md) | The compiler front end — the `#[kernel]` proc-macro and its body parser, which turn a Rust function into Iron IR at compile time. Owns the DSL grammar and its compile-error diagnostics. Used by **`wh-iron`** (re-exported as the public `#[kernel]` attribute). |
+| [`wh-iron-codegen`](../crates/wh-iron-codegen/README.md) | The optimizing compiler — lowers Iron IR through the [14-pass pipeline](#debugging-a-kernel) and emits MSL. The largest crate; owns every pass and the MSL emitter. Used by **`wh-iron-runtime`**, **`wh-iron-std`**, and **`wh-iron-cli`**. |
 | [`wh-iron-runtime`](../crates/wh-iron-runtime/README.md) | The GPU execution layer — compiles emitted MSL into Metal PSOs (with a PSO cache) and dispatches kernels through `Context`. Owns all Metal-framework / `objc2` interop. Used by **`wh-iron`** and **`wh-iron-std`**. |
 | [`wh-iron`](../crates/wh-iron/README.md) | The facade — re-exports `core`, `macros`, `codegen`, and `runtime` behind one `prelude` so downstream code and external users depend on a single crate. No logic of its own. Used by **`wh-iron-std`** and **`wh-iron-cli`**. |
 | [`wh-iron-std`](../crates/wh-iron-std/README.md) | The kernel standard library — the actual `#[kernel]` definitions (`mlx/`, `iron/`), their `BenchSpec`s, the bench harness, and the GPU correctness tests. Where new kernels land. Used by **`wh-iron-cli`**. |
 | [`wh-iron-cli`](../crates/wh-iron-cli/README.md) | The `iron` binary — `bench` / `build` / `inspect` / `device` / `snap` / `diff`, the developer-facing entry point. The top of the dependency graph; nothing depends on it. |
 
-The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron Kernels IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
 
 ## Dev loop
 

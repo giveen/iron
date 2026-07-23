@@ -7,7 +7,7 @@
 //!   Grid: [ceil(N/1024), 1, 1] × [1024, 1, 1]  (TPG=1024)
 //!   Algorithm: out[index] = start + index * step  (one thread per element)
 //!
-//! Iron Kernels: iron_arange — same one-thread-per-element algorithm via #[kernel] DSL.
+//! Iron: iron_arange — same one-thread-per-element algorithm via #[kernel] DSL.
 //!   KernelMode::Elementwise
 
 use wh_iron::kernel;
@@ -77,7 +77,7 @@ pub mod kernel_benches {
     // bytes_moved counts the output only; the two scalar reads are negligible.
     //
     // MLX `metal/arange.metal` `arange<tn>` (one thread per element) takes its
-    // params as scalar references in a different order than Iron Kernels:
+    // params as scalar references in a different order than Iron:
     //   start (constant T&) [[buffer(0)]], step (constant T&) [[buffer(1)]],
     //   out (device T*) [[buffer(2)]].
     // There's no shared input tensor (arange is a pure generator), so the
@@ -86,7 +86,7 @@ pub mod kernel_benches {
     //
     // Legacy spec used tol=1.0: at 64M elements with step=1 the output reaches
     // ~6.7e7, which overflows the f16/bf16 mantissa, so consecutive integers
-    // collapse to the same representable value. Iron Kernels and MLX overflow the
+    // collapse to the same representable value. Iron and MLX overflow the
     // same way, but the 1.0 floor absorbs any last-ULP rounding-mode difference.
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_arange(dt: DType) -> BenchSetup {

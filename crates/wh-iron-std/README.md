@@ -1,8 +1,8 @@
 # wh-iron-std
 
-Iron Kernels's **kernel standard library** — every `#[kernel]` the project ships,
+Iron's **kernel standard library** — every `#[kernel]` the project ships,
 plus the host-side quantization layer they share. Each kernel is a Rust function
-in the Iron Kernels DSL, annotated with `#[kernel]` (and optionally
+in the Iron DSL, annotated with `#[kernel]` (and optionally
 `#[kernel(variants(...))]`), and carries its own GPU correctness tests
 (`#[test_kernel]`) and throughput benches (`#[bench]`) in the same file. The
 proc-macros register everything into the `inventory` so `iron build` / `iron

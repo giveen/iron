@@ -100,7 +100,7 @@ pub struct IronConfig {
     // ── Flat (backward-compat top-level fields) ────────────────────────
     /// Path to the `__iron_runner` binary.  **Deprecated:** use `[runner] binary`.
     pub runner_binary: String,
-    /// Optional path to the Iron Kernels project root.
+    /// Optional path to the Iron project root.
     pub project_path: Option<String>,
     /// Verbosity level: 0 = quiet, 1 = profile columns, 2 = timing columns.
     pub verbose: u8,

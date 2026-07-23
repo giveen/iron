@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Create a report to help us improve Iron Kernels
+about: Create a report to help us improve Iron
 title: 'fix: '
 labels: bug
 assignees: ''

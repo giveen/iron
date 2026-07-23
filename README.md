@@ -35,7 +35,7 @@ For contributors building from source, see [Getting Started](docs/getting-starte
 
 ## Getting Started
 
-**1. Write a kernel.** Annotate a generic Rust function with `#[kernel(bench(...))]` — Iron Kernels generates `f32`, `f16`, and `bfloat16` variants from a single definition, lowers them to each enabled GPU backend (MSL by default; CUDA / HIP / Vulkan opt-in), and optionally registers it against its MLX reference if there is one in the primary [MLX repo](https://github.com/ml-explore/mlx):
+**1. Write a kernel.** Annotate a generic Rust function with `#[kernel(bench(...))]` — Iron generates `f32`, `f16`, and `bfloat16` variants from a single definition, lowers them to each enabled GPU backend (MSL by default; CUDA / HIP / Vulkan opt-in), and optionally registers it against its MLX reference if there is one in the primary [MLX repo](https://github.com/ml-explore/mlx):
 
 <table>
 <tr>
@@ -138,7 +138,7 @@ The project began as a Metal-only (MSL) kernel/code generator. It now emits MSL,
 | Command | What it does |
 |---|---|
 | `iron build` | Compile every `#[kernel]` in the workspace to MSL and (optionally) a `metallib`. |
-| `iron bench` | Run every `#[bench]`, report Iron Kernels GB/s vs the MLX reference + correctness. |
+| `iron bench` | Run every `#[bench]`, report Iron GB/s vs the MLX reference + correctness. |
 | `iron test` | Run every `#[test_kernel]` against its CPU oracle within tolerance. |
 | `iron inspect` | Dump IR / per-pass IR / MSL for one kernel. |
 | `iron device` | Print GPU device info and supported feature flags. |

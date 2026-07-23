@@ -473,7 +473,7 @@ pub mod kernel_benches {
     /// (`unary_v`, 1 element/thread) for an A/B perf + correctness comparison.
     ///
     /// `tol_floor` lifts the equivalence tolerance above the per-dtype default
-    /// for ops where Iron Kernels and MLX legitimately diverge by more than 1 ULP —
+    /// for ops where Iron and MLX legitimately diverge by more than 1 ULP —
     /// e.g. `expm1`, where Iron computes `exp(x) − 1` (catastrophic cancellation
     /// near 0) while MLX uses an accurate `expm1`.
     fn ub_ref(

@@ -1,9 +1,9 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //!
-//! Iron Kernels runtime: GPU dispatch and buffer management.
+//! Iron runtime: GPU dispatch and buffer management.
 //!
-//! This crate handles the runtime execution of compiled Iron Kernels kernels:
+//! This crate handles the runtime execution of compiled Iron kernels:
 //! - Metal device and command queue management
 //! - Pipeline state compilation and caching
 //! - Buffer allocation and transfer

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! `iron bench` — Benchmark Iron Kernels kernels (latency / GB/s / GFLOP·s /
+//! `iron bench` — Benchmark Iron kernels (latency / GB/s / GFLOP·s /
 //! roofline). The MLX reference A/B (speed + output-equivalence) is opt-in via
 //! `--mlx`; by default only the wh-iron kernels are benched.
 

@@ -1,4 +1,4 @@
-# Iron Kernels Toolchain Design
+# Iron Toolchain Design
 
 **Status:** Draft — refactor/bench-logic-3
 
@@ -184,7 +184,7 @@ default_tol = 1e-4
 
 ## The `#[kernel]` macro
 
-`#[kernel]` does exactly one thing: **convert the DSL function body into Iron Kernels IR** and register a `KernelEntry` in the inventory so `iron build` / `iron inspect` can find it.
+`#[kernel]` does exactly one thing: **convert the DSL function body into Iron IR** and register a `KernelEntry` in the inventory so `iron build` / `iron inspect` can find it.
 
 ```rust
 #[kernel]

@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 //! SPDX-License-Identifier: Apache-2.0
-//! Iron Kernels kernel standard library: kernel definitions and bench helpers.
+//! Iron kernel standard library: kernel definitions and bench helpers.
 //!
 //! `wh-iron-std` provides the kernel definitions (`#[kernel]` / `#[bench]` /
 //! `#[test_kernel]`) and the shared bench-setup utilities used by the kernels.

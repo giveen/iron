@@ -2,7 +2,7 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
 //! DSL body parser: walks `syn::Expr` trees and translates DSL function calls
-//! into Iron Kernels IR-building token streams.
+//! into Iron IR-building token streams.
 //!
 //! ## How it works
 //!
@@ -415,7 +415,7 @@ impl DslBodyParser {
         if matches!(range.limits, RangeLimits::Closed(_)) {
             self.push_error(syn::Error::new_spanned(
                 range,
-                "inclusive ranges are not supported in Iron Kernels loops; use `start..end`",
+                "inclusive ranges are not supported in Iron loops; use `start..end`",
             ));
             return None;
         }
@@ -428,7 +428,7 @@ impl DslBodyParser {
         let Some(end_expr) = range.end.as_ref() else {
             self.push_error(syn::Error::new_spanned(
                 range,
-                "open-ended ranges are not supported in Iron Kernels loops",
+                "open-ended ranges are not supported in Iron loops",
             ));
             return None;
         };
@@ -672,7 +672,7 @@ impl DslBodyParser {
                 if path.is_empty() {
                     return self.push_error_value(syn::Error::new_spanned(
                         &call.func,
-                        "unrecognized Iron Kernels DSL call: cannot determine callee name",
+                        "unrecognized Iron DSL call: cannot determine callee name",
                     ));
                 }
                 // Only treat as a cross-kernel call if the name follows the
@@ -684,7 +684,7 @@ impl DslBodyParser {
                     return self.push_error_value(syn::Error::new_spanned(
                         &call.func,
                         format!(
-                            "unrecognized Iron Kernels DSL function `{path}`. \
+                            "unrecognized Iron DSL function `{path}`. \
                              Cross-kernel callees must be registered via \
                              #[kernel] and their names must start with `iron_` \
                              or `iron_`."

@@ -291,11 +291,11 @@ impl BenchBuffer {
 // RefKernel
 // ---------------------------------------------------------------------------
 
-/// A reference Metal kernel (e.g. an MLX kernel) to benchmark a Iron Kernels
+/// A reference Metal kernel (e.g. an MLX kernel) to benchmark a Iron
 /// kernel against.
 ///
 /// The runner times both under the same machinery and compares their outputs
-/// for numerical equivalence, so a bench row can report Iron Kernels GB/s,
+/// for numerical equivalence, so a bench row can report Iron GB/s,
 /// reference GB/s, the speed ratio, and a correctness verdict.
 #[derive(Debug, Clone)]
 pub struct RefKernel {

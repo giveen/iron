@@ -73,7 +73,7 @@ pub use wh_iron_core::shape::tile as make_tile;
 pub use wh_iron_core::shape::{DimExpr, Shape};
 /// Marks a kernel parameter as a compile-time constant.
 pub use wh_iron_macros::constexpr;
-/// Marks a function as a Iron Kernels kernel.
+/// Marks a function as a Iron kernel.
 pub use wh_iron_macros::kernel;
 /// Marks a `Tensor` parameter for `constant T&` lowering in MSL.
 pub use wh_iron_macros::scalar;
@@ -96,7 +96,7 @@ pub use wh_iron_runtime::IronError;
 /// A resident Metal buffer managed by the context.
 pub use wh_iron_runtime::ResidentBuffer;
 
-/// Registry entry for a Iron Kernels kernel available for cross-kernel calling.
+/// Registry entry for a Iron kernel available for cross-kernel calling.
 ///
 /// You only need this when registering a kernel for use as an inlined callee via the
 /// `inventory::collect!` mechanism. For ordinary `#[kernel]` definitions this is handled

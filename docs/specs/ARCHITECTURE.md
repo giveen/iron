@@ -2,7 +2,7 @@
 Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 SPDX-License-Identifier: Apache-2.0
 -->
-# Iron Kernels Architecture
+# Iron Architecture
 
 How a `#[kernel]` becomes a compiled GPU shader, and how `iron bench` / `iron
 test` / `iron build` run and measure it today. Companion docs:

@@ -1,7 +1,7 @@
 # wh-iron-core
 
 Core IR types, shape algebra, DType system, and GPU-family detection for the
-Iron Kernels GPU kernel compiler. This is the foundation crate — every other
+Iron GPU kernel compiler. This is the foundation crate — every other
 crate in the workspace depends on it.
 
 Defines the SSA-form intermediate representation that `#[kernel]`

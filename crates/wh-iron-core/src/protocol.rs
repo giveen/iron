@@ -1,6 +1,6 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! JSON Lines protocol types for the Iron Kernels runner ↔ CLI communication.
+//! JSON Lines protocol types for the Iron runner ↔ CLI communication.
 //!
 //! The `__iron_runner` subprocess writes newline-delimited JSON to stdout.
 //! The `iron` CLI reads this stream and renders it. This module defines the
@@ -38,7 +38,7 @@ pub enum ArtifactKind {
     Metallib,
     /// Swift wrapper source.
     Swift,
-    /// Iron Kernels IR dump.
+    /// Iron IR dump.
     Ir,
 }
 
@@ -48,7 +48,7 @@ pub enum ArtifactKind {
 pub enum InspectKind {
     /// Metal Shading Language source.
     Msl,
-    /// Iron Kernels IR dump.
+    /// Iron IR dump.
     Ir,
     /// Kernel statistics (register count, occupancy estimate, etc.).
     Stats,
@@ -213,13 +213,13 @@ pub struct BenchResult {
     /// Human-readable shape label (e.g. `"N=1M f32"`). Empty string if not set.
     #[serde(default)]
     pub shape: String,
-    /// Throughput in GB/s for the Iron Kernels kernel.
+    /// Throughput in GB/s for the Iron kernel.
     #[serde(default)]
     pub iron_gbps: f64,
     /// Throughput in GB/s for the reference kernel, if one was configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_gbps: Option<f64>,
-    /// Iron Kernels speed relative to reference (%), if reference exists.
+    /// Iron speed relative to reference (%), if reference exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iron_pct: Option<f64>,
     /// Whether the kernel produced correct results.

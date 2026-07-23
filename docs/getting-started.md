@@ -1,6 +1,6 @@
 # Getting started
 
-Get a Iron Kernels checkout building, tested, and emitting a kernel.
+Get a Iron checkout building, tested, and emitting a kernel.
 
 ## Prerequisites
 
@@ -57,11 +57,11 @@ The workspace is seven crates:
 | [`wh-iron-std`](../crates/wh-iron-std/README.md) | kernel stdlib, op files, bench types |
 | [`wh-iron-cli`](../crates/wh-iron-cli/README.md) | the `iron` CLI binary |
 
-The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron Kernels IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
 
 ## Your first kernel
 
-A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into Iron Kernels IR; the codegen lowers it to Metal Shading Language.
+A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into Iron IR; the codegen lowers it to Metal Shading Language.
 
 ```rust
 use wh-iron::prelude::*;

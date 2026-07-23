@@ -1,16 +1,16 @@
 # CUDA / NVIDIA Backend Spec
 
 **Status:** 📋 Proposed (design only; no implementation yet)
-**Scope:** Add a second code-generation + runtime backend so Iron Kernels's existing
+**Scope:** Add a second code-generation + runtime backend so Iron's existing
 `#[kernel]` DSL / IR lowers to **CUDA** (NVIDIA GPUs) in addition to Metal/MSL.
 **Out of scope:** model loading, graph execution, tokenization, checkpoint
-readers — Iron Kernels is an optimized-kernel generator, not an inference engine.
+readers — Iron is an optimized-kernel generator, not an inference engine.
 
 ---
 
 ## 1. Motivation
 
-Iron Kernels today is a single-target toolchain: the IR in `wh-iron-core` lowers
+Iron today is a single-target toolchain: the IR in `wh-iron-core` lowers
 through `wh-iron-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
 *"lowers the algorithm IR to Metal Shading Language"*), and `wh-iron-runtime`
 dispatches exclusively through Metal (`metal_device.rs`). The algorithm IR and
@@ -146,7 +146,7 @@ stack worth evaluating for two distinct parts of this backend:
 
   | | **§4.2 path: IR → CUDA C++ → NVRTC → PTX** | **cuda-oxide path: IR → Rust device code → PTX** |
   |---|---|---|
-  | Fits Iron Kernels's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
+  | Fits Iron's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
   | Blackwell tensor cores | We must emit PTX / inline-asm or use CUTLASS for `tcgen05`/WGMMA | **Built-in intrinsics** (`tcgen05`, WGMMA, MMA, TMEM, TMA, `cta_group::2`, sm_100a) |
   | Toolchain weight | CUDA Toolkit + NVRTC | CUDA 12.x **+ Clang/libclang + nightly `rust-src`/`rustc-dev`/`llvm-tools` + LLVM 21+** for the advanced intrinsics |
   | Maturity | NVRTC is stable, shipping | **Alpha / experimental, active dev, Linux-only** (Ubuntu 24.04 tested) |

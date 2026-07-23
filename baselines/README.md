@@ -80,7 +80,7 @@ kernels that actually matter for LLM decode regress on M5 Max:
 
 The dominant pattern is **SDPA + GQA + bf16**. MLX's
 `sdpa_vector_2pass` picks a per-shape `blocks` value tuned for the
-target chip; Iron Kernels's current `iron_sdpa` uses a fixed single-pass
+target chip; Iron's current `iron_sdpa` uses a fixed single-pass
 8-simdgroups-per-head layout. The mismatch widens on M5 because the
 optimal block size differs from M3/M4.
 

@@ -1,4 +1,4 @@
-error: open-ended ranges are not supported in Iron Kernels loops
+error: open-ended ranges are not supported in Iron loops
   --> tests/error/open_ended_range_in_loop.rs:10:15
    |
 10 |     for _i in 0u32.. {

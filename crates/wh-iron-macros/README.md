@@ -1,11 +1,11 @@
 # wh-iron-macros
 
-Proc-macro crate providing the `#[kernel]` DSL for Iron Kernels GPU kernels.
+Proc-macro crate providing the `#[kernel]` DSL for Iron GPU kernels.
 Parses Rust function signatures and bodies at compile time, translates
 DSL intrinsics into `wh-iron-core` IR, and generates host-side launch
 code.
 
-This crate is the front door of the Iron Kernels compiler: user-written
+This crate is the front door of the Iron compiler: user-written
 `#[kernel]` functions enter here, and IR + dispatch surfaces exit. It
 also provides `shape!`/`tile!` constructors for shape annotations,
 `#[kernel(variants(...))]` for compile-time specialisation, and the `#[bench]` /

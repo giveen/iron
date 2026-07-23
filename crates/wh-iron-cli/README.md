@@ -1,7 +1,7 @@
 # wh-iron-cli
 
-Iron Kernels CLI — benchmark, test, and inspect GPU kernels.
-The `iron` binary is the primary developer tool for the Iron Kernels project:
+Iron CLI — benchmark, test, and inspect GPU kernels.
+The `iron` binary is the primary developer tool for the Iron project:
 run performance benchmarks against MLX, compile kernels to inspect generated
 MSL, emit kernel packages via `iron build --emit`, and manage regression baselines.
 
@@ -63,7 +63,7 @@ iron inspect --help
 | Module | Purpose |
 |---|---|
 | `cmd` | Subcommand dispatch: `bench`, `build`, `inspect`, `device`, `snap`, `diff` |
-| `cmd::bench` | Full benchmark suite: Iron Kernels vs MLX reference kernels |
+| `cmd::bench` | Full benchmark suite: Iron vs MLX reference kernels |
 | `cmd::build` | Compile all kernels to MSL, report errors, and emit artifacts (`--emit msl,metallib,swift,ir,all`) |
 | `cmd::inspect` | Print IR and/or MSL for a single kernel |
 | `cmd::device` | Show GPU device info and supported Metal features |
@@ -89,7 +89,7 @@ iron inspect --help
 | `iron diff <file>` | Compare current bench results to a saved baseline. Reports regressions. |
 | `iron clean` | Remove build artifacts and cached baselines. |
 | `iron config` | Print the effective merged config (defaults → `iron.toml` → `IRON_*` env → flags). |
-| `iron init` | Scaffold a new Iron Kernels kernel project. |
+| `iron init` | Scaffold a new Iron kernel project. |
 | `iron update` | Self-update the `iron` binary. |
 | `iron completions <shell>` | Generate shell completion scripts (bash / zsh / fish). |
 

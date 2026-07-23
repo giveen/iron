@@ -1,9 +1,9 @@
 //! Copyright 2026 Eric Kryski (@ekryski), Tom Turney (@TheTom) and 0xClandestine (@0xClandestine)
 //! SPDX-License-Identifier: Apache-2.0
-//! Iron Kernels CLI — `iron` binary.
+//! Iron CLI — `iron` binary.
 //!
 //! Subcommands:
-//!   bench         Benchmark Iron Kernels kernels (--mlx adds the MLX A/B)
+//!   bench         Benchmark Iron kernels (--mlx adds the MLX A/B)
 //!   test          Run #[test_kernel] correctness tests
 //!   build         Compile kernels to MSL; emit metallib/Swift/manifest
 //!   inspect       Print IR and/or MSL for registered kernels
@@ -11,7 +11,7 @@
 //!   snap          Save bench results as a regression baseline
 //!   diff          Compare bench results against a saved baseline
 //!   update        Install the latest iron binary
-//!   init          Scaffold a new Iron Kernels kernel project
+//!   init          Scaffold a new Iron kernel project
 //!   clean         Remove build artifacts and cached snapshots
 //!   config        Display effective merged configuration
 //!   completions   Generate shell completion scripts
@@ -128,7 +128,7 @@ pub struct GlobalArgs {
 
 // ── CLI root ──────────────────────────────────────────────────────────────
 
-/// Iron Kernels CLI — benchmark and inspect GPU kernels on Apple Silicon.
+/// Iron CLI — benchmark and inspect GPU kernels on Apple Silicon.
 ///
 /// Run `iron <COMMAND> --help` for per-command documentation.
 #[derive(Parser)]
@@ -145,7 +145,7 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
-    /// Benchmark Iron Kernels kernels (throughput, GFLOP/s, roofline).
+    /// Benchmark Iron kernels (throughput, GFLOP/s, roofline).
     ///
     /// Measures throughput (GB/s) for every registered `#[bench_kernel]` entry.
     /// By default it benches only the wh-iron kernels; pass `--mlx` to also run
@@ -193,7 +193,7 @@ enum Command {
     #[command(visible_alias = "u")]
     Update(UpdateArgs),
 
-    /// Scaffold a new Iron Kernels kernel project in a new directory.
+    /// Scaffold a new Iron kernel project in a new directory.
     ///
     /// Creates a minimal Cargo workspace with an example `#[bench_kernel]`.
     Init(InitArgs),

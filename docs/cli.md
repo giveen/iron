@@ -10,11 +10,11 @@ cargo run -p wh-iron-cli -- <command> …
 
 `make bench` wraps `iron bench`; for the other subcommands run `iron` (or the `cargo run` form) directly.
 
-## `iron bench` — benchmark Iron Kernels kernels
+## `iron bench` — benchmark Iron kernels
 
-Benchmarks the Iron Kernels kernels and reports wall-clock latency, throughput
+Benchmarks the Iron kernels and reports wall-clock latency, throughput
 (GB/s), compute throughput (GFLOP/s), and roofline figures. By default it
-benches **only the Iron Kernels kernels**; pass `--mlx` to also run each kernel's
+benches **only the Iron kernels**; pass `--mlx` to also run each kernel's
 MLX reference for a side-by-side speed A/B plus an output-equivalence check.
 
 ```

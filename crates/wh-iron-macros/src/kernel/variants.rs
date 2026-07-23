@@ -445,7 +445,7 @@ fn parse_single_value(
     Ok(VariantValue::Type(quote::quote! { #ty }))
 }
 
-/// Primitive Rust types and Iron Kernels dtype aliases that should be parsed as
+/// Primitive Rust types and Iron dtype aliases that should be parsed as
 /// `VariantValue::Type` rather than `VariantValue::Named`.
 fn is_primitive_type(s: &str) -> bool {
     matches!(
