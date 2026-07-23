@@ -11,14 +11,14 @@
 #   - kernel_registry_consistency
 #     Host-side; catches the regression class that just broke #61 +
 #     #108 (a `#[kernel] pub fn` without a matching `inventory::submit!`).
-#   - cargo build -p ffai-kernels-std
+#   - cargo build -p wh-iron-std
 #     Sanity check — catches the build-breaking macro / use-import
 #     regressions that fmt-check + clippy don't always see.
 #
 # NOT run here (too slow or environment-specific):
 #   - Full `cargo test --workspace` — runs on macOS CI
 #   - GPU correctness suite — needs Metal
-#   - `ffaik bench` — multi-minute
+#   - `iron bench` — multi-minute
 #
 # Bypass with `git push --no-verify` only when you know what you're
 # doing.
@@ -39,20 +39,20 @@ fi
 # Sanity build before running the registry test — `cargo test` would
 # do this anyway, but the failure mode is cleaner if we surface it
 # explicitly first.
-if ! cargo build -p ffai-kernels-std 2>&1 | tail -10; then
+if ! cargo build -p wh-iron-std 2>&1 | tail -10; then
     echo
     echo "✗ cargo build failed. Fix the errors above and re-push."
     exit 1
 fi
 
-if ! cargo test -p ffai-kernels-std --test kernel_registry_consistency 2>&1 | tail -15; then
+if ! cargo test -p wh-iron-std --test kernel_registry_consistency 2>&1 | tail -15; then
     echo
     echo "✗ kernel_registry_consistency failed."
     echo "  This catches kernels with #[kernel] pub fn but no matching"
     echo "  inventory::submit! — the regression class that broke #61 + #108."
     echo "  Add an inventory::submit! { BenchSpec { … } } block to the kernel"
-    echo "  file (see crates/ffai-kernels-std/src/mlx/sgload_smoke.rs for the"
-    echo "  smoke-kernel shape, or crates/ffai-kernels-std/src/ffai/gather.rs"
+    echo "  file (see crates/wh-iron-std/src/mlx/sgload_smoke.rs for the"
+    echo "  smoke-kernel shape, or crates/wh-iron-std/src/iron/gather.rs"
     echo "  for the standard shape)."
     exit 1
 fi

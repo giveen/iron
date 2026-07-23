@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Create a report to help us improve FFAI Kernels
+about: Create a report to help us improve Iron Kernels
 title: 'fix: '
 labels: bug
 assignees: ''

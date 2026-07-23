@@ -6,17 +6,17 @@ relevant issue with `#<issue-number>`.
 ## Crates affected
 
 <!-- Check all that apply -->
-- [ ] `ffai-kernels-core` (IR types, ops)
-- [ ] `ffai-kernels-macros` (proc macros, body parser)
-- [ ] `ffai-kernels-codegen` (MSL lowering, passes)
-- [ ] `ffai-kernels-runtime` (Metal dispatch)
-- [ ] `ffai-kernels-std` (kernel stdlib, op files)
-- [ ] `ffai-kernels-cli` (`ffaik` binary)
+- [ ] `wh-iron-core` (IR types, ops)
+- [ ] `wh-iron-macros` (proc macros, body parser)
+- [ ] `wh-iron-codegen` (MSL lowering, passes)
+- [ ] `wh-iron-runtime` (Metal dispatch)
+- [ ] `wh-iron-std` (kernel stdlib, op files)
+- [ ] `wh-iron-cli` (`iron` binary)
 
 ## Testing
 
 <!-- If bench numbers changed, paste relevant rows from `cargo bench` output. -->
-<!-- Format: op | dtype | FFAI GB/s | MLX GB/s | FFAI % | correct? -->
+<!-- Format: op | dtype | Iron GB/s | MLX GB/s | Iron % | correct? -->
 
 ## Checklist
 

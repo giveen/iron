@@ -20,7 +20,7 @@ if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
   exit 1
 fi
 
-IGNORE='(crates/ffai-kernels/src/(lib|prelude)\.rs|crates/ffai-kernels-std/src/(ffai|mlx)/.*\.rs|tests/|benches/|build\.rs)'
+IGNORE='(crates/wh-iron/src/(lib|prelude)\.rs|crates/wh-iron-std/src/(iron|mlx)/.*\.rs|tests/|benches/|build\.rs)'
 
 case "${1:-html}" in
   summary)

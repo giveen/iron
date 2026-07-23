@@ -1,31 +1,31 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/ffai-kernels-core",
-  "crates/ffai-kernels-macros",
-  "crates/ffai-kernels-codegen",
-  "crates/ffai-kernels-runtime",
-  "crates/ffai-kernels",
-  "crates/ffai-kernels-cli",
-  "crates/ffai-kernels-std",
+  "crates/wh-iron-core",
+  "crates/wh-iron-macros",
+  "crates/wh-iron-codegen",
+  "crates/wh-iron-runtime",
+  "crates/wh-iron",
+  "crates/wh-iron-cli",
+  "crates/wh-iron-std",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/thewafflehaus/ffai-kernels"
-homepage = "https://github.com/thewafflehaus/ffai-kernels"
-documentation = "https://docs.rs/ffai-kernels"
+repository = "https://github.com/thewafflehaus/iron"
+homepage = "https://github.com/thewafflehaus/iron"
+documentation = "https://docs.rs/wh-iron"
 
 [workspace.dependencies]
 # Internal
-ffai-kernels = { path = "crates/ffai-kernels", version = "0.1.0" }
-ffai-kernels-core = { path = "crates/ffai-kernels-core", version = "0.1.0" }
-ffai-kernels-macros = { path = "crates/ffai-kernels-macros", version = "0.1.0" }
-ffai-kernels-codegen = { path = "crates/ffai-kernels-codegen", version = "0.1.0" }
-ffai-kernels-runtime = { path = "crates/ffai-kernels-runtime", version = "0.1.0" }
-ffai-kernels-std = { path = "crates/ffai-kernels-std", version = "0.1.0" }
+wh-iron = { path = "crates/wh-iron", version = "0.1.0" }
+wh-iron-core = { path = "crates/wh-iron-core", version = "0.1.0" }
+wh-iron-macros = { path = "crates/wh-iron-macros", version = "0.1.0" }
+wh-iron-codegen = { path = "crates/wh-iron-codegen", version = "0.1.0" }
+wh-iron-runtime = { path = "crates/wh-iron-runtime", version = "0.1.0" }
+wh-iron-std = { path = "crates/wh-iron-std", version = "0.1.0" }
 
 # External
 clap = { version = "4.6", features = ["derive", "env"] }
@@ -50,8 +50,8 @@ rayon = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 
-# Apple Metal FFI. Workspace-deduped because ffai-kernels-runtime and
-# ffai-kernels-std previously declared overlapping-but-drifting feature
+# Apple Metal FFI. Workspace-deduped because wh-iron-runtime and
+# wh-iron-std previously declared overlapping-but-drifting feature
 # sets — that bit us at link time when one crate's feature was the
 # other's hard requirement.
 objc2 = "0.6"
@@ -94,7 +94,7 @@ arc_with_non_send_sync = "warn"
 debug = "line-tables-only"
 
 [profile.release]
-# ffai-kernels-std is `publish = true`, so workspace-wide `lto = "fat"` +
+# wh-iron-std is `publish = true`, so workspace-wide `lto = "fat"` +
 # `codegen-units = 1` would balloon downstream caller build times 5-10×
 # (rustls caveat in the playbook). Keep release downstream-friendly;
 # push the aggressive inlining settings into `[profile.bench]` where

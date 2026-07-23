@@ -1,18 +1,18 @@
 # CUDA / NVIDIA Backend Spec
 
 **Status:** 📋 Proposed (design only; no implementation yet)
-**Scope:** Add a second code-generation + runtime backend so FFAI Kernels's existing
+**Scope:** Add a second code-generation + runtime backend so Iron Kernels's existing
 `#[kernel]` DSL / IR lowers to **CUDA** (NVIDIA GPUs) in addition to Metal/MSL.
 **Out of scope:** model loading, graph execution, tokenization, checkpoint
-readers — FFAI Kernels is an optimized-kernel generator, not an inference engine.
+readers — Iron Kernels is an optimized-kernel generator, not an inference engine.
 
 ---
 
 ## 1. Motivation
 
-FFAI Kernels today is a single-target toolchain: the IR in `ffai-kernels-core` lowers
-through `ffai-kernels-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
-*"lowers the algorithm IR to Metal Shading Language"*), and `ffai-kernels-runtime`
+Iron Kernels today is a single-target toolchain: the IR in `wh-iron-core` lowers
+through `wh-iron-codegen` to **Metal Shading Language** only (`codegen/lib.rs`:
+*"lowers the algorithm IR to Metal Shading Language"*), and `wh-iron-runtime`
 dispatches exclusively through Metal (`metal_device.rs`). The algorithm IR and
 the `#[kernel]` DSL are, by contrast, **backend-neutral** — they describe parallel
 compute (program ids, threadgroup memory, simd reductions, MMA tiles, elementwise
@@ -36,7 +36,7 @@ eventually tuned) code for both Apple GPUs and NVIDIA GPUs.
   NVRTC at runtime, or offline `nvcc` → PTX/cubin) for every kernel expressible
   in the pure `#[kernel]` DSL.
 - A `cuda` runtime backend (device, buffers, dispatch) behind a shared trait, so
-  `ffai-kernels-std` kernels and the `ffaik` CLI (`build`/`test`/`bench`) work against
+  `wh-iron-std` kernels and the `iron` CLI (`build`/`test`/`bench`) work against
   either backend.
 - Reuse the IR, the `#[kernel]` macro, and the **entire `quant::{codec,format}`
   layer unchanged**.
@@ -55,12 +55,12 @@ eventually tuned) code for both Apple GPUs and NVIDIA GPUs.
 
 | Layer | Crate | Backend-neutral? | Notes |
 |---|---|---|---|
-| Algorithm IR (`Op`, `Kernel`, `DType`, `Shape`, `ConstExpr`) | `ffai-kernels-core` | **Yes** | `op.rs` is abstract math/parallelism; comment already references "backends" (plural). |
-| `#[kernel]` DSL macro | `ffai-kernels-macros` | **Yes** | Produces IR, not MSL. |
-| Quant codec / format / packer | `ffai-kernels-std::quant` | **Yes** | Pure host Rust; the 30-format matrix is layout + arithmetic, no Metal. |
-| Codegen | `ffai-kernels-codegen` | **No** | `emit.rs` + `msl/` emit MSL strings directly; no backend seam yet. |
-| Runtime | `ffai-kernels-runtime` | **No** | `metal_device.rs`, Metal dispatch/buffers, `gpu_family.rs`. |
-| Cooperative kernels (`Op::InlineMsl` with `mpp::`, `coop_tile_*`) | `ffai-kernels-std` | **Partly** | The raw-MSL escape hatch is Metal-only; needs a CUDA analog. |
+| Algorithm IR (`Op`, `Kernel`, `DType`, `Shape`, `ConstExpr`) | `wh-iron-core` | **Yes** | `op.rs` is abstract math/parallelism; comment already references "backends" (plural). |
+| `#[kernel]` DSL macro | `wh-iron-macros` | **Yes** | Produces IR, not MSL. |
+| Quant codec / format / packer | `wh-iron-std::quant` | **Yes** | Pure host Rust; the 30-format matrix is layout + arithmetic, no Metal. |
+| Codegen | `wh-iron-codegen` | **No** | `emit.rs` + `msl/` emit MSL strings directly; no backend seam yet. |
+| Runtime | `wh-iron-runtime` | **No** | `metal_device.rs`, Metal dispatch/buffers, `gpu_family.rs`. |
+| Cooperative kernels (`Op::InlineMsl` with `mpp::`, `coop_tile_*`) | `wh-iron-std` | **Partly** | The raw-MSL escape hatch is Metal-only; needs a CUDA analog. |
 
 So the work is **two new backend modules + one abstraction seam**, not a rewrite.
 
@@ -78,7 +78,7 @@ Introduce a backend abstraction at two layers:
   `dispatch(grid, block, args)`, `readback`. `MetalDevice` is one impl; add
   `CudaDevice` (CUDA Driver API + NVRTC).
 
-`ffaik build --target {metal,cuda}` and `ffaik bench --target cuda` select the
+`iron build --target {metal,cuda}` and `iron bench --target cuda` select the
 backend; default stays `metal`.
 
 ### 4.2 DSL → CUDA op mapping
@@ -122,7 +122,7 @@ that makes the reduction and lane-shuffle kernels port cleanly.
 ### 4.4 Compilation & dispatch
 
 - **Runtime compile:** NVRTC (`nvrtcCompileProgram`) → PTX → `cuModuleLoadData` →
-  `cuLaunchKernel`. Mirrors Metal's `newLibraryWithSource` flow, so `ffaik build`'s
+  `cuLaunchKernel`. Mirrors Metal's `newLibraryWithSource` flow, so `iron build`'s
   emit-and-compile loop and the codegen-consistency tests carry over.
 - **Offline option:** emit `.cu`, compile with `nvcc` to cubin, for AOT use.
 - **Correctness harness:** the `#[test_kernel]` CPU-oracle model is
@@ -146,7 +146,7 @@ stack worth evaluating for two distinct parts of this backend:
 
   | | **§4.2 path: IR → CUDA C++ → NVRTC → PTX** | **cuda-oxide path: IR → Rust device code → PTX** |
   |---|---|---|
-  | Fits FFAI Kernels's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
+  | Fits Iron Kernels's model | Yes — same "emit target-language text" shape as the MSL emitter | Partly — emit *Rust* instead of CUDA C++ |
   | Blackwell tensor cores | We must emit PTX / inline-asm or use CUTLASS for `tcgen05`/WGMMA | **Built-in intrinsics** (`tcgen05`, WGMMA, MMA, TMEM, TMA, `cta_group::2`, sm_100a) |
   | Toolchain weight | CUDA Toolkit + NVRTC | CUDA 12.x **+ Clang/libclang + nightly `rust-src`/`rustc-dev`/`llvm-tools` + LLVM 21+** for the advanced intrinsics |
   | Maturity | NVRTC is stable, shipping | **Alpha / experimental, active dev, Linux-only** (Ubuntu 24.04 tested) |

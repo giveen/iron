@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea or enhancement for FFAI Kernels
+about: Suggest an idea or enhancement for Iron Kernels
 title: 'feat: '
 labels: feature
 assignees: ''
@@ -22,12 +22,12 @@ Describe any alternative solutions or features you've considered.
 ## Scope
 
 <!-- Which crate(s) would this touch? -->
-- [ ] `ffai-kernels-core`
-- [ ] `ffai-kernels-macros`
-- [ ] `ffai-kernels-codegen`
-- [ ] `ffai-kernels-runtime`
-- [ ] `ffai-kernels-std`
-- [ ] `ffai-kernels-cli`
+- [ ] `wh-iron-core`
+- [ ] `wh-iron-macros`
+- [ ] `wh-iron-codegen`
+- [ ] `wh-iron-runtime`
+- [ ] `wh-iron-std`
+- [ ] `wh-iron-cli`
 
 ## Additional context
 

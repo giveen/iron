@@ -1,0 +1,322 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
+//! Steel segmented GEMM — #[kernel] DSL vs MLX
+//! `metal/steel/gemm/kernels/steel_gemm_segmented.metal`.
+//!
+//! Batched row-major matmul where each batch **segment** sums over a
+//! different K-range of a shared `A` / `B`:
+//!
+//!   C[seg] = A[:, k_start(seg)..k_end(seg)]
+//!            · B[k_start(seg)..k_end(seg), :]
+//!
+//! `A` is `[M, total_K]`, `B` is `[total_K, N]`, and the output is
+//! `[n_segments, M, N]` — one `[M, N]` matrix per segment. A
+//! `segments` descriptor buffer holds the `(k_start, k_end)` half-open
+//! K-range of each segment. This is MLX's `segmented_mm`, the
+//! ragged-K batched matmul used by variable-context attention and
+//! segment-sum GEMMs.
+//!
+//! ## How the ragged K-range is expressed
+//!
+//! The DSL has no "ragged batched matmul" primitive, and it does not
+//! need one: a segmented GEMM is the fused GEMM with a **3-D grid**
+//! (`program_id<2>` = segment index) and a K-loop whose bounds are
+//! read from the `segments` descriptor instead of being a constexpr.
+//!
+//!   - `segments[2*seg]` / `segments[2*seg + 1]` — the half-open
+//!     `[k_start, k_end)` K-range. `k_start` is a multiple of 16 and
+//!     `k_end - k_start` is a multiple of 16 (the BK contract); the
+//!     K-loop steps `for kb in range(k_start, k_end, 16)`.
+//!   - `program_id<2>()` selects the segment; the output base offset is
+//!     `seg * m * n`, the A / B operands are shared (offsets keyed by
+//!     the actual K index, which already encodes the segment range).
+//!
+//! Both the descriptor read and the variable loop bounds are ordinary
+//! arithmetic over a `Tensor<u32>` operand and a `range(start, end, …)`
+//! call — no new codegen primitive is required.
+//!
+//! ## DISPATCH INVARIANTS
+//!
+//! - **TPG: `WM*WN*32` threads** (one simdgroup per sub-tile).
+//!   `64×64 / 2×2` ⇒ 4 simdgroups ⇒ `tpg = 128`. Must be a multiple of 32.
+//! - **Grid: 3-D — `program_id<0>` = N-block, `program_id<1>` = M-block,
+//!   `program_id<2>` = segment index.** One `[M, N]` output per segment.
+//! - **`m % BM == 0`, `n % BN == 0`.** Each segment's `k_start` and
+//!   `(k_end − k_start)` must be multiples of 16 (the BK contract).
+//!   All loads are unconditional — ragged M / N shapes read OOB.
+//! - **`segments` length `2 * n_segments`**, `u32`, laid out
+//!   `[k_start_0, k_end_0, k_start_1, k_end_1, …]`. **`total_k`** is the
+//!   shared A column count / B row count; it is the leading-dimension
+//!   stride, *not* a per-segment K extent.
+//! - **`KernelMode::SimdGroup2D`** so `program_id<i>` lowers to the
+//!   threadgroup index `tid.{x,y,z}`, not the global thread index.
+
+use wh_iron::kernel;
+
+/// Segmented GEMM, both `(BM, BN, WM, WN)` block-shape instantiations.
+///
+/// Produces: `iron_steel_gemm_segmented_64x64x16_2x2`, `_32x32x16_2x2`.
+#[kernel(variants(
+    BM = [64u32, 32u32],
+    BN = [64u32, 32u32],
+    WM = [2u32,  2u32],
+    WN = [2u32,  2u32],
+    suffix = "{BM}x{BN}x16_{WM}x{WN}"
+))]
+pub fn iron_steel_gemm_segmented<T>(
+    a: Tensor<T>,
+    b: Tensor<T>,
+    segments: Tensor<u32>,
+    out: Tensor<T>,
+    #[constexpr] m: u32,
+    #[constexpr] n: u32,
+    #[constexpr] total_k: u32,
+) {
+    // ── Block / simdgroup geometry (identical to steel_gemm_fused) ──
+    let bm = BM;
+    let bn = BN;
+    let wm = WM;
+    let wn = WN;
+    let sub_m = bm / wm;
+    let sub_n = bn / wn;
+    let n_fm = sub_m / 8u32;
+    let n_fn = sub_n / 8u32;
+    let n_kf = 2u32; // BK = 16 ⇒ two 8×8 K-fragments per K-step.
+
+    let tg_col = program_id::<0>(); // N-block index
+    let tg_row = program_id::<1>(); // M-block index
+    let seg = program_id::<2>(); // segment index
+    let sg_id = simd_group_id();
+    let sg_m = sg_id / wn;
+    let sg_n = sg_id % wn;
+    let lane = simd_lane_id();
+
+    // Apple 8×8 fragment lane mapping.
+    let qid = lane / 4u32;
+    let fm = (qid & 4u32) + ((lane / 2u32) % 4u32);
+    let fn0 = (qid & 2u32) * 2u32 + (lane % 2u32) * 2u32;
+    let fn1 = fn0 + 1u32;
+
+    let sub_m0 = sg_m * sub_m;
+    let sub_n0 = sg_n * sub_n;
+    let block_m0 = tg_row * bm;
+    let block_n0 = tg_col * bn;
+
+    // ── Segment K-range from the descriptor ──
+    // segments[2*seg .. 2*seg+2) = [k_start, k_end).
+    let k_start = load(segments[seg * 2u32]);
+    let k_end = load(segments[seg * 2u32 + 1u32]);
+    // This segment's output base offset (one [M,N] matrix each).
+    let out_base = seg * m * n;
+
+    for _fm_i in range(0, n_fm, 1) {
+        for _fn_i in range(0, n_fn, 1) {
+            let acc = simdgroup_alloc::<f32, 8, 8>();
+            simdgroup_elem_store(acc, 0, 0.0f32);
+            simdgroup_elem_store(acc, 1, 0.0f32);
+
+            let m_row = block_m0 + sub_m0 + _fm_i * 8u32;
+            let n_col = block_n0 + sub_n0 + _fn_i * 8u32;
+
+            // K-loop over this segment's [k_start, k_end) range.
+            // `total_k` is the shared leading-dimension stride.
+            for kb in range(k_start, k_end, 16) {
+                for _kf in range(0, n_kf, 1) {
+                    let kf = kb + _kf * 8u32;
+                    let sub_a = simdgroup_alloc::<T, 8, 8>();
+                    let sub_b = simdgroup_alloc::<T, 8, 8>();
+
+                    // A: [M, total_k] — column index is the
+                    // absolute K (already in the segment range).
+                    simdgroup_elem_store(
+                        sub_a,
+                        0,
+                        load(a[(m_row + fm) * total_k + kf + fn0]).cast::<T>(),
+                    );
+                    simdgroup_elem_store(
+                        sub_a,
+                        1,
+                        load(a[(m_row + fm) * total_k + kf + fn1]).cast::<T>(),
+                    );
+
+                    // B: [total_k, N] — non-transposed layout.
+                    simdgroup_elem_store(
+                        sub_b,
+                        0,
+                        load(b[(kf + fm) * n + n_col + fn0]).cast::<T>(),
+                    );
+                    simdgroup_elem_store(
+                        sub_b,
+                        1,
+                        load(b[(kf + fm) * n + n_col + fn1]).cast::<T>(),
+                    );
+
+                    simdgroup_matmul(sub_a, sub_b, acc);
+                }
+            }
+
+            // Store into this segment's [M, N] output slice.
+            let r0 = simdgroup_elem_load(acc, 0);
+            let r1 = simdgroup_elem_load(acc, 1);
+            store(out[out_base + (m_row + fm) * n + n_col + fn0], r0.cast::<T>());
+            store(out[out_base + (m_row + fm) * n + n_col + fn1], r1.cast::<T>());
+        }
+    }
+}
+
+/// New-syntax benches for the segmented (ragged-K batched) steel GEMM.
+///
+/// `m = n = 2048`, `total_k = 4096`, split into `N_SEG = 4` contiguous
+/// K-segments of `total_k / N_SEG = 1024` each (multiple of 16 — the BK
+/// contract). `SimdGroup2D` 3-D dispatch: grid is tile-group counts
+/// `(n/BN, m/BM, n_segments)` — `program_id<2>` selects the segment. The
+/// `segments` descriptor (length `2 * N_SEG`, `u32`) is supplied via
+/// `from_vec` so each segment's `[k_start, k_end)` is the correct
+/// in-bounds range; without it the kernel would read OOB. `bytes_moved`
+/// counts the per-segment A/B K-slices plus the `[N_SEG, M, N]` output.
+/// Bench-only — correctness stays on the legacy GPU tests.
+pub mod kernel_benches {
+    use wh_iron::{bench, core::ir::Kernel, test::*};
+
+    use super::*;
+
+    const M: u32 = 2048;
+    const N: u32 = 2048;
+    const TOTAL_K: u32 = 4096;
+    const N_SEG: u32 = 4;
+    /// Per-segment K extent (contiguous, multiple of 16).
+    const K_PER_SEG: u32 = TOTAL_K / N_SEG;
+
+    /// Encode the `[k_start, k_end)` descriptor for the `N_SEG` contiguous
+    /// segments as little-endian `u32` bytes for the `segments` buffer.
+    fn segments_bytes() -> Vec<u8> {
+        let mut v = Vec::with_capacity((2 * N_SEG as usize) * 4);
+        for s in 0..N_SEG {
+            let k_start = s * K_PER_SEG;
+            let k_end = k_start + K_PER_SEG;
+            v.extend_from_slice(&k_start.to_le_bytes());
+            v.extend_from_slice(&k_end.to_le_bytes());
+        }
+        v
+    }
+
+    /// Build a segmented steel-GEMM bench. `bm` / `bn` are the
+    /// output-block dims; the grid z-axis spans `N_SEG` segments.
+    fn sb(kernel: Kernel, bm: u32, bn: u32, tpg: u32, dt: DType) -> BenchSetup {
+        let (m, n, total_k) = (M as usize, N as usize, TOTAL_K as usize);
+        let sz = dt.size_bytes();
+        // Each segment reads its K-slice of A / B; summed over all segments
+        // the A / B streams total the full [M, total_k] / [total_k, N].
+        let bytes = (m * total_k + total_k * n + N_SEG as usize * m * n) * sz;
+        BenchSetup::new(kernel)
+            .mode(KernelMode::SimdGroup2D)
+            .buffer(BenchBuffer::random("a", m * total_k, dt))
+            .buffer(BenchBuffer::random("b", total_k * n, dt))
+            .buffer(BenchBuffer::from_vec("segments", segments_bytes(), DType::U32))
+            .buffer(BenchBuffer::zeros("out", N_SEG as usize * m * n, dt).output())
+            .constexpr("m", M)
+            .constexpr("n", N)
+            .constexpr("total_k", TOTAL_K)
+            .with_shape_label(format!(
+                "m{M} n{N} k{TOTAL_K} seg{N_SEG} {}",
+                crate::utils::dtype_label(dt)
+            ))
+            .grid_3d(N / bn, M / bm, N_SEG, [tpg, 1, 1])
+            .bytes_moved(bytes as u64)
+            // N_SEG segments × 2 * M * N * K_PER_SEG = 2 * M * N * TOTAL_K
+            .flops(2 * (N_SEG as u64) * (M as u64) * (N as u64) * (K_PER_SEG as u64))
+    }
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_segmented_64x64x16_2x2(dt: DType) -> BenchSetup {
+        sb(iron_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_segmented_32x32x16_2x2(dt: DType) -> BenchSetup {
+        sb(iron_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+    }
+}
+
+/// New-syntax correctness tests for the segmented (ragged-K batched)
+/// steel GEMM — ports the oracle from the legacy
+/// `tests/steel_gemm_segmented_gpu_correctness.rs` (since removed). For
+/// segment `seg`
+/// with K-range `[segments[2·seg], segments[2·seg+1])`:
+///   `out[seg, r, c] = Σ_{k in range} a[r, k] · b[k, c]`,
+/// `a` is `[M, total_k]`, `b` is `[total_k, N]`, output `[n_seg, M, N]`.
+///
+/// Small shape: `M = 2·BM`, `N = 2·BN`, `total_k = 48` split into 3
+/// disjoint 16-wide segments `(0..16, 16..32, 32..48)` — each `k_start`
+/// and extent is a multiple of 16 (BK contract). `SimdGroup2D` 3-D grid
+/// `(N/BN, M/BM, n_seg)` — `program_id<2>` selects the segment.
+pub mod kernel_tests {
+    use wh_iron::{core::ir::Kernel, test::*, test_kernel};
+
+    use super::*;
+    use crate::utils::{pack_f32, unpack_f32};
+
+    fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+    fn ramp(n: usize, modulus: usize, offset: f32) -> Vec<f32> {
+        (0..n).map(|i| ((i % modulus) as f32 - offset) * 0.05).collect()
+    }
+
+    /// Naive segmented fp32 reference — one `[M, N]` matrix per segment.
+    fn naive_segmented_matmul(
+        a: &[f32],
+        b: &[f32],
+        segments: &[u32],
+        m: usize,
+        n: usize,
+        total_k: usize,
+    ) -> Vec<f32> {
+        let n_seg = segments.len() / 2;
+        let mut out = vec![0.0f32; n_seg * m * n];
+        for seg in 0..n_seg {
+            let k_start = segments[2 * seg] as usize;
+            let k_end = segments[2 * seg + 1] as usize;
+            for r in 0..m {
+                for c in 0..n {
+                    let mut acc = 0.0f32;
+                    for k in k_start..k_end {
+                        acc += a[r * total_k + k] * b[k * n + c];
+                    }
+                    out[seg * m * n + r * n + c] = acc;
+                }
+            }
+        }
+        out
+    }
+
+    /// Build a segmented-GEMM correctness setup with 3 disjoint 16-wide
+    /// K-segments over a 48-wide total K.
+    fn segmented_setup(kernel: Kernel, bm: u32, bn: u32, tpg: u32, dt: DType) -> TestSetup {
+        let (m, n, total_k) = (bm as usize * 2, bn as usize * 2, 48usize);
+        let segments: Vec<u32> = vec![0, 16, 16, 32, 32, 48];
+        let n_seg = segments.len() / 2;
+        let a = unpack_f32(&pack_f32(&ramp(m * total_k, 19, 7.0), dt), dt);
+        let b = unpack_f32(&pack_f32(&ramp(total_k * n, 23, 9.0), dt), dt);
+        let expected = naive_segmented_matmul(&a, &b, &segments, m, n, total_k);
+        TestSetup::new(kernel)
+            .mode(KernelMode::SimdGroup2D)
+            .input(TestBuffer::from_vec("a", pack_f32(&a, dt), dt))
+            .input(TestBuffer::from_vec("b", pack_f32(&b, dt), dt))
+            .input(TestBuffer::from_vec("segments", u32_bytes(&segments), DType::U32))
+            .input(TestBuffer::zeros("out", n_seg * m * n, dt))
+            .constexpr("m", m as u32)
+            .constexpr("n", n as u32)
+            .constexpr("total_k", total_k as u32)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            // 3-D grid: (n/BN, m/BM, n_seg). program_id<2> = segment.
+            .grid_3d(n as u32 / bn, m as u32 / bm, n_seg as u32, [tpg, 1, 1])
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_segmented_64x64x16_2x2(dt: DType) -> TestSetup {
+        segmented_setup(iron_steel_gemm_segmented_64x64x16_2x2::kernel_ir_for(dt), 64, 64, 128, dt)
+    }
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_segmented_32x32x16_2x2(dt: DType) -> TestSetup {
+        segmented_setup(iron_steel_gemm_segmented_32x32x16_2x2::kernel_ir_for(dt), 32, 32, 128, dt)
+    }
+}

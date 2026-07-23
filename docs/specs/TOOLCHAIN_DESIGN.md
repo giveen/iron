@@ -1,4 +1,4 @@
-# FFAI Kernels Toolchain Design
+# Iron Kernels Toolchain Design
 
 **Status:** Draft — refactor/bench-logic-3
 
@@ -6,9 +6,9 @@
 
 ## Problem with the current design
 
-The old system compiled all bench logic — buffer allocation strategies, reference kernel names, dispatch shapes, correctness tolerances — directly into the `ffaik` CLI binary via `inventory::submit!`. This created three problems:
+The old system compiled all bench logic — buffer allocation strategies, reference kernel names, dispatch shapes, correctness tolerances — directly into the `iron` CLI binary via `inventory::submit!`. This created three problems:
 
-1. **Every kernel change required reinstalling the CLI.** The bench registration lived in `ffai-kernels-std`, which `ffai-kernels-cli` linked. `cargo install` was not optional.
+1. **Every kernel change required reinstalling the CLI.** The bench registration lived in `wh-iron-std`, which `wh-iron-cli` linked. `cargo install` was not optional.
 
 2. **All policy was centralised.** `ClassKind`, `BenchDispatch`, `ShapeSpec`, and `run_spec` lived in toolchain crates. Kernel authors could not control how their kernel was benched — they filled in fields of a schema someone else defined.
 
@@ -20,10 +20,10 @@ The old system compiled all bench logic — buffer allocation strategies, refere
 
 | Goal | Description |
 |---|---|
-| **No reinstall** | `ffaik bench` / `ffaik test` run the user's project as a subprocess. Changing a kernel or its bench setup only requires recompiling the project, not the CLI. |
+| **No reinstall** | `iron bench` / `iron test` run the user's project as a subprocess. Changing a kernel or its bench setup only requires recompiling the project, not the CLI. |
 | **Kernel-local policy** | Every decision about how a kernel is benched or tested (buffer sizes, dtypes, tolerance, reference kernel) is authored next to the kernel, in the user's crate. |
 | **Minimal toolchain surface** | The toolchain provides traits and a protocol. It does not define dispatch classes, buffer init strategies, or anything domain-specific. |
-| **Foundry UX** | `cd my-kernels && ffaik bench` — the project directory is the unit of operation, like Cargo itself. |
+| **Foundry UX** | `cd my-kernels && iron bench` — the project directory is the unit of operation, like Cargo itself. |
 | **Idiomatic Rust** | All toolchain and kernel-author code follows Rust best practices: builder pattern, opaque types, trait-based polymorphism, `Result`-propagating errors. |
 
 ---
@@ -75,7 +75,7 @@ This prevents accidentally swapping throughput and latency values at call sites.
 
 ### Error handling — `Result`, never `panic` in library code
 
-Toolchain library code (`ffai-kernels`, `ffai-kernels-core`) returns `Result<_, E>` and propagates errors with `?`. `unwrap()` and `expect()` are reserved for cases that are genuinely unreachable, with a comment explaining why. Proc-macro code returns `syn::Error` / `compile_error!` on bad input rather than panicking.
+Toolchain library code (`wh-iron`, `wh-iron-core`) returns `Result<_, E>` and propagates errors with `?`. `unwrap()` and `expect()` are reserved for cases that are genuinely unreachable, with a comment explaining why. Proc-macro code returns `syn::Error` / `compile_error!` on bad input rather than panicking.
 
 ### `From` / `Into` for conversions
 
@@ -123,12 +123,12 @@ Rules:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  User project  (e.g. ffai-kernels-std, or any external     │
+│  User project  (e.g. wh-iron-std, or any external     │
 │  crate with #[kernel] functions)                        │
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  unary.rs                                         │  │
-│  │  #[kernel]      fn ffai_exp<T>(…) { … }             │  │
+│  │  #[kernel]      fn iron_exp<T>(…) { … }             │  │
 │  │  #[bench(…)]    fn exp_bench(dt) -> BenchSetup    │  │
 │  │  #[test_kernel] fn exp_test(dt)  -> TestSetup     │  │
 │  └───────────────────────────────────────────────────┘  │
@@ -140,13 +140,13 @@ Rules:
 │  │  JSON results to stdout.                         │  │
 │  └──────────────────────────────────────────────────┘  │
 └──────────┬──────────────────────────────────────────────┘
-           │ cargo run --bin __ffai_runner -- bench --filter exp
+           │ cargo run --bin __iron_runner -- bench --filter exp
            │ (JSON lines on stdout; harness generated in $CARGO_TARGET_DIR)
            ▼
 ┌─────────────────────────────┐
-│  tile CLI  (ffai-kernels-cli)  │
+│  tile CLI  (wh-iron-cli)  │
 │                             │
-│  Detects ffai.toml,         │
+│  Detects iron.toml,         │
 │  spawns subprocess,         │
 │  streams + renders output.  │
 │                             │
@@ -159,13 +159,13 @@ The CLI is a **rendering and orchestration** layer only. It knows nothing about 
 
 ---
 
-## Project manifest — `ffai.toml`
+## Project manifest — `iron.toml`
 
-Every project that uses `ffaik` has a `ffai.toml` at the workspace root:
+Every project that uses `iron` has a `iron.toml` at the workspace root:
 
 ```toml
 [project]
-name = "ffai-kernels-std"
+name = "wh-iron-std"
 
 [runner]
 # Optional: extra cargo args forwarded when spawning the auto-generated runner.
@@ -184,11 +184,11 @@ default_tol = 1e-4
 
 ## The `#[kernel]` macro
 
-`#[kernel]` does exactly one thing: **convert the DSL function body into FFAI Kernels IR** and register a `KernelEntry` in the inventory so `ffaik build` / `ffaik inspect` can find it.
+`#[kernel]` does exactly one thing: **convert the DSL function body into Iron Kernels IR** and register a `KernelEntry` in the inventory so `iron build` / `iron inspect` can find it.
 
 ```rust
 #[kernel]
-pub fn ffai_exp<T>(input: Tensor<T>, out: Tensor<T>) {
+pub fn iron_exp<T>(input: Tensor<T>, out: Tensor<T>) {
     let idx = program_id::<0>();
     store(out[idx], exp(load(input[idx])));
 }
@@ -197,8 +197,8 @@ pub fn ffai_exp<T>(input: Tensor<T>, out: Tensor<T>) {
 That is all. No bench args, no dispatch class, no tolerance.
 
 The macro generates:
-- `mod ffai_exp { pub fn kernel_ir_for(dt: DType) -> Kernel { … } }`
-- A `KernelEntry` submitted to `ffai_kernels_core::inventory` for `ffaik build`/`inspect`
+- `mod iron_exp { pub fn kernel_ir_for(dt: DType) -> Kernel { … } }`
+- A `KernelEntry` submitted to `wh_iron_core::inventory` for `iron build`/`inspect`
 
 ---
 
@@ -210,7 +210,7 @@ Bench logic lives in the user's crate, next to the kernel, as an ordinary functi
 #[bench(dtypes = [f32, f16, bf16])]
 fn exp_bench(dt: DType) -> BenchSetup {
     const N: usize = 64 << 20;
-    BenchSetup::new(ffai_exp::kernel_ir_for(dt))
+    BenchSetup::new(iron_exp::kernel_ir_for(dt))
         .buffer(BenchBuffer::random("input", N, dt))
         .buffer(BenchBuffer::zeros("out",    N, dt).output())
         .constexpr("n", N as u32)
@@ -228,7 +228,7 @@ fn exp_bench(dt: DType) -> BenchSetup { … }
 ```
 
 Compute-bound kernels (matmul, attention, convolution) should also declare a FLOP
-count so `ffaik bench` reports `GFLOP/s` and the roofline `%FLOP` / arithmetic
+count so `iron bench` reports `GFLOP/s` and the roofline `%FLOP` / arithmetic
 intensity. Use the `.flops(n)` builder (the dense-equivalent multiply-accumulate
 count × 2, e.g. `2·M·N·K` for a matmul) or the `flops` key for a closure;
 memory-bound kernels leave it unset and the compute columns stay blank.
@@ -304,7 +304,7 @@ fn exp_test(dt: DType) -> TestSetup {
     // runner handle dtype casting and element-wise comparison.
     let input = TestBuffer::random("input", N, dt);
     let expected = input.map_f32(f32::exp).rename("out");
-    TestSetup::new(ffai_exp::kernel_ir_for(dt))
+    TestSetup::new(iron_exp::kernel_ir_for(dt))
         .input(input)
         .expected(expected)
         .grid_1d(N, 256)
@@ -340,7 +340,7 @@ When `metal_reference()` returns `Some(MetalRef { .. })`, the runner:
 1. Compiles the reference `.metal` file via `xcrun metal`
 2. Allocates the same buffers
 3. Dispatches the reference kernel with the same inputs
-4. Compares GB/s (FFAI vs ref) and correctness
+4. Compares GB/s (Iron vs ref) and correctness
 
 ```rust
 pub struct MetalRef {
@@ -348,7 +348,7 @@ pub struct MetalRef {
     pub metal_file: &'static str,
     /// Kernel function name inside the metal file.
     pub function: &'static str,
-    /// Constexprs to pass to the reference (may differ from FFAI spelling).
+    /// Constexprs to pass to the reference (may differ from Iron spelling).
     pub constexprs: Vec<(String, ConstValue)>,
 }
 ```
@@ -359,7 +359,7 @@ Pass one via the `ref` key in `#[bench]`:
 #[bench(
     name   = "unary/exp",
     dtypes = [f32, f16, bf16],
-    ref    = MetalRef { metal_file: "metal/exp.metal", function: "ffai_exp_ref", constexprs: vec![] },
+    ref    = MetalRef { metal_file: "metal/exp.metal", function: "iron_exp_ref", constexprs: vec![] },
 )]
 fn exp_bench(dt: DType) -> BenchSetup { … }
 ```
@@ -379,9 +379,9 @@ The `tile-runner` binary writes newline-delimited JSON to stdout. The CLI reads 
   "type": "bench",
   "name": "unary/exp",
   "dtype": "f16",
-  "ffai_gbps": 1234.5,
+  "iron_gbps": 1234.5,
   "ref_gbps": 1189.2,    // null if no metal_reference
-  "ffai_pct": 103.8,       // null if no ref
+  "iron_pct": 103.8,       // null if no ref
   "correct": true,
   "min_us": 12.3,
   "mean_us": 12.8
@@ -405,11 +405,11 @@ The protocol is versioned. The CLI negotiates with the runner via the `runner_ve
 
 Kernel authors write zero runner code. The subprocess wiring is entirely owned by the toolchain.
 
-When `ffaik bench` is invoked, it:
+When `iron bench` is invoked, it:
 
-1. Finds `ffai.toml` walking up from CWD.
+1. Finds `iron.toml` walking up from CWD.
 2. Generates a harness entry-point on the fly (in `$CARGO_TARGET_DIR/tile/`) — exactly like how `cargo test` generates a test harness without you writing a `fn main`.
-3. Compiles it with `cargo build --bin __ffai_runner` (the generated bin is invisible to the author).
+3. Compiles it with `cargo build --bin __iron_runner` (the generated bin is invisible to the author).
 4. Spawns the compiled binary and streams JSON.
 
 The harness source is a single generated file:
@@ -417,48 +417,48 @@ The harness source is a single generated file:
 ```rust
 // auto-generated by tile — do not edit, do not check in
 fn main() {
-    ffai-kernels::runner::run(ffai-kernels::runner::Args::from_env());
+    wh-iron::runner::run(wh-iron::runner::Args::from_env());
 }
 ```
 
-`ffai-kernels::runner::run` iterates the `inventory`, handles `--filter`, `--bench`, `--test` sub-commands, and streams JSON. **Authors never see, write, or think about this file.**
+`wh-iron::runner::run` iterates the `inventory`, handles `--filter`, `--bench`, `--test` sub-commands, and streams JSON. **Authors never see, write, or think about this file.**
 
 ---
 
 ## CLI commands
 
-### `ffaik bench`
+### `iron bench`
 
 ```
-ffaik bench [-f <filter>] [-v] [-o results.json]
+iron bench [-f <filter>] [-v] [-o results.json]
 ```
 
-1. Find `ffai.toml` walking up from CWD.
+1. Find `iron.toml` walking up from CWD.
 2. Generate runner harness source into `$CARGO_TARGET_DIR/tile/__runner.rs` if absent or stale.
-3. Spawn `cargo run --bin __ffai_runner [runner.cargo_args] -- bench [--filter …]`.
+3. Spawn `cargo run --bin __iron_runner [runner.cargo_args] -- bench [--filter …]`.
 4. Stream JSON lines → render live table.
 5. Optionally write `results.json`.
 
-### `ffaik test`
+### `iron test`
 
 ```
-ffaik test [-f <filter>] [-v]
+iron test [-f <filter>] [-v]
 ```
 
 Same as bench but invokes `-- test`.
 
-### `ffaik build`
+### `iron build`
 
 ```
-ffaik build [-f <filter>] [--dtypes f32,f16,bf16] [--emit msl,metallib] [-o <dir>]
+iron build [-f <filter>] [--dtypes f32,f16,bf16] [--emit msl,metallib] [-o <dir>]
 ```
 
-Invokes the runner with `-- build`. The runner iterates `KernelEntry` inventory, generates MSL via `ffai-kernels-codegen`, optionally compiles a metallib, and streams artifacts over the protocol.
+Invokes the runner with `-- build`. The runner iterates `KernelEntry` inventory, generates MSL via `wh-iron-codegen`, optionally compiles a metallib, and streams artifacts over the protocol.
 
-### `ffaik inspect`
+### `iron inspect`
 
 ```
-ffaik inspect [<kernel>] [--ir] [--pass <name>] [--dtype f32]
+iron inspect [<kernel>] [--ir] [--pass <name>] [--dtype f32]
 ```
 
 Invokes `-- inspect`. Same kernel discovery path.
@@ -467,20 +467,20 @@ Invokes `-- inspect`. Same kernel discovery path.
 
 ## What the toolchain owns vs the kernel author
 
-| Concern | Toolchain (`ffai-kernels`) | Kernel author |
+| Concern | Toolchain (`wh-iron`) | Kernel author |
 |---|---|---|
 | DSL → IR compilation | ✅ `#[kernel]` macro | |
-| MSL codegen | ✅ `ffai-kernels-codegen` | |
+| MSL codegen | ✅ `wh-iron-codegen` | |
 | GPU dispatch & timing | ✅ `runner::run` | |
-| JSON protocol | ✅ defined in `ffai-kernels` | |
+| JSON protocol | ✅ defined in `wh-iron` | |
 | Buffer allocation | | ✅ `BenchSetup::buffers` |
 | Dtypes to run | | ✅ `KernelBench::dtypes` |
 | Dispatch shape (grid/tpg) | | ✅ `BenchSetup::grid/tpg` |
 | Reference kernel | | ✅ `KernelBench::metal_reference` |
 | Tolerance | | ✅ `KernelTest::tolerance` |
 | CPU oracle | | ✅ `TestSetup::expected` |
-| Runner harness / subprocess wiring | ✅ auto-generated by `ffaik` | |
-| Bench iterations | ✅ `ffai.toml [bench]` | override per-bench if needed |
+| Runner harness / subprocess wiring | ✅ auto-generated by `iron` | |
+| Bench iterations | ✅ `iron.toml [bench]` | override per-bench if needed |
 
 ---
 
@@ -488,7 +488,7 @@ Invokes `-- inspect`. Same kernel discovery path.
 
 ```
 my-kernels/
-├── ffai.toml
+├── iron.toml
 ├── Cargo.toml
 └── src/
     ├── lib.rs
@@ -498,16 +498,16 @@ my-kernels/
 
 The kernel, its bench setup, and its correctness test live in the same file. There is no reason to split them — they share the same constants, the same buffer layout, and the same understanding of what the kernel does. Keeping them together makes that knowledge visible in one place.
 
-No runner binary. No `src/bin/`. No protocol code. The harness is generated by `ffaik` at build time and lives entirely in `$CARGO_TARGET_DIR`.
+No runner binary. No `src/bin/`. No protocol code. The harness is generated by `iron` at build time and lives entirely in `$CARGO_TARGET_DIR`.
 
 ---
 
 ## Implementation sequence
 
-1. **`ffai-kernels-core`**: add `KernelBench`, `KernelTest`, `BenchSetup`, `TestSetup`, `BenchBuffer`, `TestBuffer`, `MetalRef`, `ConstValue` types and `KernelBenchEntry` / `KernelTestEntry` inventory wrappers.
-2. **`ffai-kernels`**: re-export the new traits; add `register_bench!` / `register_test!` macros.
-3. **`ffai-kernels`**: implement `runner::run` — the protocol loop.
-4. **`ffai-kernels-cli`**: implement `ffaik bench`, `ffaik test` — harness generation + subprocess launch + JSON rendering.
-5. **`ffai-kernels-std`**: port existing bench specs to `impl KernelBench`; add `ffai.toml` at the workspace root.
+1. **`wh-iron-core`**: add `KernelBench`, `KernelTest`, `BenchSetup`, `TestSetup`, `BenchBuffer`, `TestBuffer`, `MetalRef`, `ConstValue` types and `KernelBenchEntry` / `KernelTestEntry` inventory wrappers.
+2. **`wh-iron`**: re-export the new traits; add `register_bench!` / `register_test!` macros.
+3. **`wh-iron`**: implement `runner::run` — the protocol loop.
+4. **`wh-iron-cli`**: implement `iron bench`, `iron test` — harness generation + subprocess launch + JSON rendering.
+5. **`wh-iron-std`**: port existing bench specs to `impl KernelBench`; add `iron.toml` at the workspace root.
 
 No step requires kernel authors to create a runner binary. Step 4 owns that entirely.

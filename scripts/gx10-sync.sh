@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # rsync this worktree to the GX10 (sm_121 Blackwell) and run a command there.
-# Usage: scripts/gx10-sync.sh [cargo args...]   e.g. gx10-sync.sh test -p ffai-kernels-core
+# Usage: scripts/gx10-sync.sh [cargo args...]   e.g. gx10-sync.sh test -p wh-iron-core
 set -euo pipefail
 HOST=gx10
-REMOTE=ffai-kernels-cuda  # relative to remote $HOME
+REMOTE=wh-iron-cuda  # relative to remote $HOME
 LOCAL="$(cd "$(dirname "$0")/.." && pwd)/"
 ssh "$HOST" "mkdir -p $REMOTE"
 rsync -az --delete \

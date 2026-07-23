@@ -1,4 +1,4 @@
-# ffai-kernels CUDA — kernel latency profile (GB10 / sm_121)
+# wh-iron CUDA — kernel latency profile (GB10 / sm_121)
 
 Generated from the registered `#[test_kernel]` corpus, timed on a real DGX-Spark-class GB10 via CUDA events (`cuEvent`), 5 warmup + 50 timed launches each.
 
@@ -7,7 +7,7 @@ Generated from the registered `#[test_kernel]` corpus, timed on a real DGX-Spark
 | | |
 |---|---|
 | Device | NVIDIA GB10, compute capability **sm_121** |
-| Backend | ffai-kernels CUDA (NVRTC → PTX → driver JIT) |
+| Backend | wh-iron CUDA (NVRTC → PTX → driver JIT) |
 | Kernels timed | **4164** (kernel × dtype), 0 skipped |
 | Correctness | 100% — all 4164 bit-accurate vs the CPU oracle (separate run) |
 | Timing | GPU-side `cuEvent` wall-clock, min = steady state |
@@ -23,7 +23,7 @@ Worst dtype per kernel shown (latency is dtype-insensitive here — the emulated
 
 | # | kernel | dtype | min µs | cv % |
 |---:|---|:---:|---:|---:|
-| 1 | `test_ffai_sdpa_bidirectional_d64_vision_tower` | f32 | 1599.7 | 3.3 |
+| 1 | `test_iron_sdpa_bidirectional_d64_vision_tower` | f32 | 1599.7 | 3.3 |
 | 2 | `test_indexer_score_dsv4` | f16 | 866.5 | 0.1 |
 | 3 | `test_nvfp4_moe_gather_qmm_bm64_mpp` | f32 | 268.4 | 0.2 |
 | 4 | `test_mxfp4_moe_gather_qmm_bm64_mpp` | f32 | 268.3 | 0.1 |
@@ -64,7 +64,7 @@ Worst dtype per kernel shown (latency is dtype-insensitive here — the emulated
 ## Reproduce
 
 ```sh
-cargo test -p ffai-kernels-std --features cuda --test cuda_bench_corpus \
+cargo test -p wh-iron-std --features cuda --test cuda_bench_corpus \
     -- --ignored --nocapture
 ```
 

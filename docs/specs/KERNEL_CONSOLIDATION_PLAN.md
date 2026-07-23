@@ -4,7 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 -->
 # Kernel Consolidation Plan
 
-The single roadmap for restructuring `ffai-kernels-std`'s ~150k lines of kernels
+The single roadmap for restructuring `wh-iron-std`'s ~150k lines of kernels
 into a smaller, family-organized library. This doc owns **what the target
 structure is and the order we get there**; [`STYLE_GUIDE.md`](../STYLE_GUIDE.md)
 owns **how an individual kernel/bench/test is written** in the target style.
@@ -23,7 +23,7 @@ Where they overlap (naming, per-file shape), defer to the style guide.
 ## 1. Why
 
 The legacy split is two top-level folders — `mlx/` (≈51 files, a kernel with an
-upstream metal source) and `ffai/` (≈145 files, everything else). Two problems:
+upstream metal source) and `iron/` (≈145 files, everything else). Two problems:
 
 1. **The organizing axis is wrong.** "Does an upstream metal reference exist?"
    is a property of one *bench* — an optional comparator — not of the kernel. It
@@ -37,12 +37,12 @@ Goal: group by **operation family**, fold the dtype/format/bit-width/head-dim
 variation onto compile-time axes, and pull shared sub-expressions into
 primitives — reducing LOC dramatically while making each family easy to find and
 maintain. Generated MSL is unchanged; kernel inventory names are unchanged (so
-the FFAI emit path is unaffected).
+the Iron emit path is unaffected).
 
 ## 2. Target directory layout
 
 ```
-crates/ffai-kernels-std/src/kernels/
+crates/wh-iron-std/src/kernels/
   ops/        ✅ DONE — elementwise/core primitives: binary · unary · ternary · copy · arange ·
               random · reduce · arg_reduce · scan · indexing · gather/scatter · hadamard ·
               fence · clamp · logsumexp · vector_add · axpy · strided · gated_activation ·
@@ -74,7 +74,7 @@ crates/ffai-kernels-std/src/kernels/
               transpose_th · frame_diff · broadcast_affine
   sampling/   ✅ DONE — logits_topk/top_p/min_p/processors · categorical_sample · softmax · sort
   kv_cache/   ✅ DONE — kv_cache(_update_many) · kv_append · fft
-  primitives.rs   cross-family decode/reduce ops (ffai_decode_e2m1/e4m3/e5m2/e8m0, ffai_unpack_nbit, …)
+  primitives.rs   cross-family decode/reduce ops (iron_decode_e2m1/e4m3/e5m2/e8m0, iron_unpack_nbit, …)
   mod.rs          pub mod ops; pub mod gemm; pub mod sdpa; …
 ```
 
@@ -84,7 +84,7 @@ Notes:
 - `quant/` holds **format/codec/lowering infrastructure**, not per-op kernels —
   a quantized matmul lives in `gemm/`, not `quant/` (its format is an *axis* of
   the matmul, §5/§7).
-- No `mlx` / `ffai` / `mlx_ref` naming anywhere. A metal reference is an optional
+- No `mlx` / `iron` / `mlx_ref` naming anywhere. A metal reference is an optional
   `.with_reference(...)` on a bench, nothing more.
 - **No model names in kernels.** Name a kernel for the operation / layout it
   implements, never for a model (`rope_llama` → `rope_banded`, `kokoro` →
@@ -121,7 +121,7 @@ The convolution module is the proof of the recipe:
 | Files | 20 (`conv2d`, `conv2d_block_scaled`, `conv2d_mma`, `conv2d_mma_block_scaled`, depthwise×3, conv3d×4, conv1d×5, winograd, …) | `convolution/{conv1d,conv2d,conv3d}.rs` + `consolidated/{primitives,conv1d}.rs` + `fused/` + `steel_conv/` |
 | LOC | ~24,200 | ~1,600 target (~93% reduction) |
 
-What landed: stale `ffai/` duplicates deleted; per-format **benches** and
+What landed: stale `iron/` duplicates deleted; per-format **benches** and
 **tests** collapsed to `*_bench_fmt!` / `*_test_fmt!` macros (one macro + 30
 invocations, vs ~30 explicit fns each); the GGUF/DSv4 dequant oracles routed
 through the shared `quant::codec`. Phases still open for conv: replace the
@@ -148,10 +148,10 @@ Mechanics, per family:
 2. Merge fragmented 1-kernel files; extract shared primitives (tool 1).
 3. Collapse format/bit-width/scale families onto `variants(...)` (tool 2); merge
    by op (tool 3).
-4. Rename to `ffai_<op>`, dropping the legacy `ffai_` prefix **and any model name**
-   — name the operation / layout, not the model (§9.1); regenerate the FFAI emit
+4. Rename to `iron_<op>`, dropping the legacy `iron_` prefix **and any model name**
+   — name the operation / layout, not the model (§9.1); regenerate the Iron emit
    consumer from the new inventory.
-5. Gate: `cargo build` + `ffaik test -f <family>` green + `make fmt`. The
+5. Gate: `cargo build` + `iron test -f <family>` green + `make fmt`. The
    *generated MSL per kernel* is unchanged — diffs are whitespace/comments and
    the inventory-name rename.
 
@@ -170,7 +170,7 @@ payoff last:
 |---|---|---|---|
 | ✅ done | `convolution/`, `rope/`, `norm/`, `sampling/`, `ops/` | exemplar + all of wave 1 | 24k → ~1.6k |
 | 2 | ✅ `audio/` `vision/` `kv_cache/` `gemm/` (dense + quantized) `ssm/` all done | moderate size, few cross-deps | medium |
-| 3 | ✅ `moe/` `sdpa/` `quant/` all done; `kernels/quant/` unifies the host codec/format/gguf SSOT + the dequant kernels. `ffai/` is fully migrated and removed; only `mlx/steel/` (steel attn/conv templates) remains. | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
+| 3 | ✅ `moe/` `sdpa/` `quant/` all done; `kernels/quant/` unifies the host codec/format/gguf SSOT + the dequant kernels. `iron/` is fully migrated and removed; only `mlx/steel/` (steel attn/conv templates) remains. | hardest axes (head-dim d64..d512; bm8/bm64×int8; the 30-format matrix) — most of the ~150k LOC | the bulk |
 
 ## 7. The `quant/` umbrella — collapsing the op × format matrix
 
@@ -190,28 +190,28 @@ k-quant paths, and the AURA codec stack. The target:
   decode in `codec`, still shared between kernel and oracle.
 - The **`f16`-scale variants are not separate kernels** — `ScaleKind` (F32 /
   E8M0 / F16) is another axis of the format, so an op's `variants(...)` block
-  carries it alongside `FMT` and the `ffai_*_f16` twins fold into the base op
+  carries it alongside `FMT` and the `iron_*_f16` twins fold into the base op
   (§9.3).
 
 ## 8. What this does NOT change
 
 - Generated MSL per kernel — identical post-consolidation (same IR, same
   passes); `variants(...)` suffix templates reproduce each body exactly.
-- `ffai-kernels-core` / `-codegen` / `-runtime` / `-cli` — zero changes; this is a
-  `ffai-kernels-std` source reorg only.
+- `wh-iron-core` / `-codegen` / `-runtime` / `-cli` — zero changes; this is a
+  `wh-iron-std` source reorg only.
 
-(Inventory *names* do change where the `ffai_`/model prefix is dropped, §9.1.
-This is source-internal to `ffai-kernels-std`, but it is **not** transparent to
-downstream: the FFAI/Swift consumer references the generated kernel symbols by
+(Inventory *names* do change where the `iron_`/model prefix is dropped, §9.1.
+This is source-internal to `wh-iron-std`, but it is **not** transparent to
+downstream: the Iron/Swift consumer references the generated kernel symbols by
 name, so each family migration needs a **paired consumer-side PR** that
 regenerates against the new inventory. Land the two together, or stage the
 consumer to accept both names across the cutover.)
 
 ## 9. Decisions
 
-1. **Name the operation / layout, never the model → `ffai_<op>`.** Drop the legacy
-   `ffai_` prefix *and* any model name (`ffai_rope_llama` → `ffai_rope_banded`,
-   `dsv4_partial_rope` → `ffai_partial_rope`); the differentiator between similar
+1. **Name the operation / layout, never the model → `iron_<op>`.** Drop the legacy
+   `iron_` prefix *and* any model name (`iron_rope_llama` → `iron_rope_banded`,
+   `dsv4_partial_rope` → `iron_partial_rope`); the differentiator between similar
    kernels is the layout, which the name should describe. Model-specific usage
    notes go in a comment above the kernel. Names are **not** pinned in-tree, but
    they are not free downstream — see the paired consumer-side PR note in §8.
@@ -219,7 +219,7 @@ consumer to accept both names across the cutover.)
 2. **Keep `vision/` and `audio/`** as their own folders for now — do not
    distribute their ops into `convolution/` / `norm/` / `ops/`.
 3. **`f16`-scale twins become a scale axis.** `ScaleKind` (F32 / E8M0 / F16) is an
-   axis of the *format*, carried by `variants(...)`; `ffai_*_f16` kernels collapse
+   axis of the *format*, carried by `variants(...)`; `iron_*_f16` kernels collapse
    into their base op rather than existing as separate files (§7).
 4. **Metal references stay on the kernels that mirror them, indefinitely.** Any
    kernel that is the same op / functionality as an upstream (MLX) reference keeps

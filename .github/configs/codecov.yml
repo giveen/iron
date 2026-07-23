@@ -27,7 +27,7 @@ flag_management:
   individual_flags:
     - name: codegen
       paths:
-        - crates/ffai-kernels-codegen/
+        - crates/wh-iron-codegen/
       statuses:
         - type: project
           target: auto
@@ -35,7 +35,7 @@ flag_management:
           if_ci_failed: success
     - name: core
       paths:
-        - crates/ffai-kernels-core/
+        - crates/wh-iron-core/
       statuses:
         - type: project
           target: auto
@@ -43,7 +43,7 @@ flag_management:
           if_ci_failed: success
     - name: macros
       paths:
-        - crates/ffai-kernels-macros/
+        - crates/wh-iron-macros/
       statuses:
         - type: project
           target: auto
@@ -51,7 +51,7 @@ flag_management:
           if_ci_failed: success
     - name: runtime
       paths:
-        - crates/ffai-kernels-runtime/
+        - crates/wh-iron-runtime/
       statuses:
         - type: project
           target: auto
@@ -59,7 +59,7 @@ flag_management:
           if_ci_failed: success
     - name: cli
       paths:
-        - crates/ffai-kernels-cli/
+        - crates/wh-iron-cli/
       statuses:
         - type: project
           target: auto
@@ -70,12 +70,12 @@ flag_management:
 #   - facade re-exports (no logic)
 #   - kernel-body files (`#[kernel]` proc-macro consumes the body; the Rust
 #     body never executes, so line coverage is meaningless — correctness is
-#     validated end-to-end via `ffaik bench` numerical-equiv vs MLX)
+#     validated end-to-end via `iron bench` numerical-equiv vs MLX)
 #   - tests, benches, build scripts
 ignore:
-  - "crates/ffai-kernels/src/lib.rs"
-  - "crates/ffai-kernels/src/prelude.rs"
-  - "crates/ffai-kernels-std/src/kernels/**"
+  - "crates/wh-iron/src/lib.rs"
+  - "crates/wh-iron/src/prelude.rs"
+  - "crates/wh-iron-std/src/kernels/**"
   - "**/tests/**"
   - "**/benches/**"
   - "**/build.rs"

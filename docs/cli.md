@@ -1,31 +1,31 @@
 # CLI
 
-`ffaik` is the command-line driver for benchmarking, building, and inspecting kernels. Install it, or run it through `cargo` from a checkout.
+`iron` is the command-line driver for benchmarking, building, and inspecting kernels. Install it, or run it through `cargo` from a checkout.
 
 ```bash
-cargo install --path crates/ffai-kernels-cli      # installs the `ffaik` binary
+cargo install --path crates/wh-iron-cli      # installs the `iron` binary
 # or, from a checkout, without installing:
-cargo run -p ffai-kernels-cli -- <command> …
+cargo run -p wh-iron-cli -- <command> …
 ```
 
-`make bench` wraps `ffaik bench`; for the other subcommands run `ffaik` (or the `cargo run` form) directly.
+`make bench` wraps `iron bench`; for the other subcommands run `iron` (or the `cargo run` form) directly.
 
-## `ffaik bench` — benchmark FFAI Kernels kernels
+## `iron bench` — benchmark Iron Kernels kernels
 
-Benchmarks the FFAI Kernels kernels and reports wall-clock latency, throughput
+Benchmarks the Iron Kernels kernels and reports wall-clock latency, throughput
 (GB/s), compute throughput (GFLOP/s), and roofline figures. By default it
-benches **only the FFAI Kernels kernels**; pass `--mlx` to also run each kernel's
+benches **only the Iron Kernels kernels**; pass `--mlx` to also run each kernel's
 MLX reference for a side-by-side speed A/B plus an output-equivalence check.
 
 ```
-ffaik bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
+iron bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
            [--diff] [--baseline-ref <git-ref>]
 ```
 
 | Flag | Effect |
 |---|---|
 | `-f, --filter <substr>` | only run kernels whose name contains `<substr>` |
-| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `FFAI %` columns and the output-equivalence check. Off by default (the ffai-kernels kernels have superseded the references; correctness lives in `ffaik test`); roughly doubles bench time |
+| `--mlx` (alias `--reference`) | also run each kernel's MLX reference: the `Ref` / `Iron %` columns and the output-equivalence check. Off by default (the wh-iron kernels have superseded the references; correctness lives in `iron test`); roughly doubles bench time |
 | `-v` / `-vv` | `-v` adds the roofline (`%BW` / `%FLOP` / arithmetic intensity), occupancy/registers, and a bottleneck verdict (plus the reference latency when `--mlx` is set); `-vv` adds the GPU timing distribution (`p95` / `p99` / `cv%`) |
 | `-o, --json <file>` | also write results as JSON |
 | `--allow-dirty` | run on a dirty working tree (default: refuses, so numbers tie to a clean SHA) |
@@ -34,11 +34,11 @@ ffaik bench [-f <substr>] [--mlx] [-v|-vv] [-o <file.json>] [--allow-dirty]
 
 ### Metrics
 
-The default table shows, per kernel/dtype: `FFAI(µs)` (wall-clock latency, the
+The default table shows, per kernel/dtype: `Iron(µs)` (wall-clock latency, the
 `min` sample — the metric that makes "which precision is fastest" directly
-readable), `FFAI` (GB/s bandwidth), `GFLOP/s` (compute throughput, blank for
+readable), `Iron` (GB/s bandwidth), `GFLOP/s` (compute throughput, blank for
 memory-bound kernels), and `ok` (correctness). With `--mlx` it also fills the
-`Ref` (MLX GB/s) and `FFAI %` (FFAI-vs-MLX ratio) columns; without it those
+`Ref` (MLX GB/s) and `Iron %` (Iron-vs-MLX ratio) columns; without it those
 stay blank.
 
 `-v` adds the roofline view: `%BW` (achieved ÷ the device's peak DRAM bandwidth),
@@ -47,22 +47,22 @@ applicable, the SIMD pipe otherwise), `AI` (arithmetic intensity, FLOPs/byte),
 the estimated `occ%`/`regs`, and a combined `bottleneck` verdict
 (`memory-bound` / `compute-bound` / `occupancy-limited` / `register-limited` /
 `latency-bound`). Peak ceilings come from a per-device table
-(`crates/ffai-kernels/src/runner/device_specs.rs`); an unknown GPU leaves the roofline
+(`crates/wh-iron/src/runner/device_specs.rs`); an unknown GPU leaves the roofline
 columns blank rather than failing.
 
 GFLOP/s, latency, and the roofline figures only appear for kernels that declared
 a FLOP count (`#[bench(flops = …)]` or `BenchSetup::flops`) — matmul, attention,
 and convolution; memory-bound elementwise/reduction kernels leave them blank. The
-JSON (`-o`) is **additive**: it keeps the `ref`/`ffai` (GB/s) keys baseline diffing
+JSON (`-o`) is **additive**: it keeps the `ref`/`iron` (GB/s) keys baseline diffing
 consumes and adds `latency_us`, `gflops`, `pct_peak_bw`, `pct_peak_flops`, and
 `arith_intensity`.
 
-## `ffaik build` — compile kernels to MSL
+## `iron build` — compile kernels to MSL
 
 Compiles every kernel and reports errors; with `--emit`, writes artifacts.
 
 ```
-ffaik build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
+iron build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
            [--emit msl,metallib,swift,ir,all] [-o <dir>] [--sdk <sdk>] [-t]
 ```
 
@@ -76,7 +76,7 @@ ffaik build [-f <substr>] [--dtypes f32,f16,bf16] [-v]
 | `--sdk <sdk>` | `xcrun` SDK for the Metal toolchain (default: `macosx`) |
 | `-t, --time-passes` | run the pass pipeline 25× per kernel, print per-pass median wall time instead of emitting |
 
-Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `ffaik build --emit all -o /tmp/ffai-smoke`.
+Codegen smoke check — emit everything and confirm `xcrun metal` accepts it: `iron build --emit all -o /tmp/iron-smoke`.
 
 The output layout matches a SwiftPM `Sources/<Target>/` convention so `--out` can point directly at a target directory:
 
@@ -84,13 +84,13 @@ The output layout matches a SwiftPM `Sources/<Target>/` convention so `--out` ca
 <out>/Resources/kernels/<name>.metal
 <out>/Resources/kernels.metallib
 <out>/Resources/manifest.json
-<out>/Generated/FFAIKernels.swift
+<out>/Generated/IronKernels.swift
 ```
 
-## `ffaik inspect` — IR and MSL for one kernel
+## `iron inspect` — IR and MSL for one kernel
 
 ```
-ffaik inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
+iron inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
              [--pass <name>] [--dtype <f32|f16|bf16|i32|u32>] [-o <dir>]
 ```
 
@@ -106,14 +106,14 @@ ffaik inspect [<kernel>] [--filter <substr>] [--all] [--ir] [--stats]
 
 Omit the kernel name to list every registered kernel. See [Developing → debugging a kernel](developing.md#debugging-a-kernel).
 
-## `ffaik device` — GPU info
+## `iron device` — GPU info
 
 Prints the Metal device name, Metal version, Apple GPU family, and the supported feature flags (native `bfloat`, simdgroup matrix, etc.). Add `--json` for machine-readable output.
 
-## `ffaik snap` — save a perf regression baseline
+## `iron snap` — save a perf regression baseline
 
 ```
-ffaik snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
+iron snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
 ```
 
 | Flag | Effect |
@@ -123,10 +123,10 @@ ffaik snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
 | `--note <text>` | attach a note to the snapshot |
 | `-f, --filter <substr>` | only include kernels whose name contains `<substr>` |
 
-## `ffaik diff` — compare against a baseline
+## `iron diff` — compare against a baseline
 
 ```
-ffaik diff <baseline> [<current>] [-f <substr>] [--threshold <pct>]
+iron diff <baseline> [<current>] [-f <substr>] [--threshold <pct>]
           [--sort name|delta|pct] [--only-regressions] [--only-improvements]
 ```
 

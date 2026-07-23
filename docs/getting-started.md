@@ -1,24 +1,24 @@
 # Getting started
 
-Get a FFAI Kernels checkout building, tested, and emitting a kernel.
+Get a Iron Kernels checkout building, tested, and emitting a kernel.
 
 ## Prerequisites
 
 - **Rust nightly.** The workspace is `edition = 2024` and uses unstable `rustfmt` features; the toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the right nightly automatically on first build.
-- **macOS + Metal** — only needed to *run* kernels on the GPU (`ffaik bench`, GPU correctness tests). The DSL, codegen passes, and MSL emission build and test on any platform; non-Mac CI exercises everything except GPU dispatch.
+- **macOS + Metal** — only needed to *run* kernels on the GPU (`iron bench`, GPU correctness tests). The DSL, codegen passes, and MSL emission build and test on any platform; non-Mac CI exercises everything except GPU dispatch.
 - **Xcode command-line tools** (`xcrun metal`) on macOS — the codegen smoke step compiles emitted MSL with the Metal toolchain.
 
 ## Install from source
 
-If you want to build and install the `ffaik` CLI from source rather than using
+If you want to build and install the `iron` CLI from source rather than using
 the release binary:
 
 ```bash
 # From a local clone (recommended for contributors):
-cargo install --path crates/ffai-kernels-cli
+cargo install --path crates/wh-iron-cli
 
 # Directly from the repository without cloning:
-cargo install --git https://github.com/thewafflehaus/ffai-kernels ffai-kernels-cli
+cargo install --git https://github.com/thewafflehaus/iron wh-iron-cli
 ```
 
 Requires Rust nightly — the toolchain is pinned in `rust-toolchain.toml` and
@@ -27,8 +27,8 @@ installed automatically by `rustup` on first build.
 ## Clone and set up
 
 ```bash
-git clone git@github.com:thewafflehaus/ffai-kernels.git
-cd ffai-kernels
+git clone git@github.com:thewafflehaus/iron.git
+cd wh-iron
 ./scripts/setup-dev.sh
 ```
 
@@ -41,7 +41,7 @@ make build      # debug build of the whole workspace
 make test       # workspace tests — codegen, runtime, GPU correctness (GPU on a Mac)
 ```
 
-`make` is the canonical entry point — it centralises flags and always passes `--workspace`. See [Developing](developing.md) for the full dev loop and [the CLI reference](cli.md) for the `ffaik` binary.
+`make` is the canonical entry point — it centralises flags and always passes `--workspace`. See [Developing](developing.md) for the full dev loop and [the CLI reference](cli.md) for the `iron` binary.
 
 ## Crate layout
 
@@ -49,22 +49,22 @@ The workspace is seven crates:
 
 | Crate | Description |
 |---|---|
-| [`ffai-kernels-core`](../crates/ffai-kernels-core/README.md) | IR types, `DType`, `Shape` |
-| [`ffai-kernels-macros`](../crates/ffai-kernels-macros/README.md) | the `#[kernel]` proc-macro + body parser |
-| [`ffai-kernels-codegen`](../crates/ffai-kernels-codegen/README.md) | MSL lowering + optimization passes |
-| [`ffai-kernels-runtime`](../crates/ffai-kernels-runtime/README.md) | Metal dispatch, PSO cache |
-| [`ffai-kernels`](../crates/ffai-kernels/README.md) | facade re-exporting all crates |
-| [`ffai-kernels-std`](../crates/ffai-kernels-std/README.md) | kernel stdlib, op files, bench types |
-| [`ffai-kernels-cli`](../crates/ffai-kernels-cli/README.md) | the `ffaik` CLI binary |
+| [`wh-iron-core`](../crates/wh-iron-core/README.md) | IR types, `DType`, `Shape` |
+| [`wh-iron-macros`](../crates/wh-iron-macros/README.md) | the `#[kernel]` proc-macro + body parser |
+| [`wh-iron-codegen`](../crates/wh-iron-codegen/README.md) | MSL lowering + optimization passes |
+| [`wh-iron-runtime`](../crates/wh-iron-runtime/README.md) | Metal dispatch, PSO cache |
+| [`wh-iron`](../crates/wh-iron/README.md) | facade re-exporting all crates |
+| [`wh-iron-std`](../crates/wh-iron-std/README.md) | kernel stdlib, op files, bench types |
+| [`wh-iron-cli`](../crates/wh-iron-cli/README.md) | the `iron` CLI binary |
 
-The compile pipeline: `#[kernel] fn` → `ffai-kernels-macros` parses the body into **FFAI Kernels IR** → `ffai-kernels-codegen` runs the optimization passes and emits **MSL** → `ffai-kernels-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron Kernels IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
 
 ## Your first kernel
 
-A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into FFAI Kernels IR; the codegen lowers it to Metal Shading Language.
+A kernel is a Rust function annotated with `#[kernel]`. The proc-macro parses the body into Iron Kernels IR; the codegen lowers it to Metal Shading Language.
 
 ```rust
-use ffai-kernels::prelude::*;
+use wh-iron::prelude::*;
 
 #[kernel]
 fn vector_add(a: Tensor<f32>, b: Tensor<f32>, c: Tensor<f32>) {
@@ -97,12 +97,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Inspect the generated MSL without running anything:
 
 ```rust
-use ffai-kernels::codegen::msl::MslGenerator;
+use wh-iron::codegen::msl::MslGenerator;
 let msl = MslGenerator::default().generate(&vector_add::kernel_ir())?;
 println!("{msl}");
 ```
 
-or from the CLI: `ffaik inspect vector_add`.
+or from the CLI: `iron inspect vector_add`.
 
 ## Next steps
 

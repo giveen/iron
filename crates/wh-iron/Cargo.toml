@@ -1,0 +1,45 @@
+[package]
+name = "wh-iron"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Rust DSL for writing fast and stable GPU kernels across all platforms — write once, run fast on Apple Silicon, NVIDIA, AMD and Vulkan supporteddevices"
+keywords = ["metal", "gpu", "apple-silicon", "cuda", "hip", "amd", "vulkan", "dsl", "shader"]
+categories = ["compilers", "hardware-support"]
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# CUDA / NVIDIA device runtime (`CudaDevice` and friends). Forwards to
+# wh-iron-runtime/cuda so downstream iron projects only name the facade.
+cuda = ["wh-iron-runtime/cuda"]
+# HIP / ROCm device runtime (`HipDevice` and friends). Forwards to
+# wh-iron-runtime/hip so downstream iron projects only name the facade.
+hip = ["wh-iron-runtime/hip"]
+# Vulkan device runtime (`VulkanDevice` and friends). Forwards to
+# wh-iron-runtime/vulkan so downstream iron projects only name the facade.
+vulkan = ["wh-iron-runtime/vulkan"]
+
+[dependencies]
+wh-iron-core.workspace = true
+wh-iron-macros.workspace = true
+wh-iron-codegen.workspace = true
+wh-iron-runtime.workspace = true
+inventory.workspace = true
+serde.workspace = true
+bytemuck.workspace = true
+rayon.workspace = true
+regex.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-metal.workspace = true
+objc2-foundation.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true

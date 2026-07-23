@@ -1,22 +1,22 @@
 #!/usr/bin/env sh
-# install.sh — download and install the latest ffaik release binary.
+# install.sh — download and install the latest iron release binary.
 #
 # Usage:
-#   curl -fsSL https://github.com/thewafflehaus/ffai-kernels/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/thewafflehaus/iron/releases/latest/download/install.sh | sh
 #
 # By default installs to /usr/local/bin if writable, else ~/.local/bin.
-# Override with FFAI_INSTALL_DIR:
-#   FFAI_INSTALL_DIR=~/.cargo/bin curl -fsSL ... | sh
+# Override with IRON_INSTALL_DIR:
+#   IRON_INSTALL_DIR=~/.cargo/bin curl -fsSL ... | sh
 set -eu
 
-REPO="thewafflehaus/ffai-kernels"
-BINARY="ffaik"
-ASSET="ffaik-aarch64-apple-darwin.tar.gz"
+REPO="thewafflehaus/iron"
+BINARY="iron"
+ASSET="iron-aarch64-apple-darwin.tar.gz"
 
 # ── Detect install directory ──────────────────────────────────────────────────
 
-if [ -n "${FFAI_INSTALL_DIR:-}" ]; then
-    INSTALL_DIR="$FFAI_INSTALL_DIR"
+if [ -n "${IRON_INSTALL_DIR:-}" ]; then
+    INSTALL_DIR="$IRON_INSTALL_DIR"
 elif [ -w /usr/local/bin ]; then
     INSTALL_DIR="/usr/local/bin"
 else
@@ -38,7 +38,7 @@ if [ -z "$TAG" ]; then
     exit 1
 fi
 
-echo "Installing ffaik ${TAG}..."
+echo "Installing iron ${TAG}..."
 
 # ── Download and extract ──────────────────────────────────────────────────────
 
@@ -59,13 +59,13 @@ elif command -v sudo >/dev/null 2>&1; then
     echo "Requesting sudo to write to $INSTALL_DIR..."
     sudo mv "$TMP/$BINARY" "$INSTALL_DIR/$BINARY"
 else
-    echo "error: cannot write to $INSTALL_DIR — set FFAI_INSTALL_DIR to a writable path." >&2
+    echo "error: cannot write to $INSTALL_DIR — set IRON_INSTALL_DIR to a writable path." >&2
     exit 1
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
-echo "Installed ffaik ${TAG} to ${INSTALL_DIR}/${BINARY}"
+echo "Installed iron ${TAG} to ${INSTALL_DIR}/${BINARY}"
 
 # Warn if the install dir isn't on PATH.
 case ":${PATH}:" in

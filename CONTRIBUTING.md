@@ -1,6 +1,6 @@
-# Contributing to FFAI Kernels
+# Contributing to Iron Kernels
 
-Thanks for your interest. FFAI Kernels is a focused project — these guidelines keep contributions coherent and the reviewer queue sane.
+Thanks for your interest. Iron Kernels is a focused project — these guidelines keep contributions coherent and the reviewer queue sane.
 
 **TL;DR:**
 - Read the [docs](docs/README.md) before you write code — especially the kernel-authoring hazards in [`developing.md`](docs/developing.md).
@@ -36,7 +36,7 @@ The [`docs/`](docs/README.md) tree is the real reference. At minimum:
 - [Getting started](docs/getting-started.md) — toolchain, build, first kernel.
 - [Developing](docs/developing.md) — repo layout, dev loop, branching, commits, and the **⚠️ kernel-authoring hazards**. Read the hazard sections before writing a kernel — one of them is "a wrong dispatch can freeze your machine."
 - [Testing](docs/testing.md) — the test layers, what runs in CI, how to write a test, and the gaps that let bugs through silently.
-- [CLI](docs/cli.md) and [Publishing](docs/publishing.md) for the `ffaik` binary and the release flow.
+- [CLI](docs/cli.md) and [Publishing](docs/publishing.md) for the `iron` binary and the release flow.
 
 ## What a good PR looks like
 
@@ -60,7 +60,7 @@ The [`docs/`](docs/README.md) tree is the real reference. At minimum:
 
 ## Dependency policy
 
-FFAI Kernels keeps its dependency tree small on purpose. Every external crate is a potential supply-chain attack vector — a compromised or malicious publish can execute arbitrary code during your build or at runtime. Before adding a dependency, ask:
+Iron Kernels keeps its dependency tree small on purpose. Every external crate is a potential supply-chain attack vector — a compromised or malicious publish can execute arbitrary code during your build or at runtime. Before adding a dependency, ask:
 
 1. **Can std do it?** `std::sync::Mutex`, `std::collections::HashMap`, manual `Display`/`Error` impls, and raw ANSI escape codes replace a surprising number of popular crates with zero cost.
 2. **How large is the transitive tree?** Run `cargo tree -p <crate>` and count what comes along for the ride. A crate that adds five transitive deps for a two-line abstraction is usually not worth it.

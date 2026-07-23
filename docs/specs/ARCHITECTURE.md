@@ -2,10 +2,10 @@
 Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
 SPDX-License-Identifier: Apache-2.0
 -->
-# FFAI Kernels Architecture
+# Iron Kernels Architecture
 
-How a `#[kernel]` becomes a compiled GPU shader, and how `ffaik bench` / `ffaik
-test` / `ffaik build` run and measure it today. Companion docs:
+How a `#[kernel]` becomes a compiled GPU shader, and how `iron bench` / `iron
+test` / `iron build` run and measure it today. Companion docs:
 [`TOOLCHAIN_DESIGN.md`](TOOLCHAIN_DESIGN.md) (the `#[kernel]` /
 `#[kernel(variants(...))]` / `#[bench]` / `#[test_kernel]` macro surface),
 [`BENCH_METRICS_SPEC.md`](BENCH_METRICS_SPEC.md) (metric definitions),
@@ -16,8 +16,8 @@ restructure roadmap), the backend specs ([`CUDA`](CUDA_BACKEND_SPEC.md) /
 [`developing.md`](../developing.md) (kernel-authoring hazards).
 
 > **Two things drive the current shape of the runtime:**
-> 1. **The runner is a subprocess.** `ffaik` spawns a generated `__ffai_runner`
->    binary (linked against the project's `ffai-kernels-std`, so its kernel
+> 1. **The runner is a subprocess.** `iron` spawns a generated `__iron_runner`
+>    binary (linked against the project's `wh-iron-std`, so its kernel
 >    inventory is populated) and streams results back as `ProtocolMessage`
 >    JSON lines — see [Subprocess execution](#subprocess-execution).
 > 2. **Codegen is multi-backend.** IR lowers through a `CodegenBackend` to
@@ -29,13 +29,13 @@ restructure roadmap), the backend specs ([`CUDA`](CUDA_BACKEND_SPEC.md) /
 
 ```mermaid
 flowchart TD
-    macros["ffai-kernels-macros<br/>#[kernel] · variants · #[bench] · #[test_kernel]"]
-    core["ffai-kernels-core<br/>IR + wire protocol<br/>(no GPU)"]
-    codegen["ffai-kernels-codegen<br/>passes + backends<br/>(MSL · CUDA · HIP · SPIR-V)"]
-    runtime["ffai-kernels-runtime<br/>device dispatch<br/>(Metal · CUDA · HIP · Vulkan)"]
-    facade["ffai-kernels (facade)<br/>harness/ + runner/"]
-    std["ffai-kernels-std<br/>kernel stdlib<br/>(mlx · ffai · convolution · quant)"]
-    cli["ffai-kernels-cli<br/>tile binary (thin)"]
+    macros["wh-iron-macros<br/>#[kernel] · variants · #[bench] · #[test_kernel]"]
+    core["wh-iron-core<br/>IR + wire protocol<br/>(no GPU)"]
+    codegen["wh-iron-codegen<br/>passes + backends<br/>(MSL · CUDA · HIP · SPIR-V)"]
+    runtime["wh-iron-runtime<br/>device dispatch<br/>(Metal · CUDA · HIP · Vulkan)"]
+    facade["wh-iron (facade)<br/>harness/ + runner/"]
+    std["wh-iron-std<br/>kernel stdlib<br/>(mlx · iron · convolution · quant)"]
+    cli["wh-iron-cli<br/>tile binary (thin)"]
 
     macros --> core
     codegen --> core
@@ -52,19 +52,19 @@ flowchart TD
 
 | Crate | Responsibility |
 |---|---|
-| `ffai-kernels-core` | IR (`Op`, `Kernel`) + the `protocol` wire types (`ProtocolMessage`, `ProfileInfo`). Pure — no GPU, no tooling deps. |
-| `ffai-kernels-macros` | `#[kernel]` (lowers a DSL fn to IR) + `#[kernel(variants(...))]` (compile-time specialisation — stamps one kernel per tuple of int/type/float params); `#[bench]` / `#[test_kernel]` (register a setup callback via `inventory`). |
-| `ffai-kernels-codegen` | Optimization passes (const-fold, vectorize, unroll, fusion, DCE, …) + the `CodegenBackend` seam: `msl/` (Metal, default) and the `cuda/` / `hip/` / `spirv/` generators. `backend.rs` holds the `Target` enum, `TargetProfile`, and `MmaStrategy`. |
-| `ffai-kernels-runtime` | Per-backend device, buffers, PSO/module cache, dispatch + timing. `device/metal_device.rs` is the default; `device/{cuda,hip,vulkan}/` are **feature-gated** (`--features cuda\|hip\|vulkan`). |
-| `ffai-kernels` (facade) | Re-exports the above; hosts `harness/` (the kernel/bench/test **registries**) and `runner/` (the `__ffai_runner` engine: `RunnerHarness`, `GpuRunner`, per-backend dispatch, arg parsing, protocol emit, profiling, device specs). |
-| `ffai-kernels-std` | The kernel standard library. Modules: `mlx/` (kernels with an upstream metal reference), `ffai/` (model-specific), `convolution/` (consolidated 1D/2D/3D/depthwise/winograd + `steel_conv/`), `quant/` (the `codec` + `format` + `gguf` precision layer), plus `probe/` and `utils`. Every `#[kernel]`/`#[bench]`/`#[test_kernel]` lives here. |
-| `ffai-kernels-cli` | The `ffaik` binary: config, command dispatch, result rendering. Thin — it spawns the runner subprocess rather than doing GPU work itself. |
+| `wh-iron-core` | IR (`Op`, `Kernel`) + the `protocol` wire types (`ProtocolMessage`, `ProfileInfo`). Pure — no GPU, no tooling deps. |
+| `wh-iron-macros` | `#[kernel]` (lowers a DSL fn to IR) + `#[kernel(variants(...))]` (compile-time specialisation — stamps one kernel per tuple of int/type/float params); `#[bench]` / `#[test_kernel]` (register a setup callback via `inventory`). |
+| `wh-iron-codegen` | Optimization passes (const-fold, vectorize, unroll, fusion, DCE, …) + the `CodegenBackend` seam: `msl/` (Metal, default) and the `cuda/` / `hip/` / `spirv/` generators. `backend.rs` holds the `Target` enum, `TargetProfile`, and `MmaStrategy`. |
+| `wh-iron-runtime` | Per-backend device, buffers, PSO/module cache, dispatch + timing. `device/metal_device.rs` is the default; `device/{cuda,hip,vulkan}/` are **feature-gated** (`--features cuda\|hip\|vulkan`). |
+| `wh-iron` (facade) | Re-exports the above; hosts `harness/` (the kernel/bench/test **registries**) and `runner/` (the `__iron_runner` engine: `RunnerHarness`, `GpuRunner`, per-backend dispatch, arg parsing, protocol emit, profiling, device specs). |
+| `wh-iron-std` | The kernel standard library. Modules: `mlx/` (kernels with an upstream metal reference), `iron/` (model-specific), `convolution/` (consolidated 1D/2D/3D/depthwise/winograd + `steel_conv/`), `quant/` (the `codec` + `format` + `gguf` precision layer), plus `probe/` and `utils`. Every `#[kernel]`/`#[bench]`/`#[test_kernel]` lives here. |
+| `wh-iron-cli` | The `iron` binary: config, command dispatch, result rendering. Thin — it spawns the runner subprocess rather than doing GPU work itself. |
 
 ## From source to shader
 
 ```mermaid
 flowchart LR
-    K["#[kernel]<br/>fn ffai_exp&lt;T&gt;(..)"] --> IR["IR<br/>(Op variants)"]
+    K["#[kernel]<br/>fn iron_exp&lt;T&gt;(..)"] --> IR["IR<br/>(Op variants)"]
     V["#[kernel(variants(...))]"] -. "stamps N kernels" .-> IR
     IR --> Passes["codegen passes<br/>const-fold · vectorize · unroll · FMA · DCE · …"]
     Passes --> Backend{CodegenBackend<br/>Target}
@@ -86,21 +86,21 @@ function that register a **setup callback** (`BenchSetup` / `TestSetup`) into an
 
 ## Command dispatch
 
-Every subcommand is a struct implementing the `FFAICommand` trait
+Every subcommand is a struct implementing the `IronCommand` trait
 (`cmd/mod.rs`); `main.rs` parses args, builds a `Harness` (the loaded
-`FFAIConfig`), and dispatches:
+`IronConfig`), and dispatches:
 
 ```mermaid
 flowchart TD
-    main["main.rs<br/>parse args"] --> cfg["ConfigLoader<br/>defaults → ffai.toml → FFAI_* env → CLI args"]
-    cfg --> harness["Harness (owns FFAIConfig)"]
-    harness --> cmd{FFAICommand}
+    main["main.rs<br/>parse args"] --> cfg["ConfigLoader<br/>defaults → iron.toml → IRON_* env → CLI args"]
+    cfg --> harness["Harness (owns IronConfig)"]
+    harness --> cmd{IronCommand}
     cmd --> bench["bench"]
     cmd --> test["test"]
     cmd --> build["build (+ --emit)"]
     cmd --> inspect["inspect"]
     cmd --> other["device · snap · diff · clean · config · update · init<br/>(pure CPU / IO — stay in-process)"]
-    bench --> pr["ProjectRunner<br/>spawn __ffai_runner"]
+    bench --> pr["ProjectRunner<br/>spawn __iron_runner"]
     test --> pr
     build --> pr
     inspect --> pr
@@ -112,9 +112,9 @@ spawns the runner subprocess. `device` (GPU query), `snap` (save baseline),
 resolved config), `update` (self-update), and `init` (scaffold a new project)
 are pure CPU / IO and run directly.
 
-> **`emit` is a `build` flag, not a command.** `ffaik build --emit
+> **`emit` is a `build` flag, not a command.** `iron build --emit
 > msl|metallib|swift|ir|all --out <dir>` writes per-kernel `.metal`, the
-> compiled `kernels.metallib`, the `FFAIKernels.swift` bindings, and/or the
+> compiled `kernels.metallib`, the `IronKernels.swift` bindings, and/or the
 > `manifest.json` IR descriptor. `build` / `inspect` always emit **MSL** (the
 > `--backend` flag below applies only to `bench` / `test`).
 
@@ -123,44 +123,44 @@ are pure CPU / IO and run directly.
 Registration deliberately spans three crates, and the split isn't obvious from
 the call sites:
 
-- **`ffai-kernels-core`** re-exports the `inventory` crate, so the macro-expanded
+- **`wh-iron-core`** re-exports the `inventory` crate, so the macro-expanded
   `inventory::submit!` calls have a single canonical path to submit to.
-- **`ffai-kernels-codegen`** owns `KernelEntry` + `all_kernels()`
+- **`wh-iron-codegen`** owns `KernelEntry` + `all_kernels()`
   (`src/kernel_registry.rs`) — placed next to `KernelInlinePass`, its only
   consumer (the inliner needs the full kernel set to resolve cross-kernel
   primitive calls).
-- **`ffai-kernels` (facade)** holds the bench/test registries in
+- **`wh-iron` (facade)** holds the bench/test registries in
   `harness/registry.rs` (`all_benches` / `all_tests`), consumed by the runner.
 
 The load-bearing detail: `inventory` statics live in a linker section and are
-**garbage-collected if nothing references the library**. The `__ffai_runner`
-bin in **`ffai-kernels-std`** (`bin/runner.rs`) exists largely to do
-`extern crate ffai_kernels_std;` — that one line forces the linker to keep every
+**garbage-collected if nothing references the library**. The `__iron_runner`
+bin in **`wh-iron-std`** (`bin/runner.rs`) exists largely to do
+`extern crate wh_iron_std;` — that one line forces the linker to keep every
 `submit!` static, so the registries are non-empty inside the child process.
-`ffaik init` scaffolds a per-project copy of this bin for downstream projects.
+`iron init` scaffolds a per-project copy of this bin for downstream projects.
 Deleting the `extern crate` line as "dead code" silently empties the registries
 — it is intentional, not cruft.
 
 ## Subprocess execution
 
-The `ffaik` CLI does **no GPU work itself**. `ProjectRunner` spawns
-`__ffai_runner` — a binary linked against the project's `ffai-kernels-std`, so the
+The `iron` CLI does **no GPU work itself**. `ProjectRunner` spawns
+`__iron_runner` — a binary linked against the project's `wh-iron-std`, so the
 `#[kernel]`/`#[bench]`/`#[test_kernel]` `inventory` is populated inside the child
 — and streams its stdout, parsing each line as a `ProtocolMessage`.
 
 ```mermaid
 flowchart LR
-    cli["tile CLI<br/>(thin protocol parser)"] -- "spawn + args" --> proc["__ffai_runner<br/>RunnerHarness + GpuRunner + inventory"]
+    cli["tile CLI<br/>(thin protocol parser)"] -- "spawn + args" --> proc["__iron_runner<br/>RunnerHarness + GpuRunner + inventory"]
     proc -- "ProtocolMessage JSON lines (stdout)" --> cli
 ```
 
 | Piece | Where | Purpose |
 |---|---|---|
-| `ProtocolMessage` (+ `runner_version`) | `ffai-kernels-core::protocol` | Versioned JSON-line wire format (CLI ↔ runner). |
-| `RunnerArgs` | `ffai-kernels::runner::args` | Subprocess CLI arg parsing (`from_env_args`), incl. `--backend`. |
-| `RunnerHarness` | `ffai-kernels::runner::harness` | Orchestrates bench / test / build / inspect, emitting protocol messages. |
-| `runner::backend` | `ffai-kernels::runner::backend` | Routes `--backend cuda\|hip\|vulkan` through the matching feature-gated device. |
-| `ProjectRunner` | `ffai-kernels-cli::project_runner` | Spawns `__ffai_runner`, streams + parses its stdout. |
+| `ProtocolMessage` (+ `runner_version`) | `wh-iron-core::protocol` | Versioned JSON-line wire format (CLI ↔ runner). |
+| `RunnerArgs` | `wh-iron::runner::args` | Subprocess CLI arg parsing (`from_env_args`), incl. `--backend`. |
+| `RunnerHarness` | `wh-iron::runner::harness` | Orchestrates bench / test / build / inspect, emitting protocol messages. |
+| `runner::backend` | `wh-iron::runner::backend` | Routes `--backend cuda\|hip\|vulkan` through the matching feature-gated device. |
+| `ProjectRunner` | `wh-iron-cli::project_runner` | Spawns `__iron_runner`, streams + parses its stdout. |
 
 ## Multi-backend codegen
 
@@ -173,9 +173,9 @@ subgroup) and the **`MmaStrategy`** (Metal `simdgroup_matrix` 8×8, CUDA/CDNA/RD
 tensor-core paths, Vulkan `VK_KHR_cooperative_matrix`).
 
 - **Codegen** (emit) supports all four targets; `build`/`inspect` emit MSL.
-- **Execution** is Metal by default. `ffaik bench|test --backend cuda|hip|vulkan`
+- **Execution** is Metal by default. `iron bench|test --backend cuda|hip|vulkan`
   routes through the feature-gated `CudaDevice` / `HipDevice` / `VulkanDevice`
-  in `ffai-kernels-runtime`. These are validated by GPU-vs-GPU reference corpora
+  in `wh-iron-runtime`. These are validated by GPU-vs-GPU reference corpora
   (`tests/{cuda,hip}_kernel_corpus.rs`, `tests/vulkan_sdpa_multi.rs`) — the same
   `#[test_kernel]` inventory run on a non-Metal device and diffed against Metal.
 
@@ -187,7 +187,7 @@ See the backend specs ([`CUDA`](CUDA_BACKEND_SPEC.md) /
 
 ```mermaid
 flowchart TD
-    RH["RunnerHarness (in __ffai_runner)"] --> loop["for each #[bench] × dtype (sequential)"]
+    RH["RunnerHarness (in __iron_runner)"] --> loop["for each #[bench] × dtype (sequential)"]
     loop --> emit["backend emit + compile (PSO/module cache)"]
     emit --> timed["⏱ GpuRunner.bench(warmup, iters)<br/>→ BenchStats (min/mean µs)"]
     timed --> dm["metrics from stats — to_gflops · estimate_profile ·<br/>classify_bottleneck · device_specs::lookup (CPU-only, AFTER timing)"]
@@ -197,7 +197,7 @@ flowchart TD
 
 The bench run loop is **sequential** — GPU dispatch + timing is serialized on
 the device, so running benches concurrently would corrupt timings. (The CPU-only
-work that *can* parallelize — `ffaik build` MSL emit, `ffaik test` oracles — uses
+work that *can* parallelize — `iron build` MSL emit, `iron test` oracles — uses
 `rayon`; the bench run does not.)
 
 **Timing isolation.** `GpuRunner.bench(…)` is the *only* timed region; it
@@ -209,7 +209,7 @@ metric computation **cannot skew** the measured kernel performance.
 
 ## Test runner
 
-`ffaik test` iterates the `#[test_kernel]` registry and dispatches each setup,
+`iron test` iterates the `#[test_kernel]` registry and dispatches each setup,
 comparing GPU output against the test's CPU oracle within its tolerance. The CPU
 oracle pass is `rayon`-parallel (order-preserving via `collect`); GPU dispatch of
 the survivors is sequential. Under `--backend`, the same inventory runs on the
@@ -217,7 +217,7 @@ selected device and is compared against the Metal reference.
 
 ## Kernel profiling
 
-The roofline / occupancy metrics shown under `ffaik bench -v` / `-vv`:
+The roofline / occupancy metrics shown under `iron bench -v` / `-vv`:
 
 ```mermaid
 flowchart LR

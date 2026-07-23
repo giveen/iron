@@ -1,0 +1,578 @@
+//! Copyright 2026 Eric Kryski (@ekryski) and Tom Turney (@TheTom)
+//! SPDX-License-Identifier: Apache-2.0
+//! Shared test/bench helpers for the MPP MoE grouped BGEMM family.
+//!
+//! Every MPP MoE kernel (`moe_mpp{,_bm8,_bm64}`, each a `variants(BITS=[2,4,8])`
+//! set) shares one ABI — `x, w, scales, biases, indices, x_rows, out` plus the four
+//! `{m_total, n_out, k_in, group_size}` constexprs — and the same math:
+//! per-row expert routing via `indices[t]`, dequant-then-grouped-matmul.
+//! Only the tile geometry (BM/BN/BK, SG count) differs per file; the int2/4/8
+//! weight bit-width is folded onto the `BITS` axis within each file. These
+//! helpers centralise the affine dequant oracles, the per-variant
+//! `TestSetup`, and the per-variant `BenchSetup` so each kernel file stays a
+//! thin shape-binding wrapper.
+
+use wh_iron::{
+    core::{DType, ir::Kernel},
+    test::*,
+};
+
+use crate::utils::{pack_f32, unpack_f32};
+
+fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+
+/// Pack a row of int2 codes into u32s (16 codes per u32, LSB-first).
+fn pack_int2_row(weights: &[u32]) -> Vec<u32> {
+    weights
+        .chunks_exact(16)
+        .map(|chunk| {
+            let mut packed = 0u32;
+            for (i, &q) in chunk.iter().enumerate() {
+                packed |= (q & 0x3) << (i * 2);
+            }
+            packed
+        })
+        .collect()
+}
+
+/// Per-row-`indices` int2 dequant-then-matmul reference (affine `s*q+b`).
+/// `weight_packed` stacks `[n_experts, n_out, k_in/16]` int2 codes.
+#[allow(clippy::too_many_arguments)]
+fn cpu_gather_qmm_int2_indexed(
+    x: &[f32],
+    weight_packed: &[u32],
+    scales: &[f32],
+    biases: &[f32],
+    indices: &[u32],
+    m_total: usize,
+    k_in: usize,
+    n_out: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    let weight_stride_m = k_in / 16;
+    let groups_per_row = k_in / group_size;
+    let mut out = vec![0.0f32; m_total * n_out];
+    for row in 0..m_total {
+        let expert = indices[row] as usize;
+        for n in 0..n_out {
+            let weight_row_base = expert * n_out * weight_stride_m + n * weight_stride_m;
+            let scale_row_base = expert * n_out * groups_per_row + n * groups_per_row;
+            let x_row_base = row * k_in;
+            let mut acc = 0.0f32;
+            for pack_idx in 0..(k_in / 16) {
+                let packed = weight_packed[weight_row_base + pack_idx];
+                let k_first = pack_idx * 16;
+                let g = k_first / group_size;
+                let scale = scales[scale_row_base + g];
+                let bias = biases[scale_row_base + g];
+                for bit in 0..16 {
+                    let q = ((packed >> (bit * 2)) & 0x3) as f32;
+                    acc += (q * scale + bias) * x[x_row_base + k_first + bit];
+                }
+            }
+            out[row * n_out + n] = acc;
+        }
+    }
+    out
+}
+
+/// Pack a row of int4 codes into u32s (8 nibbles per u32, LSB-first).
+fn pack_int4_row(weights: &[u32]) -> Vec<u32> {
+    weights
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut packed = 0u32;
+            for (i, &q) in chunk.iter().enumerate() {
+                packed |= (q & 0xf) << (i * 4);
+            }
+            packed
+        })
+        .collect()
+}
+
+/// Per-row-`indices` int4 dequant-then-matmul reference. `weight_packed`
+/// stacks `[n_experts, n_out, k_in/8]` int4 codes; `scales`/`biases` stack
+/// `[n_experts, n_out, k_in/group_size]`. Row `t`'s expert is `indices[t]`.
+#[allow(clippy::too_many_arguments)]
+fn cpu_gather_qmm_int4_indexed(
+    x: &[f32],
+    weight_packed: &[u32],
+    scales: &[f32],
+    biases: &[f32],
+    indices: &[u32],
+    m_total: usize,
+    k_in: usize,
+    n_out: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    let weight_stride_m = k_in / 8;
+    let groups_per_row = k_in / group_size;
+    let mut out = vec![0.0f32; m_total * n_out];
+    for row in 0..m_total {
+        let expert = indices[row] as usize;
+        for n in 0..n_out {
+            let weight_row_base = expert * n_out * weight_stride_m + n * weight_stride_m;
+            let scale_row_base = expert * n_out * groups_per_row + n * groups_per_row;
+            let x_row_base = row * k_in;
+            let mut acc = 0.0f32;
+            for pack_idx in 0..(k_in / 8) {
+                let packed = weight_packed[weight_row_base + pack_idx];
+                let k_first = pack_idx * 8;
+                let g = k_first / group_size;
+                let scale = scales[scale_row_base + g];
+                let bias = biases[scale_row_base + g];
+                for nib in 0..8 {
+                    let q = ((packed >> (nib * 4)) & 0xf) as f32;
+                    acc += (q * scale + bias) * x[x_row_base + k_first + nib];
+                }
+            }
+            out[row * n_out + n] = acc;
+        }
+    }
+    out
+}
+
+/// Pack a row of unsigned int8 codes into u32s (4 bytes per u32, LSB-first).
+fn pack_int8_row(weights: &[u32]) -> Vec<u32> {
+    weights
+        .chunks_exact(4)
+        .map(|chunk| {
+            let mut packed = 0u32;
+            for (i, &q) in chunk.iter().enumerate() {
+                packed |= (q & 0xff) << (i * 8);
+            }
+            packed
+        })
+        .collect()
+}
+
+/// Per-row-`indices` int8 dequant-then-matmul reference. `weight_packed`
+/// stacks `[n_experts, n_out, k_in/4]` int8 codes (4 bytes/u32, LSB-first);
+/// `scales`/`biases` stack `[n_experts, n_out, k_in/group_size]`. Row `t`'s
+/// expert is `indices[t]`. Byte extraction matches the kernel:
+/// `(packed >> (byte*8)) & 0xFF`.
+#[allow(clippy::too_many_arguments)]
+fn cpu_gather_qmm_int8_indexed(
+    x: &[f32],
+    weight_packed: &[u32],
+    scales: &[f32],
+    biases: &[f32],
+    indices: &[u32],
+    m_total: usize,
+    k_in: usize,
+    n_out: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    // int8: 4 bytes per u32 → weight row stride = k_in / 4 u32 words.
+    let weight_stride_m = k_in / 4;
+    let groups_per_row = k_in / group_size;
+    let mut out = vec![0.0f32; m_total * n_out];
+    for row in 0..m_total {
+        let expert = indices[row] as usize;
+        for n in 0..n_out {
+            let weight_row_base = expert * n_out * weight_stride_m + n * weight_stride_m;
+            let scale_row_base = expert * n_out * groups_per_row + n * groups_per_row;
+            let x_row_base = row * k_in;
+            let mut acc = 0.0f32;
+            for pack_idx in 0..(k_in / 4) {
+                let packed = weight_packed[weight_row_base + pack_idx];
+                let k_first = pack_idx * 4;
+                let g = k_first / group_size;
+                let scale = scales[scale_row_base + g];
+                let bias = biases[scale_row_base + g];
+                for byte in 0..4 {
+                    let q = ((packed >> (byte * 8)) & 0xff) as f32;
+                    acc += (q * scale + bias) * x[x_row_base + k_first + byte];
+                }
+            }
+            out[row * n_out + n] = acc;
+        }
+    }
+    out
+}
+
+/// Test shape for an int4 MMA/MPP variant. Dims chosen per the variant's
+/// tile contract (all clean multiples; no edge padding).
+pub struct MmaTestShape {
+    pub n_experts: usize,
+    pub m_total: usize,
+    pub n_out: usize,
+    pub k_in: usize,
+    pub group_size: usize,
+}
+
+/// Build a `TestSetup` for an int2 indexed-MMA/MPP kernel (affine oQ2).
+/// Same ABI/dispatch as [`int4_indexed_setup`]; weight packing is 16 codes/u32.
+/// Evenly spreads rows across `n_experts` (requires `m_total % n_experts == 0`).
+pub fn int2_indexed_setup(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, .. } = shape;
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+    int2_indexed_setup_with_indices(kernel, shape, bn, bm, tpg, dt, &indices)
+}
+
+/// Like [`int2_indexed_setup`] but with an explicit expert-sorted `indices`
+/// (length `m_total`). Use for multi-chunk / empty-expert coverage.
+pub fn int2_indexed_setup_with_indices(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+    indices: &[u32],
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+    assert_eq!(indices.len(), m_total);
+
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0x3;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int2_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    let expected = cpu_gather_qmm_int2_indexed(
+        &x,
+        &weight_packed,
+        &s,
+        &b,
+        indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+}
+
+/// Build a `TestSetup` for an int4 indexed-MMA/MPP kernel. `bn`/`bm` give the
+/// tile dims (grid `[n_out/bn, ceil(m_total/bm), 1]`), `tpg` the threadgroup
+/// width (lanes). Reduction mode for all.
+pub fn int4_indexed_setup(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+
+    // Per-row expert indices, sorted (post-permute layout).
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0xf;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int4_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    let expected = cpu_gather_qmm_int4_indexed(
+        &x,
+        &weight_packed,
+        &s,
+        &b,
+        &indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+}
+
+/// Like [`int4_indexed_setup`] but with a NON-identity `x_rows` mapping:
+/// `x` is the unpermuted token table and `x_rows[i]` points row `i` of the
+/// expert-sorted output at its source token (here: a reversal, so any
+/// indexing bug that survives the identity tests fails loudly). Exercises
+/// the gather-fusion contract the identity setups cannot.
+pub fn int4_indexed_setup_xrows_reversed(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+    let x_rows: Vec<u32> = (0..m_total as u32).rev().collect();
+
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0xf;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int4_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    // Oracle sees the EFFECTIVE per-row activations: row i reads x[x_rows[i]].
+    let mut x_eff = vec![0.0f32; m_total * k_in];
+    for (i, &src) in x_rows.iter().enumerate() {
+        let src = src as usize;
+        x_eff[i * k_in..(i + 1) * k_in].copy_from_slice(&x[src * k_in..(src + 1) * k_in]);
+    }
+    let expected = cpu_gather_qmm_int4_indexed(
+        &x_eff,
+        &weight_packed,
+        &s,
+        &b,
+        &indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec("x_rows", u32_bytes(&x_rows), DType::U32))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+}
+
+/// Build a `TestSetup` for an int8 indexed-MMA/MPP kernel. Same ABI and
+/// dispatch contract as [`int4_indexed_setup`]; the only difference is the
+/// weight packing (4 unsigned bytes per u32 vs 8 nibbles) and the matching
+/// int8 dequant oracle. `bn`/`bm` give the tile dims (grid `[n_out/bn,
+/// ceil(m_total/bm), 1]`), `tpg` the threadgroup width (lanes).
+pub fn int8_indexed_setup(
+    kernel: Kernel,
+    shape: MmaTestShape,
+    bn: u32,
+    bm: u32,
+    tpg: u32,
+    dt: DType,
+) -> TestSetup {
+    let MmaTestShape { n_experts, m_total, n_out, k_in, group_size } = shape;
+
+    // Per-row expert indices, sorted (post-permute layout).
+    let indices: Vec<u32> = (0..m_total).map(|r| (r / (m_total / n_experts)) as u32).collect();
+
+    // Unsigned byte codes 0..255 (int8 affine is unsigned-coded, like int4).
+    let mut weight_unpacked = vec![0u32; n_experts * n_out * k_in];
+    for (i, w) in weight_unpacked.iter_mut().enumerate() {
+        *w = ((i as u32) * 7 + 3) & 0xff;
+    }
+    let weight_packed: Vec<u32> =
+        weight_unpacked.chunks_exact(k_in).flat_map(pack_int8_row).collect();
+
+    let n_groups = k_in / group_size;
+    let scales_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| 0.005 + 0.001 * (i as f32 * 0.03).sin())
+        .collect();
+    let biases_f: Vec<f32> = (0..n_experts * n_out * n_groups)
+        .map(|i| -0.02 + 0.005 * (i as f32 * 0.07).cos())
+        .collect();
+    let x_f: Vec<f32> = (0..m_total * k_in).map(|i| 0.05 * (i as f32 * 0.013).sin()).collect();
+
+    let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+    let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+    let x = unpack_f32(&pack_f32(&x_f, dt), dt);
+    let expected = cpu_gather_qmm_int8_indexed(
+        &x,
+        &weight_packed,
+        &s,
+        &b,
+        &indices,
+        m_total,
+        k_in,
+        n_out,
+        group_size,
+    );
+
+    TestSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .input(TestBuffer::from_vec("x", pack_f32(&x_f, dt), dt))
+        .input(TestBuffer::from_vec("w", u32_bytes(&weight_packed), DType::U32))
+        .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+        .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+        .input(TestBuffer::from_vec("indices", u32_bytes(&indices), DType::U32))
+        .input(TestBuffer::from_vec(
+            "x_rows",
+            u32_bytes(&(0..m_total as u32).collect::<Vec<_>>()),
+            DType::U32,
+        ))
+        .input(TestBuffer::zeros("out", m_total * n_out, dt))
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+}
+
+/// Bench shape for an int4/int8 MMA/MPP variant. `bits` selects the packed
+/// word count (`k_in*bits/32` u32 per row).
+pub struct MmaBenchShape {
+    pub bits: u32,
+    pub bn: u32,
+    pub bm: u32,
+    pub tpg: u32,
+    pub m_total: usize,
+    pub n_out: usize,
+    pub k_in: usize,
+    pub n_experts: usize,
+    pub group_size: usize,
+}
+
+/// Build a `BenchSetup` for an indexed-MMA/MPP kernel. Production-ish shape;
+/// `bytes_moved` counts the full expert weight slab (dominant) + scales/biases
+/// + x + out.
+pub fn int4_mma_bench(kernel: Kernel, shape: MmaBenchShape, dt: DType) -> BenchSetup {
+    let MmaBenchShape { bits, bn, bm, tpg, m_total, n_out, k_in, n_experts, group_size } = shape;
+    let groups_per_row = k_in / group_size;
+    let words_per_row = k_in * bits as usize / 32;
+    let sz = dt.size_bytes();
+    let bytes = n_experts * n_out * words_per_row * 4
+        + 2 * n_experts * n_out * groups_per_row * sz
+        + m_total * k_in * sz
+        + m_total * n_out * sz;
+    BenchSetup::new(kernel)
+        .mode(KernelMode::Reduction)
+        .buffer(BenchBuffer::random("x", m_total * k_in, dt))
+        .buffer(BenchBuffer::random("w", n_experts * n_out * words_per_row, DType::U32))
+        .buffer(BenchBuffer::random("scales", n_experts * n_out * groups_per_row, dt))
+        .buffer(BenchBuffer::random("biases", n_experts * n_out * groups_per_row, dt))
+        .buffer(BenchBuffer::zeros("indices", m_total, DType::U32))
+        // Identity x_rows: pre-gathered X path (row i reads x[i, :]).
+        .buffer(BenchBuffer::zeros("x_rows", m_total, DType::U32))
+        .buffer(BenchBuffer::zeros("out", m_total * n_out, dt).output())
+        .constexpr("m_total", m_total as u32)
+        .constexpr("n_out", n_out as u32)
+        .constexpr("k_in", k_in as u32)
+        .constexpr("group_size", group_size as u32)
+        .with_shape_label(format!(
+            "M{m_total} N{n_out} K{k_in} E{n_experts} {}",
+            crate::utils::dtype_label(dt)
+        ))
+        .grid_3d(n_out as u32 / bn, (m_total as u32).div_ceil(bm), 1, [tpg, 1, 1])
+        .bytes_moved(bytes as u64)
+        // MoE gather_qmm indexed: 2 * m_total * n_out * k_in (dense-equivalent FLOPs)
+        .flops(2 * m_total as u64 * n_out as u64 * k_in as u64)
+}
+
+/// Zipf-ish per-expert row counts summing to `m_total` across `n_experts`,
+/// seeded so a given `(m_total, n_experts, seed)` triple is reproducible.
+/// Shared by the tile-plan GEMM isolated benches (BM=16 production default
+/// and the coop-core gather variant under evaluation against it) so both
+/// sides of a comparison see the IDENTICAL routing skew at a given shape -
+/// a fairness requirement for the isolated bench, not just a convenience.
+pub fn zipfish_counts(m_total: usize, n_experts: usize, seed: u64) -> Vec<usize> {
+    let mut weights: Vec<f64> = (0..n_experts)
+        .map(|e| {
+            let jitter = 1.0
+                + 0.4
+                    * (((e as u64).wrapping_mul(2654435761).wrapping_add(seed) % 1000) as f64
+                        / 1000.0
+                        - 0.5);
+            jitter / ((e + 1) as f64)
+        })
+        .collect();
+    let total_w: f64 = weights.iter().sum();
+    for w in &mut weights {
+        *w /= total_w;
+    }
+    let mut counts: Vec<usize> = weights.iter().map(|w| (w * m_total as f64) as usize).collect();
+    let assigned: usize = counts.iter().sum();
+    // Dump any rounding remainder onto the heaviest expert so
+    // `sum(counts) == m_total` exactly.
+    if assigned < m_total {
+        counts[0] += m_total - assigned;
+    } else if assigned > m_total {
+        let over = assigned - m_total;
+        counts[0] = counts[0].saturating_sub(over);
+    }
+    counts
+}

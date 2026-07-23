@@ -7,7 +7,7 @@
   "results": [
     {
       "metric": "GB/s",
-      "ffai": 77.802,
+      "iron": 77.802,
       "op": "affine",
       "ref": 75.776,
       "shape": "bits=3 gs=32 n_groups=4096 f32",
@@ -15,7 +15,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 24.124,
+      "iron": 24.124,
       "op": "affine",
       "ref": 36.749,
       "shape": "bits=3 gs=32 n_groups=4096 f16",
@@ -23,7 +23,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 24.05,
+      "iron": 24.05,
       "op": "affine",
       "ref": 25.955,
       "shape": "bits=3 gs=32 n_groups=4096 bf16",
@@ -31,7 +31,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 62.442,
+      "iron": 62.442,
       "op": "affine",
       "ref": 86.344,
       "shape": "bits=4 gs=64 n_groups=4096 f32",
@@ -39,7 +39,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 52.859,
+      "iron": 52.859,
       "op": "affine",
       "ref": 44.659,
       "shape": "bits=4 gs=64 n_groups=4096 f16",
@@ -47,7 +47,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 50.068,
+      "iron": 50.068,
       "op": "affine",
       "ref": 46.327,
       "shape": "bits=4 gs=64 n_groups=4096 bf16",
@@ -55,7 +55,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 41.559,
+      "iron": 41.559,
       "op": "affine",
       "ref": 77.452,
       "shape": "bits=5 gs=32 n_groups=4096 f32",
@@ -63,7 +63,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 32.4,
+      "iron": 32.4,
       "op": "affine",
       "ref": 40.05,
       "shape": "bits=5 gs=32 n_groups=4096 f16",
@@ -71,7 +71,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 25.295,
+      "iron": 25.295,
       "op": "affine",
       "ref": 22.528,
       "shape": "bits=5 gs=32 n_groups=4096 bf16",
@@ -79,7 +79,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 40.124,
+      "iron": 40.124,
       "op": "affine",
       "ref": 50.902,
       "shape": "bits=6 gs=32 n_groups=4096 f32",
@@ -87,7 +87,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 26.522,
+      "iron": 26.522,
       "op": "affine",
       "ref": 25.914,
       "shape": "bits=6 gs=32 n_groups=4096 f16",
@@ -95,7 +95,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 31.403,
+      "iron": 31.403,
       "op": "affine",
       "ref": 35.747,
       "shape": "bits=6 gs=32 n_groups=4096 bf16",
@@ -103,7 +103,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 75.16,
+      "iron": 75.16,
       "op": "affine",
       "ref": 68.458,
       "shape": "bits=8 gs=64 n_groups=4096 f32",
@@ -111,7 +111,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 77.692,
+      "iron": 77.692,
       "op": "affine",
       "ref": 35.096,
       "shape": "bits=8 gs=64 n_groups=4096 f16",
@@ -119,7 +119,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 57.344,
+      "iron": 57.344,
       "op": "affine",
       "ref": 39.809,
       "shape": "bits=8 gs=64 n_groups=4096 bf16",
@@ -127,7 +127,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 57.62,
+      "iron": 57.62,
       "op": "affine",
       "ref": 55.214,
       "shape": "bits=4 gs=64 n_groups=4096 f32",
@@ -135,7 +135,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 41.659,
+      "iron": 41.659,
       "op": "affine",
       "ref": 37.319,
       "shape": "bits=4 gs=64 n_groups=4096 f16",
@@ -143,7 +143,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 26.129,
+      "iron": 26.129,
       "op": "affine",
       "ref": 30.022,
       "shape": "bits=4 gs=64 n_groups=4096 bf16",
@@ -151,7 +151,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 107.479,
+      "iron": 107.479,
       "op": "affine",
       "ref": 79.614,
       "shape": "bits=8 gs=64 n_groups=4096 f32",
@@ -159,7 +159,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 34.53,
+      "iron": 34.53,
       "op": "affine",
       "ref": 28.844,
       "shape": "bits=8 gs=64 n_groups=4096 f16",
@@ -167,7 +167,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 30.439,
+      "iron": 30.439,
       "op": "affine",
       "ref": 40.393,
       "shape": "bits=8 gs=64 n_groups=4096 bf16",
@@ -175,7 +175,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 10.987,
+      "iron": 10.987,
       "op": "all_reduce",
       "ref": 10.231,
       "shape": "N=64M f32",
@@ -183,7 +183,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.281,
+      "iron": 5.281,
       "op": "all_reduce",
       "ref": 5.04,
       "shape": "N=64M f16",
@@ -191,7 +191,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.223,
+      "iron": 5.223,
       "op": "all_reduce",
       "ref": 4.919,
       "shape": "N=64M bf16",
@@ -199,7 +199,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 10.779,
+      "iron": 10.779,
       "op": "all_reduce",
       "ref": 10.418,
       "shape": "N=64M f32",
@@ -207,7 +207,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.28,
+      "iron": 5.28,
       "op": "all_reduce",
       "ref": 5.048,
       "shape": "N=64M f16",
@@ -215,7 +215,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.254,
+      "iron": 5.254,
       "op": "all_reduce",
       "ref": 5.014,
       "shape": "N=64M bf16",
@@ -223,7 +223,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 10.972,
+      "iron": 10.972,
       "op": "all_reduce",
       "ref": 10.648,
       "shape": "N=64M f32",
@@ -231,7 +231,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.247,
+      "iron": 5.247,
       "op": "all_reduce",
       "ref": 5.183,
       "shape": "N=64M f16",
@@ -239,7 +239,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.218,
+      "iron": 5.218,
       "op": "all_reduce",
       "ref": 4.8,
       "shape": "N=64M bf16",
@@ -247,7 +247,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 10.793,
+      "iron": 10.793,
       "op": "all_reduce",
       "ref": 10.783,
       "shape": "N=64M f32",
@@ -255,7 +255,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.239,
+      "iron": 5.239,
       "op": "all_reduce",
       "ref": 5.142,
       "shape": "N=64M f16",
@@ -263,7 +263,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.258,
+      "iron": 5.258,
       "op": "all_reduce",
       "ref": 4.798,
       "shape": "N=64M bf16",
@@ -271,7 +271,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 406.72,
+      "iron": 406.72,
       "op": "arange",
       "ref": 429.239,
       "shape": "N=64M f32",
@@ -279,7 +279,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 314.113,
+      "iron": 314.113,
       "op": "arange",
       "ref": 215.611,
       "shape": "N=64M f16",
@@ -287,7 +287,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 258.733,
+      "iron": 258.733,
       "op": "arange",
       "ref": 215.741,
       "shape": "N=64M bf16",
@@ -295,7 +295,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 14.01,
+      "iron": 14.01,
       "op": "arg_reduce",
       "ref": 1.576,
       "shape": "N=1048576 f32",
@@ -303,7 +303,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 376.458,
+      "iron": 376.458,
       "op": "binary",
       "ref": 364.371,
       "shape": "N=64M f32",
@@ -311,7 +311,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.322,
+      "iron": 369.322,
       "op": "binary",
       "ref": 354.059,
       "shape": "N=64M f16",
@@ -319,7 +319,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.384,
+      "iron": 370.384,
       "op": "binary",
       "ref": 348.316,
       "shape": "N=64M bf16",
@@ -327,7 +327,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.028,
+      "iron": 367.028,
       "op": "binary",
       "ref": 361.604,
       "shape": "N=64M f32",
@@ -335,7 +335,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.425,
+      "iron": 365.425,
       "op": "binary",
       "ref": 225.119,
       "shape": "N=64M f16",
@@ -343,7 +343,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 356.87,
+      "iron": 356.87,
       "op": "binary",
       "ref": 223.976,
       "shape": "N=64M bf16",
@@ -351,7 +351,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.991,
+      "iron": 364.991,
       "op": "binary",
       "ref": 370.256,
       "shape": "N=64M f32",
@@ -359,7 +359,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.799,
+      "iron": 366.799,
       "op": "binary",
       "ref": 351.47,
       "shape": "N=64M f16",
@@ -367,7 +367,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 358.06,
+      "iron": 358.06,
       "op": "binary",
       "ref": 351.011,
       "shape": "N=64M bf16",
@@ -375,7 +375,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 361.185,
+      "iron": 361.185,
       "op": "binary",
       "ref": 363.262,
       "shape": "N=64M f32",
@@ -383,7 +383,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 376.18,
+      "iron": 376.18,
       "op": "binary",
       "ref": 355.976,
       "shape": "N=64M f16",
@@ -391,7 +391,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.256,
+      "iron": 370.256,
       "op": "binary",
       "ref": 306.9,
       "shape": "N=64M bf16",
@@ -399,7 +399,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.55,
+      "iron": 365.55,
       "op": "binary",
       "ref": 364.605,
       "shape": "N=64M f32",
@@ -407,7 +407,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.763,
+      "iron": 364.763,
       "op": "binary",
       "ref": 350.514,
       "shape": "N=64M f16",
@@ -415,7 +415,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.191,
+      "iron": 365.191,
       "op": "binary",
       "ref": 342.939,
       "shape": "N=64M bf16",
@@ -423,7 +423,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 360.538,
+      "iron": 360.538,
       "op": "binary",
       "ref": 368.168,
       "shape": "N=64M f32",
@@ -431,7 +431,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.447,
+      "iron": 364.447,
       "op": "binary",
       "ref": 355.387,
       "shape": "N=64M f16",
@@ -439,7 +439,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.465,
+      "iron": 366.465,
       "op": "binary",
       "ref": 354.578,
       "shape": "N=64M bf16",
@@ -447,7 +447,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.688,
+      "iron": 365.688,
       "op": "binary",
       "ref": 364.063,
       "shape": "N=64M f32",
@@ -455,7 +455,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.764,
+      "iron": 362.764,
       "op": "binary",
       "ref": 345.947,
       "shape": "N=64M f16",
@@ -463,7 +463,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 360.814,
+      "iron": 360.814,
       "op": "binary",
       "ref": 351.957,
       "shape": "N=64M bf16",
@@ -471,7 +471,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.867,
+      "iron": 364.867,
       "op": "binary",
       "ref": 363.255,
       "shape": "N=64M f32",
@@ -479,7 +479,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.215,
+      "iron": 366.215,
       "op": "binary",
       "ref": 350.133,
       "shape": "N=64M f16",
@@ -487,7 +487,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.953,
+      "iron": 374.953,
       "op": "binary",
       "ref": 347.802,
       "shape": "N=64M bf16",
@@ -495,7 +495,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.462,
+      "iron": 370.462,
       "op": "binary",
       "ref": 362.024,
       "shape": "N=64M f32",
@@ -503,7 +503,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.799,
+      "iron": 366.799,
       "op": "binary",
       "ref": 349.74,
       "shape": "N=64M f16",
@@ -511,7 +511,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.52,
+      "iron": 369.52,
       "op": "binary",
       "ref": 355.387,
       "shape": "N=64M bf16",
@@ -519,7 +519,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 373.851,
+      "iron": 373.851,
       "op": "binary",
       "ref": 364.063,
       "shape": "N=64M f32",
@@ -527,7 +527,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.837,
+      "iron": 371.837,
       "op": "binary",
       "ref": 343.451,
       "shape": "N=64M f16",
@@ -535,7 +535,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.896,
+      "iron": 366.896,
       "op": "binary",
       "ref": 346.219,
       "shape": "N=64M bf16",
@@ -543,7 +543,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.012,
+      "iron": 366.012,
       "op": "binary_two",
       "ref": null,
       "shape": "N=64M f32",
@@ -551,7 +551,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.934,
+      "iron": 365.934,
       "op": "binary_two",
       "ref": null,
       "shape": "N=64M f16",
@@ -559,7 +559,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.735,
+      "iron": 370.735,
       "op": "binary_two",
       "ref": null,
       "shape": "N=64M bf16",
@@ -567,7 +567,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.841,
+      "iron": 369.841,
       "op": "copy",
       "ref": 372.192,
       "shape": "N=64M f32",
@@ -575,7 +575,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 354.253,
+      "iron": 354.253,
       "op": "copy",
       "ref": 350.209,
       "shape": "N=64M f16",
@@ -583,7 +583,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.646,
+      "iron": 368.646,
       "op": "copy",
       "ref": 362.649,
       "shape": "N=64M bf16",
@@ -591,7 +591,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 309.733,
+      "iron": 309.733,
       "op": "fp_quantized",
       "ref": 270.237,
       "shape": "N=1M f32 gs32",
@@ -599,7 +599,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.633,
+      "iron": 371.633,
       "op": "gemv",
       "ref": null,
       "shape": "B=4096 N=4096 f32",
@@ -607,7 +607,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 158.26,
+      "iron": 158.26,
       "op": "gemv",
       "ref": null,
       "shape": "B=4096 N=4096 f16",
@@ -615,7 +615,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 93.447,
+      "iron": 93.447,
       "op": "gemv",
       "ref": null,
       "shape": "B=4096 N=4096 bf16",
@@ -623,7 +623,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 156.545,
+      "iron": 156.545,
       "op": "gemv_masked",
       "ref": null,
       "shape": "B=4096 N=4096 f32",
@@ -631,7 +631,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 181.263,
+      "iron": 181.263,
       "op": "gemv_masked",
       "ref": null,
       "shape": "B=4096 N=4096 f16",
@@ -639,7 +639,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 180.33,
+      "iron": 180.33,
       "op": "gemv_masked",
       "ref": null,
       "shape": "B=4096 N=4096 bf16",
@@ -647,7 +647,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 598.296,
+      "iron": 598.296,
       "op": "layer_norm",
       "ref": 428.203,
       "shape": "B=1024 N=4096 f32",
@@ -655,7 +655,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 435.772,
+      "iron": 435.772,
       "op": "layer_norm",
       "ref": 214.177,
       "shape": "B=1024 N=4096 f16",
@@ -663,7 +663,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 177.224,
+      "iron": 177.224,
       "op": "layer_norm",
       "ref": 175.985,
       "shape": "B=1024 N=4096 bf16",
@@ -671,7 +671,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 594.029,
+      "iron": 594.029,
       "op": "logsumexp",
       "ref": 320.407,
       "shape": "B=1024 N=4096 f32",
@@ -679,7 +679,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 375.701,
+      "iron": 375.701,
       "op": "logsumexp",
       "ref": 120.081,
       "shape": "B=1024 N=4096 f16",
@@ -687,7 +687,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 247.695,
+      "iron": 247.695,
       "op": "logsumexp",
       "ref": 78.724,
       "shape": "B=1024 N=4096 bf16",
@@ -695,7 +695,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 117.692,
+      "iron": 117.692,
       "op": "quantized",
       "ref": 51.821,
       "shape": "M=4 N=4096 K=4096 f32 gs64 b4",
@@ -703,7 +703,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 88.808,
+      "iron": 88.808,
       "op": "quantized",
       "ref": 42.861,
       "shape": "M=4 N=5120 K=5120 f32 gs64 b4",
@@ -711,7 +711,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 71.538,
+      "iron": 71.538,
       "op": "quantized",
       "ref": 59.644,
       "shape": "M=4 N=14336 K=5120 f32 gs64 b4",
@@ -719,7 +719,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 104.435,
+      "iron": 104.435,
       "op": "quantized",
       "ref": 57.006,
       "shape": "M=4 N=5120 K=14336 f32 gs64 b4",
@@ -727,7 +727,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 88.636,
+      "iron": 88.636,
       "op": "quantized",
       "ref": 62.46,
       "shape": "M=4 N=27648 K=5120 f32 gs64 b4",
@@ -735,7 +735,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 123.814,
+      "iron": 123.814,
       "op": "quantized",
       "ref": 48.525,
       "shape": "M=4 N=4096 K=4096 f16 gs64 b4",
@@ -743,7 +743,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 129.687,
+      "iron": 129.687,
       "op": "quantized",
       "ref": 53.634,
       "shape": "M=4 N=5120 K=5120 f16 gs64 b4",
@@ -751,7 +751,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 132.548,
+      "iron": 132.548,
       "op": "quantized",
       "ref": 45.965,
       "shape": "M=4 N=14336 K=5120 f16 gs64 b4",
@@ -759,7 +759,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 101.081,
+      "iron": 101.081,
       "op": "quantized",
       "ref": 53.724,
       "shape": "M=4 N=5120 K=14336 f16 gs64 b4",
@@ -767,7 +767,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 94.069,
+      "iron": 94.069,
       "op": "quantized",
       "ref": 62.386,
       "shape": "M=4 N=27648 K=5120 f16 gs64 b4",
@@ -775,7 +775,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 47.768,
+      "iron": 47.768,
       "op": "quantized",
       "ref": 52.621,
       "shape": "M=8 N=4096 K=4096 f32 gs64 b4",
@@ -783,7 +783,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 45.89,
+      "iron": 45.89,
       "op": "quantized",
       "ref": 57.396,
       "shape": "M=8 N=5120 K=5120 f32 gs64 b4",
@@ -791,7 +791,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 44.674,
+      "iron": 44.674,
       "op": "quantized",
       "ref": 60.091,
       "shape": "M=8 N=14336 K=5120 f32 gs64 b4",
@@ -799,7 +799,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 42.571,
+      "iron": 42.571,
       "op": "quantized",
       "ref": 57.416,
       "shape": "M=8 N=5120 K=14336 f32 gs64 b4",
@@ -807,7 +807,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 44.136,
+      "iron": 44.136,
       "op": "quantized",
       "ref": 62.579,
       "shape": "M=8 N=27648 K=5120 f32 gs64 b4",
@@ -815,7 +815,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 77.659,
+      "iron": 77.659,
       "op": "quantized",
       "ref": 49.141,
       "shape": "M=8 N=4096 K=4096 f16 gs64 b4",
@@ -823,7 +823,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 75.682,
+      "iron": 75.682,
       "op": "quantized",
       "ref": 53.833,
       "shape": "M=8 N=5120 K=5120 f16 gs64 b4",
@@ -831,7 +831,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 75.338,
+      "iron": 75.338,
       "op": "quantized",
       "ref": 61.209,
       "shape": "M=8 N=14336 K=5120 f16 gs64 b4",
@@ -839,7 +839,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 68.26,
+      "iron": 68.26,
       "op": "quantized",
       "ref": 54.148,
       "shape": "M=8 N=5120 K=14336 f16 gs64 b4",
@@ -847,7 +847,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 73.348,
+      "iron": 73.348,
       "op": "quantized",
       "ref": 62.423,
       "shape": "M=8 N=27648 K=5120 f16 gs64 b4",
@@ -855,7 +855,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 75.16,
+      "iron": 75.16,
       "op": "quantized",
       "ref": 52.365,
       "shape": "M=8 N=4096 K=4096 f32 gs64 b4",
@@ -863,7 +863,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 74.137,
+      "iron": 74.137,
       "op": "quantized",
       "ref": 57.281,
       "shape": "M=8 N=5120 K=5120 f32 gs64 b4",
@@ -871,7 +871,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 74.491,
+      "iron": 74.491,
       "op": "quantized",
       "ref": 59.833,
       "shape": "M=8 N=14336 K=5120 f32 gs64 b4",
@@ -879,7 +879,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 71.279,
+      "iron": 71.279,
       "op": "quantized",
       "ref": 57.36,
       "shape": "M=8 N=5120 K=14336 f32 gs64 b4",
@@ -887,7 +887,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 74.046,
+      "iron": 74.046,
       "op": "quantized",
       "ref": 62.545,
       "shape": "M=8 N=27648 K=5120 f32 gs64 b4",
@@ -895,7 +895,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 93.463,
+      "iron": 93.463,
       "op": "quantized",
       "ref": 49.3,
       "shape": "M=8 N=4096 K=4096 f16 gs64 b4",
@@ -903,7 +903,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 97.235,
+      "iron": 97.235,
       "op": "quantized",
       "ref": 53.93,
       "shape": "M=8 N=5120 K=5120 f16 gs64 b4",
@@ -911,7 +911,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 100.289,
+      "iron": 100.289,
       "op": "quantized",
       "ref": 61.138,
       "shape": "M=8 N=14336 K=5120 f16 gs64 b4",
@@ -919,7 +919,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 100.188,
+      "iron": 100.188,
       "op": "quantized",
       "ref": 54.316,
       "shape": "M=8 N=5120 K=14336 f16 gs64 b4",
@@ -927,7 +927,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 101.094,
+      "iron": 101.094,
       "op": "quantized",
       "ref": 62.437,
       "shape": "M=8 N=27648 K=5120 f16 gs64 b4",
@@ -935,7 +935,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 22.677,
+      "iron": 22.677,
       "op": "quantized",
       "ref": 30.287,
       "shape": "M=32 N=4096 K=4096 f32 gs64 b4",
@@ -943,7 +943,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 31.732,
+      "iron": 31.732,
       "op": "quantized",
       "ref": 32.788,
       "shape": "M=32 N=5120 K=5120 f32 gs64 b4",
@@ -951,7 +951,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 63.587,
+      "iron": 63.587,
       "op": "quantized",
       "ref": 65.536,
       "shape": "M=32 N=14336 K=5120 f32 gs64 b4",
@@ -959,7 +959,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 61.573,
+      "iron": 61.573,
       "op": "quantized",
       "ref": 63.597,
       "shape": "M=32 N=5120 K=14336 f32 gs64 b4",
@@ -967,7 +967,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 65.771,
+      "iron": 65.771,
       "op": "quantized",
       "ref": 68.348,
       "shape": "M=32 N=27648 K=5120 f32 gs64 b4",
@@ -975,7 +975,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 55.755,
+      "iron": 55.755,
       "op": "quantized",
       "ref": 55.406,
       "shape": "M=32 N=4096 K=4096 f16 gs64 b4",
@@ -983,7 +983,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 59.33,
+      "iron": 59.33,
       "op": "quantized",
       "ref": 59.511,
       "shape": "M=32 N=5120 K=5120 f16 gs64 b4",
@@ -991,7 +991,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 66.968,
+      "iron": 66.968,
       "op": "quantized",
       "ref": 67.312,
       "shape": "M=32 N=14336 K=5120 f16 gs64 b4",
@@ -999,7 +999,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 58.72,
+      "iron": 58.72,
       "op": "quantized",
       "ref": 59.091,
       "shape": "M=32 N=5120 K=14336 f16 gs64 b4",
@@ -1007,7 +1007,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 69.757,
+      "iron": 69.757,
       "op": "quantized",
       "ref": 69.272,
       "shape": "M=32 N=27648 K=5120 f16 gs64 b4",
@@ -1015,7 +1015,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 70.184,
+      "iron": 70.184,
       "op": "quantized",
       "ref": 52.838,
       "shape": "M=16 N=4096 K=4096 f32 gs64 b4",
@@ -1023,7 +1023,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 77.998,
+      "iron": 77.998,
       "op": "quantized",
       "ref": 57.067,
       "shape": "M=16 N=5120 K=5120 f32 gs64 b4",
@@ -1031,7 +1031,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 84.433,
+      "iron": 84.433,
       "op": "quantized",
       "ref": 59.091,
       "shape": "M=16 N=14336 K=5120 f32 gs64 b4",
@@ -1039,7 +1039,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 76.062,
+      "iron": 76.062,
       "op": "quantized",
       "ref": 57.012,
       "shape": "M=16 N=5120 K=14336 f32 gs64 b4",
@@ -1047,7 +1047,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 84.301,
+      "iron": 84.301,
       "op": "quantized",
       "ref": 61.976,
       "shape": "M=16 N=27648 K=5120 f32 gs64 b4",
@@ -1055,7 +1055,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 66.529,
+      "iron": 66.529,
       "op": "quantized",
       "ref": 49.225,
       "shape": "M=16 N=4096 K=4096 f16 gs64 b4",
@@ -1063,7 +1063,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 72.308,
+      "iron": 72.308,
       "op": "quantized",
       "ref": 53.801,
       "shape": "M=16 N=5120 K=5120 f16 gs64 b4",
@@ -1071,7 +1071,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 49.422,
+      "iron": 49.422,
       "op": "quantized",
       "ref": 60.04,
       "shape": "M=16 N=14336 K=5120 f16 gs64 b4",
@@ -1079,7 +1079,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 71.744,
+      "iron": 71.744,
       "op": "quantized",
       "ref": 53.423,
       "shape": "M=16 N=5120 K=14336 f16 gs64 b4",
@@ -1087,7 +1087,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 85.461,
+      "iron": 85.461,
       "op": "quantized",
       "ref": 62.231,
       "shape": "M=16 N=27648 K=5120 f16 gs64 b4",
@@ -1095,7 +1095,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 388.975,
+      "iron": 388.975,
       "op": "quantized",
       "ref": 347.984,
       "shape": "M=4096 K=4096 f32 gs64 b4",
@@ -1103,7 +1103,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 419.808,
+      "iron": 419.808,
       "op": "quantized",
       "ref": 323.345,
       "shape": "M=5120 K=5120 f32 gs64 b4",
@@ -1111,7 +1111,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 279.562,
+      "iron": 279.562,
       "op": "quantized",
       "ref": 290.436,
       "shape": "M=14336 K=5120 f32 gs64 b4",
@@ -1119,7 +1119,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 168.583,
+      "iron": 168.583,
       "op": "quantized",
       "ref": 279.864,
       "shape": "M=5120 K=14336 f32 gs64 b4",
@@ -1127,7 +1127,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 235.13,
+      "iron": 235.13,
       "op": "quantized",
       "ref": 252.389,
       "shape": "M=27648 K=5120 f32 gs64 b4",
@@ -1135,7 +1135,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 129.28,
+      "iron": 129.28,
       "op": "quantized",
       "ref": 146.283,
       "shape": "M=4096 K=4096 f16 gs64 b4",
@@ -1143,7 +1143,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 232.689,
+      "iron": 232.689,
       "op": "quantized",
       "ref": 216.485,
       "shape": "M=5120 K=5120 f16 gs64 b4",
@@ -1151,7 +1151,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 156.466,
+      "iron": 156.466,
       "op": "quantized",
       "ref": 356.905,
       "shape": "M=14336 K=5120 f16 gs64 b4",
@@ -1159,7 +1159,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 296.071,
+      "iron": 296.071,
       "op": "quantized",
       "ref": 280.259,
       "shape": "M=5120 K=14336 f16 gs64 b4",
@@ -1167,7 +1167,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 350.743,
+      "iron": 350.743,
       "op": "quantized",
       "ref": 352.553,
       "shape": "M=27648 K=5120 f16 gs64 b4",
@@ -1175,7 +1175,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 185.043,
+      "iron": 185.043,
       "op": "random",
       "ref": 7.945,
       "shape": "1M u32",
@@ -1183,7 +1183,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 559.241,
+      "iron": 559.241,
       "op": "rms_norm",
       "ref": 413.827,
       "shape": "B=1024 N=4096 f32",
@@ -1191,7 +1191,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 248.245,
+      "iron": 248.245,
       "op": "rms_norm",
       "ref": 356.33,
       "shape": "B=1024 N=4096 f16",
@@ -1199,7 +1199,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 405.9,
+      "iron": 405.9,
       "op": "rms_norm",
       "ref": 207.055,
       "shape": "B=1024 N=4096 bf16",
@@ -1207,7 +1207,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 77.354,
+      "iron": 77.354,
       "op": "rms_norm",
       "ref": 8.975,
       "shape": "B=1024 N=64 f32",
@@ -1215,7 +1215,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 56.174,
+      "iron": 56.174,
       "op": "rms_norm",
       "ref": 4.443,
       "shape": "B=1024 N=64 f16",
@@ -1223,7 +1223,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 35.345,
+      "iron": 35.345,
       "op": "rms_norm",
       "ref": 2.761,
       "shape": "B=1024 N=64 bf16",
@@ -1231,7 +1231,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 234.373,
+      "iron": 234.373,
       "op": "rope",
       "ref": 178.957,
       "shape": "B1H32L512D128 f16",
@@ -1239,7 +1239,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 236.576,
+      "iron": 236.576,
       "op": "rope",
       "ref": 178.481,
       "shape": "B1H32L512D128 f16",
@@ -1247,7 +1247,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 184.028,
+      "iron": 184.028,
       "op": "rope",
       "ref": 181.867,
       "shape": "B1H32L512D128 f16",
@@ -1255,7 +1255,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 472.713,
+      "iron": 472.713,
       "op": "row_reduce",
       "ref": 80.47,
       "shape": "B=1024 N=4096 f32",
@@ -1263,7 +1263,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 191.422,
+      "iron": 191.422,
       "op": "row_reduce",
       "ref": 57.9,
       "shape": "B=1024 N=4096 f16",
@@ -1271,7 +1271,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 84.969,
+      "iron": 84.969,
       "op": "row_reduce",
       "ref": 37.417,
       "shape": "B=1024 N=4096 bf16",
@@ -1279,7 +1279,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 473.825,
+      "iron": 473.825,
       "op": "row_reduce",
       "ref": 185.514,
       "shape": "B=1024 N=4096 f32",
@@ -1287,7 +1287,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 194.004,
+      "iron": 194.004,
       "op": "row_reduce",
       "ref": 46.486,
       "shape": "B=1024 N=4096 f16",
@@ -1295,7 +1295,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 201.175,
+      "iron": 201.175,
       "op": "row_reduce",
       "ref": 89.94,
       "shape": "B=1024 N=4096 bf16",
@@ -1303,7 +1303,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 242.768,
+      "iron": 242.768,
       "op": "row_reduce",
       "ref": 105.295,
       "shape": "B=1024 N=4096 f32",
@@ -1311,7 +1311,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 247.695,
+      "iron": 247.695,
       "op": "row_reduce",
       "ref": 75.253,
       "shape": "B=1024 N=4096 f16",
@@ -1319,7 +1319,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 105.047,
+      "iron": 105.047,
       "op": "row_reduce",
       "ref": 48.653,
       "shape": "B=1024 N=4096 bf16",
@@ -1327,7 +1327,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 394.468,
+      "iron": 394.468,
       "op": "row_reduce",
       "ref": 102.927,
       "shape": "B=1024 N=4096 f32",
@@ -1335,7 +1335,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 219.364,
+      "iron": 219.364,
       "op": "row_reduce",
       "ref": 144.875,
       "shape": "B=1024 N=4096 f16",
@@ -1343,7 +1343,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 85.148,
+      "iron": 85.148,
       "op": "row_reduce",
       "ref": 61.696,
       "shape": "B=1024 N=4096 bf16",
@@ -1351,7 +1351,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 250.64,
+      "iron": 250.64,
       "op": "scan",
       "ref": 329.369,
       "shape": "B=1024 N=4096 f32",
@@ -1359,7 +1359,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 151.687,
+      "iron": 151.687,
       "op": "scan",
       "ref": 203.927,
       "shape": "B=1024 N=4096 f32",
@@ -1367,7 +1367,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 151.373,
+      "iron": 151.373,
       "op": "scan",
       "ref": 201.226,
       "shape": "B=1024 N=4096 f32",
@@ -1375,7 +1375,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 82.248,
+      "iron": 82.248,
       "op": "sdpa",
       "ref": 70.195,
       "shape": "H=8 N=2048 D=128 f32",
@@ -1383,7 +1383,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 292.432,
+      "iron": 292.432,
       "op": "sdpa",
       "ref": 301.32,
       "shape": "H=32 N=4096 D=128 f32",
@@ -1391,7 +1391,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 74.519,
+      "iron": 74.519,
       "op": "sdpa",
       "ref": 84.526,
       "shape": "H=8 N=2048 D=128 f16",
@@ -1399,7 +1399,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 310.226,
+      "iron": 310.226,
       "op": "sdpa",
       "ref": 290.376,
       "shape": "H=32 N=4096 D=128 f16",
@@ -1407,7 +1407,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 70.601,
+      "iron": 70.601,
       "op": "sdpa",
       "ref": null,
       "shape": "H=8 N=2048 D=128 bf16",
@@ -1415,7 +1415,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 285.336,
+      "iron": 285.336,
       "op": "sdpa",
       "ref": null,
       "shape": "H=32 N=4096 D=128 bf16",
@@ -1423,7 +1423,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 352.776,
+      "iron": 352.776,
       "op": "sdpa",
       "ref": 221.881,
       "shape": "H=32 N=4096 D=128 gqa=4 blocks=32 f32",
@@ -1431,7 +1431,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 91.706,
+      "iron": 91.706,
       "op": "sdpa",
       "ref": 164.241,
       "shape": "H=32 N=4096 D=128 gqa=4 blocks=32 f16",
@@ -1439,7 +1439,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 113.823,
+      "iron": 113.823,
       "op": "sdpa",
       "ref": 121.144,
       "shape": "H=32 N=4096 D=128 gqa=4 blocks=32 bf16",
@@ -1447,7 +1447,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 39.026,
+      "iron": 39.026,
       "op": "sdpa",
       "ref": null,
       "shape": "K=16 H=32 N=4096 D=128 gqa=4 causal f32",
@@ -1455,7 +1455,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 20.961,
+      "iron": 20.961,
       "op": "sdpa",
       "ref": null,
       "shape": "K=16 H=32 N=4096 D=128 gqa=4 causal f16",
@@ -1463,7 +1463,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 13.785,
+      "iron": 13.785,
       "op": "sdpa",
       "ref": null,
       "shape": "K=16 H=32 N=4096 D=128 gqa=4 causal bf16",
@@ -1471,7 +1471,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 39.229,
+      "iron": 39.229,
       "op": "sdpa",
       "ref": null,
       "shape": "K=8 H=32 N=4096 D=128 gqa=4 causal f32",
@@ -1479,7 +1479,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 24.892,
+      "iron": 24.892,
       "op": "sdpa",
       "ref": null,
       "shape": "K=8 H=32 N=4096 D=128 gqa=4 causal f16",
@@ -1487,7 +1487,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 13.789,
+      "iron": 13.789,
       "op": "sdpa",
       "ref": null,
       "shape": "K=8 H=32 N=4096 D=128 gqa=4 causal bf16",
@@ -1495,7 +1495,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 11.459,
+      "iron": 11.459,
       "op": "sdpa",
       "ref": 32.495,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f32",
@@ -1503,7 +1503,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.99,
+      "iron": 5.99,
       "op": "sdpa",
       "ref": 24.499,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f16",
@@ -1511,7 +1511,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 5.66,
+      "iron": 5.66,
       "op": "sdpa",
       "ref": 15.744,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 bf16",
@@ -1519,7 +1519,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 29.689,
+      "iron": 29.689,
       "op": "sdpa",
       "ref": 31.651,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f32",
@@ -1527,7 +1527,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 17.504,
+      "iron": 17.504,
       "op": "sdpa",
       "ref": 18.134,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f16",
@@ -1535,7 +1535,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 14.911,
+      "iron": 14.911,
       "op": "sdpa",
       "ref": 12.189,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 bf16",
@@ -1543,7 +1543,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 29.439,
+      "iron": 29.439,
       "op": "sdpa",
       "ref": 31.817,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f32",
@@ -1551,7 +1551,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 16.455,
+      "iron": 16.455,
       "op": "sdpa",
       "ref": 17.587,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 f16",
@@ -1559,7 +1559,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 13.524,
+      "iron": 13.524,
       "op": "sdpa",
       "ref": 15.674,
       "shape": "B=1 H=32 T=512/512 D=128 gqa=4 bf16",
@@ -1567,7 +1567,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 225.166,
+      "iron": 225.166,
       "op": "sdpa",
       "ref": 224.101,
       "shape": "H=32 N=4096 D=128 gqa=4 f32",
@@ -1575,7 +1575,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 84.038,
+      "iron": 84.038,
       "op": "sdpa",
       "ref": 81.721,
       "shape": "H=32 N=4096 D=128 gqa=4 f16",
@@ -1583,7 +1583,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 75.463,
+      "iron": 75.463,
       "op": "sdpa",
       "ref": 171.948,
       "shape": "H=32 N=4096 D=128 gqa=4 bf16",
@@ -1591,7 +1591,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 363.936,
+      "iron": 363.936,
       "op": "select",
       "ref": 366.446,
       "shape": "N=64M f32",
@@ -1599,7 +1599,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.758,
+      "iron": 369.758,
       "op": "select",
       "ref": 369.855,
       "shape": "N=64M f16",
@@ -1607,7 +1607,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 372.531,
+      "iron": 372.531,
       "op": "select",
       "ref": 363.206,
       "shape": "N=64M bf16",
@@ -1615,7 +1615,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 695.028,
+      "iron": 695.028,
       "op": "softmax",
       "ref": 750.752,
       "shape": "B=1024 N=4096 f32",
@@ -1623,7 +1623,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 625.886,
+      "iron": 625.886,
       "op": "softmax",
       "ref": 303.355,
       "shape": "B=1024 N=4096 f16",
@@ -1631,7 +1631,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 287.609,
+      "iron": 287.609,
       "op": "softmax",
       "ref": 75.001,
       "shape": "B=1024 N=4096 bf16",
@@ -1639,7 +1639,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 14.966,
+      "iron": 14.966,
       "op": "sort",
       "ref": 15.809,
       "shape": "B=1024 N=1024 f32",
@@ -1647,7 +1647,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 11.316,
+      "iron": 11.316,
       "op": "sort",
       "ref": 14.614,
       "shape": "B=1024 N=1024 f16",
@@ -1655,7 +1655,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 12.753,
+      "iron": 12.753,
       "op": "sort",
       "ref": 10.439,
       "shape": "B=1024 N=1024 bf16",
@@ -1663,7 +1663,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 2.369,
+      "iron": 2.369,
       "op": "steel_gemm_fused",
       "ref": 3.664,
       "shape": "M=4096 N=4096 K=4096 BM=64 BN=64 f32",
@@ -1671,7 +1671,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 1.013,
+      "iron": 1.013,
       "op": "steel_gemm_fused",
       "ref": 1.536,
       "shape": "M=4096 N=4096 K=4096 BM=64 BN=64 f16",
@@ -1679,7 +1679,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 0.423,
+      "iron": 0.423,
       "op": "steel_gemm_fused",
       "ref": 0.73,
       "shape": "M=4096 N=4096 K=4096 BM=64 BN=64 bf16",
@@ -1687,7 +1687,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 246.799,
+      "iron": 246.799,
       "op": "strided_copy",
       "ref": null,
       "shape": "M=1024 N=4096+128 f32",
@@ -1695,7 +1695,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 185.811,
+      "iron": 185.811,
       "op": "strided_copy",
       "ref": null,
       "shape": "M=1024 N=4096+128 f16",
@@ -1703,7 +1703,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 134.487,
+      "iron": 134.487,
       "op": "strided_copy",
       "ref": null,
       "shape": "M=1024 N=4096+128 bf16",
@@ -1711,7 +1711,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 373.41,
+      "iron": 373.41,
       "op": "swiglu",
       "ref": null,
       "shape": "N=64M f32",
@@ -1719,7 +1719,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.167,
+      "iron": 369.167,
       "op": "swiglu",
       "ref": null,
       "shape": "N=64M f16",
@@ -1727,7 +1727,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 375.172,
+      "iron": 375.172,
       "op": "swiglu",
       "ref": null,
       "shape": "N=64M bf16",
@@ -1735,7 +1735,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 376.487,
+      "iron": 376.487,
       "op": "unary",
       "ref": 375.927,
       "shape": "N=64M f32",
@@ -1743,7 +1743,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 357.16,
+      "iron": 357.16,
       "op": "unary",
       "ref": 347.264,
       "shape": "N=64M f16",
@@ -1751,7 +1751,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.831,
+      "iron": 369.831,
       "op": "unary",
       "ref": 364.825,
       "shape": "N=64M bf16",
@@ -1759,7 +1759,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.238,
+      "iron": 367.238,
       "op": "unary",
       "ref": 369.841,
       "shape": "N=64M f32",
@@ -1767,7 +1767,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 303.746,
+      "iron": 303.746,
       "op": "unary",
       "ref": 360.619,
       "shape": "N=64M f16",
@@ -1775,7 +1775,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 359.311,
+      "iron": 359.311,
       "op": "unary",
       "ref": 319.518,
       "shape": "N=64M bf16",
@@ -1783,7 +1783,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.927,
+      "iron": 370.927,
       "op": "unary",
       "ref": 257.338,
       "shape": "N=64M f32",
@@ -1791,7 +1791,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 350.839,
+      "iron": 350.839,
       "op": "unary",
       "ref": 125.945,
       "shape": "N=64M f16",
@@ -1799,7 +1799,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.017,
+      "iron": 362.017,
       "op": "unary",
       "ref": 125.014,
       "shape": "N=64M bf16",
@@ -1807,7 +1807,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.917,
+      "iron": 370.917,
       "op": "unary",
       "ref": 374.496,
       "shape": "N=64M f32",
@@ -1815,7 +1815,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 268.223,
+      "iron": 268.223,
       "op": "unary",
       "ref": 220.897,
       "shape": "N=64M f16",
@@ -1823,7 +1823,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.836,
+      "iron": 368.836,
       "op": "unary",
       "ref": 209.042,
       "shape": "N=64M bf16",
@@ -1831,7 +1831,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 372.558,
+      "iron": 372.558,
       "op": "unary",
       "ref": 371.591,
       "shape": "N=64M f32",
@@ -1839,7 +1839,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.771,
+      "iron": 362.771,
       "op": "unary",
       "ref": 184.65,
       "shape": "N=64M f16",
@@ -1847,7 +1847,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 363.057,
+      "iron": 363.057,
       "op": "unary",
       "ref": 180.861,
       "shape": "N=64M bf16",
@@ -1855,7 +1855,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 375.817,
+      "iron": 375.817,
       "op": "unary",
       "ref": 374.104,
       "shape": "N=64M f32",
@@ -1863,7 +1863,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.057,
+      "iron": 362.057,
       "op": "unary",
       "ref": 309.793,
       "shape": "N=64M f16",
@@ -1871,7 +1871,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.59,
+      "iron": 366.59,
       "op": "unary",
       "ref": 261.803,
       "shape": "N=64M bf16",
@@ -1879,7 +1879,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.083,
+      "iron": 374.083,
       "op": "unary",
       "ref": 371.184,
       "shape": "N=64M f32",
@@ -1887,7 +1887,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 354.117,
+      "iron": 354.117,
       "op": "unary",
       "ref": 196.207,
       "shape": "N=64M f16",
@@ -1895,7 +1895,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 328.027,
+      "iron": 328.027,
       "op": "unary",
       "ref": 190.144,
       "shape": "N=64M bf16",
@@ -1903,7 +1903,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.167,
+      "iron": 365.167,
       "op": "unary",
       "ref": 367.751,
       "shape": "N=64M f32",
@@ -1911,7 +1911,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.972,
+      "iron": 367.972,
       "op": "unary",
       "ref": 366.715,
       "shape": "N=64M f16",
@@ -1919,7 +1919,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.529,
+      "iron": 365.529,
       "op": "unary",
       "ref": 369.937,
       "shape": "N=64M bf16",
@@ -1927,7 +1927,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 372.342,
+      "iron": 372.342,
       "op": "unary",
       "ref": 370.97,
       "shape": "N=64M f32",
@@ -1935,7 +1935,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 329.369,
+      "iron": 329.369,
       "op": "unary",
       "ref": 292.347,
       "shape": "N=64M f16",
@@ -1943,7 +1943,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 356.843,
+      "iron": 356.843,
       "op": "unary",
       "ref": 284.85,
       "shape": "N=64M bf16",
@@ -1951,7 +1951,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.055,
+      "iron": 371.055,
       "op": "unary",
       "ref": 368.151,
       "shape": "N=64M f32",
@@ -1959,7 +1959,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.227,
+      "iron": 364.227,
       "op": "unary",
       "ref": 261.665,
       "shape": "N=64M f16",
@@ -1967,7 +1967,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.628,
+      "iron": 362.628,
       "op": "unary",
       "ref": 247.472,
       "shape": "N=64M bf16",
@@ -1975,7 +1975,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.812,
+      "iron": 374.812,
       "op": "unary",
       "ref": 370.447,
       "shape": "N=64M f32",
@@ -1983,7 +1983,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 355.367,
+      "iron": 355.367,
       "op": "unary",
       "ref": 269.92,
       "shape": "N=64M f16",
@@ -1991,7 +1991,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.329,
+      "iron": 368.329,
       "op": "unary",
       "ref": 262.914,
       "shape": "N=64M bf16",
@@ -1999,7 +1999,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.46,
+      "iron": 369.46,
       "op": "unary",
       "ref": 372.719,
       "shape": "N=64M f32",
@@ -2007,7 +2007,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.804,
+      "iron": 367.804,
       "op": "unary",
       "ref": 363.713,
       "shape": "N=64M f16",
@@ -2015,7 +2015,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.615,
+      "iron": 367.615,
       "op": "unary",
       "ref": 368.962,
       "shape": "N=64M bf16",
@@ -2023,7 +2023,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.815,
+      "iron": 364.815,
       "op": "unary",
       "ref": 370.277,
       "shape": "N=64M f32",
@@ -2031,7 +2031,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.736,
+      "iron": 366.736,
       "op": "unary",
       "ref": 349.582,
       "shape": "N=64M f16",
@@ -2039,7 +2039,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.425,
+      "iron": 365.425,
       "op": "unary",
       "ref": 332.531,
       "shape": "N=64M bf16",
@@ -2047,7 +2047,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.762,
+      "iron": 371.762,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2055,7 +2055,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.33,
+      "iron": 364.33,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2063,7 +2063,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.351,
+      "iron": 364.351,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2071,7 +2071,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.714,
+      "iron": 374.714,
       "op": "unary",
       "ref": 371.762,
       "shape": "N=64M f32",
@@ -2079,7 +2079,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.825,
+      "iron": 367.825,
       "op": "unary",
       "ref": 326.812,
       "shape": "N=64M f16",
@@ -2087,7 +2087,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.741,
+      "iron": 367.741,
       "op": "unary",
       "ref": 318.949,
       "shape": "N=64M bf16",
@@ -2095,7 +2095,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.65,
+      "iron": 370.65,
       "op": "unary",
       "ref": 367.332,
       "shape": "N=64M f32",
@@ -2103,7 +2103,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.104,
+      "iron": 364.104,
       "op": "unary",
       "ref": 363.652,
       "shape": "N=64M f16",
@@ -2111,7 +2111,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.741,
+      "iron": 367.741,
       "op": "unary",
       "ref": 369.491,
       "shape": "N=64M bf16",
@@ -2119,7 +2119,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 330.23,
+      "iron": 330.23,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2127,7 +2127,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 165.001,
+      "iron": 165.001,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2135,7 +2135,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 158.943,
+      "iron": 158.943,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2143,7 +2143,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.555,
+      "iron": 369.555,
       "op": "unary",
       "ref": 366.569,
       "shape": "N=64M f32",
@@ -2151,7 +2151,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.695,
+      "iron": 365.695,
       "op": "unary",
       "ref": 370.554,
       "shape": "N=64M f16",
@@ -2159,7 +2159,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.935,
+      "iron": 362.935,
       "op": "unary",
       "ref": 329.537,
       "shape": "N=64M bf16",
@@ -2167,7 +2167,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 373.216,
+      "iron": 373.216,
       "op": "unary",
       "ref": 374.093,
       "shape": "N=64M f32",
@@ -2175,7 +2175,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.489,
+      "iron": 367.489,
       "op": "unary",
       "ref": 345.458,
       "shape": "N=64M f16",
@@ -2183,7 +2183,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.488,
+      "iron": 365.488,
       "op": "unary",
       "ref": 350.076,
       "shape": "N=64M bf16",
@@ -2191,7 +2191,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 359.723,
+      "iron": 359.723,
       "op": "unary",
       "ref": 371.002,
       "shape": "N=64M f32",
@@ -2199,7 +2199,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 338.488,
+      "iron": 338.488,
       "op": "unary",
       "ref": 356.35,
       "shape": "N=64M f16",
@@ -2207,7 +2207,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 347.059,
+      "iron": 347.059,
       "op": "unary",
       "ref": 340.582,
       "shape": "N=64M bf16",
@@ -2215,7 +2215,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.13,
+      "iron": 368.13,
       "op": "unary",
       "ref": 373.508,
       "shape": "N=64M f32",
@@ -2223,7 +2223,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 361.063,
+      "iron": 361.063,
       "op": "unary",
       "ref": 343.433,
       "shape": "N=64M f16",
@@ -2231,7 +2231,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.601,
+      "iron": 371.601,
       "op": "unary",
       "ref": 320.664,
       "shape": "N=64M bf16",
@@ -2239,7 +2239,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.371,
+      "iron": 366.371,
       "op": "unary",
       "ref": 374.191,
       "shape": "N=64M f32",
@@ -2247,7 +2247,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.682,
+      "iron": 370.682,
       "op": "unary",
       "ref": 296.956,
       "shape": "N=64M f16",
@@ -2255,7 +2255,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 349.355,
+      "iron": 349.355,
       "op": "unary",
       "ref": 351.279,
       "shape": "N=64M bf16",
@@ -2263,7 +2263,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.414,
+      "iron": 368.414,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2271,7 +2271,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.342,
+      "iron": 367.342,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2279,7 +2279,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 367.133,
+      "iron": 367.133,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2287,7 +2287,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 372.762,
+      "iron": 372.762,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2295,7 +2295,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 363.816,
+      "iron": 363.816,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2303,7 +2303,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.11,
+      "iron": 369.11,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2311,7 +2311,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.352,
+      "iron": 370.352,
       "op": "unary",
       "ref": 370.479,
       "shape": "N=64M f32",
@@ -2319,7 +2319,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 352.856,
+      "iron": 352.856,
       "op": "unary",
       "ref": 363.549,
       "shape": "N=64M f16",
@@ -2327,7 +2327,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.54,
+      "iron": 368.54,
       "op": "unary",
       "ref": 346.536,
       "shape": "N=64M bf16",
@@ -2335,7 +2335,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.056,
+      "iron": 368.056,
       "op": "unary",
       "ref": 371.441,
       "shape": "N=64M f32",
@@ -2343,7 +2343,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 350.019,
+      "iron": 350.019,
       "op": "unary",
       "ref": 364.846,
       "shape": "N=64M f16",
@@ -2351,7 +2351,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.426,
+      "iron": 370.426,
       "op": "unary",
       "ref": 369.64,
       "shape": "N=64M bf16",
@@ -2359,7 +2359,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.237,
+      "iron": 369.237,
       "op": "unary",
       "ref": 374.844,
       "shape": "N=64M f32",
@@ -2367,7 +2367,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.404,
+      "iron": 362.404,
       "op": "unary",
       "ref": 364.124,
       "shape": "N=64M f16",
@@ -2375,7 +2375,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 350.667,
+      "iron": 350.667,
       "op": "unary",
       "ref": 361.347,
       "shape": "N=64M bf16",
@@ -2383,7 +2383,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 372.073,
+      "iron": 372.073,
       "op": "unary",
       "ref": 370.586,
       "shape": "N=64M f32",
@@ -2391,7 +2391,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.737,
+      "iron": 365.737,
       "op": "unary",
       "ref": 363.919,
       "shape": "N=64M f16",
@@ -2399,7 +2399,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 365.716,
+      "iron": 365.716,
       "op": "unary",
       "ref": 356.449,
       "shape": "N=64M bf16",
@@ -2407,7 +2407,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 376.399,
+      "iron": 376.399,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2415,7 +2415,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 363.857,
+      "iron": 363.857,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2423,7 +2423,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.71,
+      "iron": 362.71,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2431,7 +2431,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 370.895,
+      "iron": 370.895,
       "op": "unary",
       "ref": 365.622,
       "shape": "N=64M f32",
@@ -2439,7 +2439,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 369.343,
+      "iron": 369.343,
       "op": "unary",
       "ref": 290.672,
       "shape": "N=64M f16",
@@ -2447,7 +2447,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.54,
+      "iron": 368.54,
       "op": "unary",
       "ref": 283.347,
       "shape": "N=64M bf16",
@@ -2455,7 +2455,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 371.708,
+      "iron": 371.708,
       "op": "unary",
       "ref": 373.216,
       "shape": "N=64M f32",
@@ -2463,7 +2463,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 373.931,
+      "iron": 373.931,
       "op": "unary",
       "ref": 185.94,
       "shape": "N=64M f16",
@@ -2471,7 +2471,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 366.402,
+      "iron": 366.402,
       "op": "unary",
       "ref": 235.582,
       "shape": "N=64M bf16",
@@ -2479,7 +2479,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.137,
+      "iron": 374.137,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2487,7 +2487,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 363.795,
+      "iron": 363.795,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2495,7 +2495,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 359.131,
+      "iron": 359.131,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",
@@ -2503,7 +2503,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 361.377,
+      "iron": 361.377,
       "op": "unary",
       "ref": 366.715,
       "shape": "N=64M f32",
@@ -2511,7 +2511,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 356.626,
+      "iron": 356.626,
       "op": "unary",
       "ref": 372.762,
       "shape": "N=64M f16",
@@ -2519,7 +2519,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 342.538,
+      "iron": 342.538,
       "op": "unary",
       "ref": 367.154,
       "shape": "N=64M bf16",
@@ -2527,7 +2527,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.119,
+      "iron": 368.119,
       "op": "unary",
       "ref": 368.393,
       "shape": "N=64M f32",
@@ -2535,7 +2535,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 364.042,
+      "iron": 364.042,
       "op": "unary",
       "ref": 366.82,
       "shape": "N=64M f16",
@@ -2543,7 +2543,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 362.628,
+      "iron": 362.628,
       "op": "unary",
       "ref": 369.026,
       "shape": "N=64M bf16",
@@ -2551,7 +2551,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 368.477,
+      "iron": 368.477,
       "op": "unary",
       "ref": 368.867,
       "shape": "N=64M f32",
@@ -2559,7 +2559,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 329.672,
+      "iron": 329.672,
       "op": "unary",
       "ref": 186.77,
       "shape": "N=64M f16",
@@ -2567,7 +2567,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 332.582,
+      "iron": 332.582,
       "op": "unary",
       "ref": 185.624,
       "shape": "N=64M bf16",
@@ -2575,7 +2575,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 374.224,
+      "iron": 374.224,
       "op": "unary",
       "ref": 370.917,
       "shape": "N=64M f32",
@@ -2583,7 +2583,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 354.956,
+      "iron": 354.956,
       "op": "unary",
       "ref": 183.64,
       "shape": "N=64M f16",
@@ -2591,7 +2591,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 329.571,
+      "iron": 329.571,
       "op": "unary",
       "ref": 175.214,
       "shape": "N=64M bf16",
@@ -2599,7 +2599,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 376.774,
+      "iron": 376.774,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f32",
@@ -2607,7 +2607,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 349.184,
+      "iron": 349.184,
       "op": "unary",
       "ref": null,
       "shape": "N=64M f16",
@@ -2615,7 +2615,7 @@
     },
     {
       "metric": "GB/s",
-      "ffai": 331.385,
+      "iron": 331.385,
       "op": "unary",
       "ref": null,
       "shape": "N=64M bf16",

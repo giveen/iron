@@ -9,7 +9,7 @@ Short terms used throughout the docs and the codebase:
 | Term | Meaning |
 |---|---|
 | **DSL** | Domain-specific language — the Rust-embedded language you write inside a `#[kernel]` function. |
-| **IR** | Intermediate representation — FFAI Kernels's typed kernel graph (`Kernel` / `Op`), produced by the proc-macro and consumed by the codegen. |
+| **IR** | Intermediate representation — Iron Kernels's typed kernel graph (`Kernel` / `Op`), produced by the proc-macro and consumed by the codegen. |
 | **MSL** | Metal Shading Language — Apple's C++-based GPU shader language, and the codegen's final output. |
 | **Kernel** | A GPU compute function; in this repo, a Rust `fn` annotated with `#[kernel]`. |
 | **Threadgroup** | A block of GPU threads that share threadgroup memory and can synchronise with a barrier. |
@@ -24,15 +24,15 @@ The workspace is seven crates, layered from the shared data model up to the CLI 
 
 | Crate | What it is |
 |---|---|
-| [`ffai-kernels-core`](../crates/ffai-kernels-core/README.md) | The shared data model — the `Kernel` / `Op` IR types, `DType`, `Shape`, and error types. Pure data structures with no logic, so every layer above can speak the same vocabulary. Used by **every** other crate. |
-| [`ffai-kernels-macros`](../crates/ffai-kernels-macros/README.md) | The compiler front end — the `#[kernel]` proc-macro and its body parser, which turn a Rust function into FFAI Kernels IR at compile time. Owns the DSL grammar and its compile-error diagnostics. Used by **`ffai-kernels`** (re-exported as the public `#[kernel]` attribute). |
-| [`ffai-kernels-codegen`](../crates/ffai-kernels-codegen/README.md) | The optimizing compiler — lowers FFAI Kernels IR through the [14-pass pipeline](#debugging-a-kernel) and emits MSL. The largest crate; owns every pass and the MSL emitter. Used by **`ffai-kernels-runtime`**, **`ffai-kernels-std`**, and **`ffai-kernels-cli`**. |
-| [`ffai-kernels-runtime`](../crates/ffai-kernels-runtime/README.md) | The GPU execution layer — compiles emitted MSL into Metal PSOs (with a PSO cache) and dispatches kernels through `Context`. Owns all Metal-framework / `objc2` interop. Used by **`ffai-kernels`** and **`ffai-kernels-std`**. |
-| [`ffai-kernels`](../crates/ffai-kernels/README.md) | The facade — re-exports `core`, `macros`, `codegen`, and `runtime` behind one `prelude` so downstream code and external users depend on a single crate. No logic of its own. Used by **`ffai-kernels-std`** and **`ffai-kernels-cli`**. |
-| [`ffai-kernels-std`](../crates/ffai-kernels-std/README.md) | The kernel standard library — the actual `#[kernel]` definitions (`mlx/`, `ffai/`), their `BenchSpec`s, the bench harness, and the GPU correctness tests. Where new kernels land. Used by **`ffai-kernels-cli`**. |
-| [`ffai-kernels-cli`](../crates/ffai-kernels-cli/README.md) | The `ffaik` binary — `bench` / `build` / `inspect` / `device` / `snap` / `diff`, the developer-facing entry point. The top of the dependency graph; nothing depends on it. |
+| [`wh-iron-core`](../crates/wh-iron-core/README.md) | The shared data model — the `Kernel` / `Op` IR types, `DType`, `Shape`, and error types. Pure data structures with no logic, so every layer above can speak the same vocabulary. Used by **every** other crate. |
+| [`wh-iron-macros`](../crates/wh-iron-macros/README.md) | The compiler front end — the `#[kernel]` proc-macro and its body parser, which turn a Rust function into Iron Kernels IR at compile time. Owns the DSL grammar and its compile-error diagnostics. Used by **`wh-iron`** (re-exported as the public `#[kernel]` attribute). |
+| [`wh-iron-codegen`](../crates/wh-iron-codegen/README.md) | The optimizing compiler — lowers Iron Kernels IR through the [14-pass pipeline](#debugging-a-kernel) and emits MSL. The largest crate; owns every pass and the MSL emitter. Used by **`wh-iron-runtime`**, **`wh-iron-std`**, and **`wh-iron-cli`**. |
+| [`wh-iron-runtime`](../crates/wh-iron-runtime/README.md) | The GPU execution layer — compiles emitted MSL into Metal PSOs (with a PSO cache) and dispatches kernels through `Context`. Owns all Metal-framework / `objc2` interop. Used by **`wh-iron`** and **`wh-iron-std`**. |
+| [`wh-iron`](../crates/wh-iron/README.md) | The facade — re-exports `core`, `macros`, `codegen`, and `runtime` behind one `prelude` so downstream code and external users depend on a single crate. No logic of its own. Used by **`wh-iron-std`** and **`wh-iron-cli`**. |
+| [`wh-iron-std`](../crates/wh-iron-std/README.md) | The kernel standard library — the actual `#[kernel]` definitions (`mlx/`, `iron/`), their `BenchSpec`s, the bench harness, and the GPU correctness tests. Where new kernels land. Used by **`wh-iron-cli`**. |
+| [`wh-iron-cli`](../crates/wh-iron-cli/README.md) | The `iron` binary — `bench` / `build` / `inspect` / `device` / `snap` / `diff`, the developer-facing entry point. The top of the dependency graph; nothing depends on it. |
 
-The compile pipeline: `#[kernel] fn` → `ffai-kernels-macros` parses the body into **FFAI Kernels IR** → `ffai-kernels-codegen` runs the optimization passes and emits **MSL** → `ffai-kernels-runtime` dispatches it on the GPU.
+The compile pipeline: `#[kernel] fn` → `wh-iron-macros` parses the body into **Iron Kernels IR** → `wh-iron-codegen` runs the optimization passes and emits **MSL** → `wh-iron-runtime` dispatches it on the GPU.
 
 ## Dev loop
 
@@ -48,9 +48,9 @@ make bench       # full benchmark suite vs MLX (macOS + Metal)
 make clean       # remove target/
 ```
 
-Prefer `make` over raw `cargo` — it centralises flags and always passes `--workspace`. See [the CLI reference](cli.md) for the `ffaik` binary.
+Prefer `make` over raw `cargo` — it centralises flags and always passes `--workspace`. See [the CLI reference](cli.md) for the `iron` binary.
 
-New kernels can declare their correctness test and benchmark inline with the `#[test_kernel]` / `#[bench]` attributes (run via `ffaik test` / `ffaik bench`) instead of, or alongside, the hand-written `tests/*_gpu_correctness.rs` files. Both styles coexist during the migration — see [testing.md](testing.md#new-declarative-test_kernel--bench-additive-opt-in) and `crates/ffai-kernels-std/src/mlx/arange.rs` for the template.
+New kernels can declare their correctness test and benchmark inline with the `#[test_kernel]` / `#[bench]` attributes (run via `iron test` / `iron bench`) instead of, or alongside, the hand-written `tests/*_gpu_correctness.rs` files. Both styles coexist during the migration — see [testing.md](testing.md#new-declarative-test_kernel--bench-additive-opt-in) and `crates/wh-iron-std/src/mlx/arange.rs` for the template.
 
 ## Pre-push hooks
 
@@ -66,7 +66,7 @@ Run `make hooks` once after cloning. Bypass an individual hook with `--no-verify
 
 **What's caught locally**: the cheap wins — formatting, common typos, AI-attribution trailers / footers in commit messages, trailer-shape lookalikes, clippy warnings, and the `#[kernel] pub fn` → `inventory::submit!` consistency check.
 
-**What still only runs in CI**: the GPU correctness suite (needs Metal), `cargo test --workspace` (full test matrix), `ffaik build --emit all` (multi-minute), and the full bench harness. Pre-push handles the part of CI that fails most often without GPU.
+**What still only runs in CI**: the GPU correctness suite (needs Metal), `cargo test --workspace` (full test matrix), `iron build --emit all` (multi-minute), and the full bench harness. Pre-push handles the part of CI that fails most often without GPU.
 
 ## Branching model
 
@@ -97,12 +97,12 @@ Add `!` for breaking changes (`feat!: …`) and describe them in the PR body.
 
 | Want | Command |
 |---|---|
-| IR before any passes | `ffaik inspect <kernel> --ir` |
-| Final MSL | `ffaik inspect <kernel>` |
-| IR after one pass | `ffaik inspect <kernel> --pass <name>` (or `--pass all`) |
-| Per-pass op-count deltas | `ffaik inspect <kernel> --stats` |
-| Which pass is slow | `ffaik build --time-passes --filter <kernel>` |
-| Emit every kernel's MSL | `ffaik build --emit all -o <dir>` |
+| IR before any passes | `iron inspect <kernel> --ir` |
+| Final MSL | `iron inspect <kernel>` |
+| IR after one pass | `iron inspect <kernel> --pass <name>` (or `--pass all`) |
+| Per-pass op-count deltas | `iron inspect <kernel> --stats` |
+| Which pass is slow | `iron build --time-passes --filter <kernel>` |
+| Emit every kernel's MSL | `iron build --emit all -o <dir>` |
 
 When a kernel regresses, `--stats` before/after the change shows which pass changed the op count; `--pass all` dumps the IR at every stage.
 
@@ -172,7 +172,7 @@ macro_rules! body { ($bits:literal) => { /* … */ }; }
 #[kernel] pub fn dequant_gather_int4<T>(/* … */) { body!(4); }
 ```
 
-Canonical reference: `crates/ffai-kernels-std/src/ffai/dequant_gather.rs`. For hand-unrolled tree reductions, replace `*_step!` macros with a DSL `for` loop over the halving strides — identical MSL, survives the proc-macro.
+Canonical reference: `crates/wh-iron-std/src/iron/dequant_gather.rs`. For hand-unrolled tree reductions, replace `*_step!` macros with a DSL `for` loop over the halving strides — identical MSL, survives the proc-macro.
 
 ### ⚠️ `threadgroup_alloc` is hoisted to function scope — names must be globally unique
 
@@ -191,7 +191,7 @@ Invariants for any codegen pass you write or touch:
 Detection — emit every kernel, then scan for empty bodies:
 
 ```bash
-ffaik build --emit all -o /tmp/ffai-smoke
+iron build --emit all -o /tmp/iron-smoke
 awk '
   /for \(.*\) \{$/               { f=1; fn=FILENAME; l=FNR; next }
   f && /^[[:space:]]*\}$/        { print fn":"l": empty for-loop body"; f=0; next }
@@ -200,7 +200,7 @@ awk '
   k && /^\{$/                    { next }
   k && /^\}$/                    { print fn":"l": empty kernel body"; k=0; next }
   k                              { k=0 }
-' /tmp/ffai-smoke/Resources/kernels/*.metal
+' /tmp/iron-smoke/Resources/kernels/*.metal
 ```
 
 Empty output = clean. Any hit = ship-stopper. **Neither `xcrun metal` nor MSL snapshots catch an empty body** — only a GPU correctness test does (see [Testing](testing.md)).

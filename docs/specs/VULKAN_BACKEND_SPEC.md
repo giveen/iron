@@ -1,11 +1,11 @@
 # Vulkan / SPIR-V Backend Spec
 
 **Status:** 📋 Proposed (design only; no implementation yet)
-**Scope:** Add a **portable** GPU backend that lowers FFAI Kernels's `#[kernel]` DSL /
+**Scope:** Add a **portable** GPU backend that lowers Iron Kernels's `#[kernel]` DSL /
 IR to **SPIR-V** and dispatches it through **Vulkan compute** — one backend that
 runs across AMD, NVIDIA, Intel, Qualcomm Adreno, ARM Mali, and Apple (via
 MoltenVK).
-**Out of scope:** model loading, graph execution, checkpoint readers — FFAI Kernels
+**Out of scope:** model loading, graph execution, checkpoint readers — Iron Kernels
 is an optimized-kernel generator, not an inference engine.
 
 > Read `CUDA_BACKEND_SPEC.md` (the backend-seam design) and `AMD_BACKEND_SPEC.md`
@@ -30,7 +30,7 @@ vendor-specific ones:
 - Use **Vulkan** to reach everything *else* (Intel, mobile/embedded, ARM), and as
   a vendor-neutral baseline where a native backend doesn't exist yet.
 
-A second reason it's attractive: **SPIR-V is an IR**, so FFAI Kernels's IR → SPIR-V is
+A second reason it's attractive: **SPIR-V is an IR**, so Iron Kernels's IR → SPIR-V is
 an **IR-to-IR lowering** (via `rspirv`), not a text-emit-then-reparse step — a more
 natural structural fit than MSL/CUDA-C++ text, and a good candidate for the
 *reference* portable backend.
@@ -85,7 +85,7 @@ This is the AMD wave32/64 problem *taken to its limit*: Vulkan's **subgroup**
   subgroup support** and the relevant `VkSubgroupFeatureFlagBits` (arithmetic,
   shuffle, …) — themselves **optional**.
 
-FFAI Kernels's pervasive **32-lane** assumption cannot hold. Two coping strategies,
+Iron Kernels's pervasive **32-lane** assumption cannot hold. Two coping strategies,
 used together:
 - **`VK_EXT_subgroup_size_control`**: query the supported range and *require* a
   specific subgroup size at pipeline creation (`VkPipelineShaderStageRequired­
@@ -146,7 +146,7 @@ choice:
 
 | Strategy | How | Notes |
 |---|---|---|
-| **Direct SPIR-V (`rspirv`)** — recommended | IR → SPIR-V module via the `rspirv` builder | IR-to-IR; no text round-trip; full control over capabilities/exec-modes. Best fit for FFAI Kernels's IR. |
+| **Direct SPIR-V (`rspirv`)** — recommended | IR → SPIR-V module via the `rspirv` builder | IR-to-IR; no text round-trip; full control over capabilities/exec-modes. Best fit for Iron Kernels's IR. |
 | **GLSL/HLSL text → `shaderc`** | emit GLSL compute, compile with `shaderc`/`glslang` | reuses a text-emitter shape (like MSL/CUDA-C++); easy to read/debug; extra compile dep. |
 | **Rust → SPIR-V (`rust-gpu`)** | emit Rust device code, compile via Embark's `rust-gpu` | the Vulkan analog of `cuda-oxide`; idiomatic Rust kernels, but heavier toolchain + maturity caveats. On the radar, not the default. |
 
@@ -186,7 +186,7 @@ GLSL/`shaderc` path as a debugging/bring-up convenience.
 - **Driver fragmentation.** behavior/perf vary widely across vendors + driver
   versions, especially mobile (Adreno/Mali) — broad testing required.
 - **MoltenVK is a translation layer**, not native — useful for reach/CI on Apple
-  but slower than FFAI Kernels's own Metal backend; it's a fallback, not the Apple
+  but slower than Iron Kernels's own Metal backend; it's a fallback, not the Apple
   path.
 - **Tooling maturity:** `ash`/`vulkano`/`rspirv` are mature; `rust-gpu` is less so
   (if that codegen strategy is chosen).
@@ -194,7 +194,7 @@ GLSL/`shaderc` path as a debugging/bring-up convenience.
 ## 8. Why this backend earns its place
 
 It's the **breadth** backend: one SPIR-V/Vulkan target reaches Intel, Qualcomm,
-ARM, and any GPU without a native FFAI Kernels backend (plus Apple via MoltenVK),
+ARM, and any GPU without a native Iron Kernels backend (plus Apple via MoltenVK),
 reusing the IR + `#[kernel]` macro + the full `quant` codec. It complements — not
 replaces — the peak-perf native backends: Metal/CUDA/HIP for the vendor you're on,
 Vulkan for everywhere else and as the vendor-neutral baseline.

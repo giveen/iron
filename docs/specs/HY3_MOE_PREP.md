@@ -1,9 +1,9 @@
-# Hy3 (`hy_v3`) MoE prep for ffai-kernels
+# Hy3 (`hy_v3`) MoE prep for wh-iron
 
 Target model: [tencent/Hy3](https://huggingface.co/tencent/Hy3) (295B MoE, 21B active).
 Practical local checkpoint for Apple Silicon: `mlx-community/Hy3-oQ2` (~99 GB, MLX affine 2-bit, `group_size=64`).
 
-This doc tracks **kernel-layer** readiness. FFAI model-family wiring (`HYV3ForCausalLM`) is out of scope here.
+This doc tracks **kernel-layer** readiness. Iron model-family wiring (`HYV3ForCausalLM`) is out of scope here.
 
 ## Config snapshot (from `tencent/Hy3` `config.json`)
 
@@ -25,18 +25,18 @@ This doc tracks **kernel-layer** readiness. FFAI model-family wiring (`HYV3ForCa
 
 | Need | Kernel(s) | Status |
 |------|-----------|--------|
-| Sigmoid + bias scores (single tensor) | `ffai_moe_router_sigmoid_bias` | ready; Hy3 shape test |
-| Sigmoid unbiased + biased pair | `ffai_moe_sigmoid_bias` | ready; Hy3 shape test |
-| Top-k biased / weight unbiased | `ffai_moe_router_topk_biased` | ready; Hy3 192/8 test + bench |
-| Softmax top-k (not Hy3 scorer) | `ffai_moe_router_topk` | width bench only |
-| Expert gather / permute / sort | `ffai_moe_gather_*`, `ffai_moe_permute`, `ffai_moe_sort_plan` | ready |
-| Expert-outer int2/4/8 gather (MPP) | `ffai_moe_gather_qmm_mma_eg_int{2,4,8}_expert_grid_mpp` | ready; Path B prefill |
-| int2 BM16 MMA gather | `ffai_moe_gather_qmm_mma_int2_bm16` | ready |
-| int2 BM8/BM64 MPP gather | `ffai_moe_gather_qmm_mma_int2_bm{8,64}_mpp` | ready (opt-in tiles) |
-| int2 expert-indexed matvec | `ffai_dequant_gemv_int2_expert_indexed` | ready (decode) |
-| SwiGLU / down combine | `ffai_swiglu`, `ffai_moe_down_swiglu_accum_*` | ready |
-| Shared-expert helpers | `ffai_sigmoid_scalar_fma*` | ready |
-| QK-norm | `ffai_rms_norm` / `ffai_rms_norm_small` | ready (`head_dim=128`) |
+| Sigmoid + bias scores (single tensor) | `iron_moe_router_sigmoid_bias` | ready; Hy3 shape test |
+| Sigmoid unbiased + biased pair | `iron_moe_sigmoid_bias` | ready; Hy3 shape test |
+| Top-k biased / weight unbiased | `iron_moe_router_topk_biased` | ready; Hy3 192/8 test + bench |
+| Softmax top-k (not Hy3 scorer) | `iron_moe_router_topk` | width bench only |
+| Expert gather / permute / sort | `iron_moe_gather_*`, `iron_moe_permute`, `iron_moe_sort_plan` | ready |
+| Expert-outer int2/4/8 gather (MPP) | `iron_moe_gather_qmm_mma_eg_int{2,4,8}_expert_grid_mpp` | ready; Path B prefill |
+| int2 BM16 MMA gather | `iron_moe_gather_qmm_mma_int2_bm16` | ready |
+| int2 BM8/BM64 MPP gather | `iron_moe_gather_qmm_mma_int2_bm{8,64}_mpp` | ready (opt-in tiles) |
+| int2 expert-indexed matvec | `iron_dequant_gemv_int2_expert_indexed` | ready (decode) |
+| SwiGLU / down combine | `iron_swiglu`, `iron_moe_down_swiglu_accum_*` | ready |
+| Shared-expert helpers | `iron_sigmoid_scalar_fma*` | ready |
+| QK-norm | `iron_rms_norm` / `iron_rms_norm_small` | ready (`head_dim=128`) |
 
 ## Decisions (locked)
 
@@ -48,8 +48,8 @@ This doc tracks **kernel-layer** readiness. FFAI model-family wiring (`HYV3ForCa
    weights  = renorm(unbiased[chosen]) if route_norm
    weights *= router_scaling_factor
    ```
-   FFAI: `MoEGatingMode.sigmoidBiasedTopK` + `MoERouter.routedScalingFactor`.
-   Kernels: `ffai_moe_sigmoid_bias` + `ffai_moe_router_topk_biased` (GPU path);
+   Iron: `MoEGatingMode.sigmoidBiasedTopK` + `MoERouter.routedScalingFactor`.
+   Kernels: `iron_moe_sigmoid_bias` + `iron_moe_router_topk_biased` (GPU path);
    CPU oracle matches NemotronH / DeepSeek-V3 Path B.
 
 2. **Shared expert** — always-on ungated SwiGLU; `y = routed + shared` (not router-gated).
@@ -58,12 +58,12 @@ This doc tracks **kernel-layer** readiness. FFAI model-family wiring (`HYV3ForCa
 
 ## Still open
 
-1. **Prefill throughput** — expert-sorted EG gather is the FFAI default at large
+1. **Prefill throughput** — expert-sorted EG gather is the Iron default at large
    `mTotal`; residual multi-× work is BW-bound MoE GU/down, not missing router kernels.
 
 2. **MTP** — `num_nextn_predict_layers=1`;
    `enorm(embed)+hnorm(h)→concat→eh_proj→decoder→final_layernorm→lm_head`.
-   Not wired in FFAI yet (optional follow-up).
+   Not wired in Iron yet (optional follow-up).
 
 ## Local checkpoint
 
@@ -77,4 +77,4 @@ huggingface-cli download mlx-community/Hy3-oQ2 --local-dir ~/models/Hy3-oQ2
 - Chat template / tokenizer / vocab 120832
 - MTP scheduling (reuse same decoder blocks)
 - RoPE table generation (host)
-- Full model registry in FFAI
+- Full model registry in Iron

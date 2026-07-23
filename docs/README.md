@@ -1,6 +1,6 @@
-# FFAI Kernels Documentation
+# Iron Kernels Documentation
 
-Table of contents for the FFAI Kernels docs. The top-level [`README`](../README.md) is the curated landing page; this index lists every page so you can jump straight to a topic. New contributors (and their agents) should read [Getting started](getting-started.md) → [Developing](developing.md) → [Testing](testing.md) before opening a PR.
+Table of contents for the Iron Kernels docs. The top-level [`README`](../README.md) is the curated landing page; this index lists every page so you can jump straight to a topic. New contributors (and their agents) should read [Getting started](getting-started.md) → [Developing](developing.md) → [Testing](testing.md) before opening a PR.
 
 ## Getting started
 
@@ -16,15 +16,15 @@ Table of contents for the FFAI Kernels docs. The top-level [`README`](../README.
 ## Reference
 
 - [Architecture](specs/ARCHITECTURE.md) — how a `#[kernel]` becomes a compiled shader, and how the bench runner, test runner, and kernel profiling work end-to-end (current in-process vs planned-subprocess execution model).
-- [CLI](cli.md) — the `ffaik` binary: `bench`, `build`, `emit`, `inspect`, `device`, `snap`, `diff`.
-- [Kernel audit](specs/KERNEL_AUDIT.md) — per-op coverage table: which MLX / FFAI kernels are ported, partial, or still missing, with the gaps and open PRs called out.
+- [CLI](cli.md) — the `iron` binary: `bench`, `build`, `emit`, `inspect`, `device`, `snap`, `diff`.
+- [Kernel audit](specs/KERNEL_AUDIT.md) — per-op coverage table: which MLX / Iron kernels are ported, partial, or still missing, with the gaps and open PRs called out.
 
 ## Design & planning
 
 Long-form specs and design docs live in [`specs/`](specs/).
 
-- [Bench metrics spec](specs/BENCH_METRICS_SPEC.md) — planned `ffaik bench` measurement additions (latency, GFLOP/s, roofline/utilization, bottleneck) so kernels can actually be optimized and precisions compared; includes the precision-support roadmap (nvfp4/mxfp4/mxfp8) and M5 Neural Accelerator context.
-- [Kernel consolidation plan](specs/KERNEL_CONSOLIDATION_PLAN.md) — the singular roadmap for restructuring `ffai-kernels-std`'s kernels: the `kernels/<family>/` target layout, the three LOC-reduction tools, the proven `conv/` exemplar, and the family-by-family migration order. (Authoring style lives in the [style guide](STYLE_GUIDE.md).)
+- [Bench metrics spec](specs/BENCH_METRICS_SPEC.md) — planned `iron bench` measurement additions (latency, GFLOP/s, roofline/utilization, bottleneck) so kernels can actually be optimized and precisions compared; includes the precision-support roadmap (nvfp4/mxfp4/mxfp8) and M5 Neural Accelerator context.
+- [Kernel consolidation plan](specs/KERNEL_CONSOLIDATION_PLAN.md) — the singular roadmap for restructuring `wh-iron-std`'s kernels: the `kernels/<family>/` target layout, the three LOC-reduction tools, the proven `conv/` exemplar, and the family-by-family migration order. (Authoring style lives in the [style guide](STYLE_GUIDE.md).)
 - [Hy3 MoE prep](specs/HY3_MOE_PREP.md) — kernel-layer readiness for Tencent Hy3 (`hy_v3`): router path choice, 192/top-8 shapes, oQ2 int2 expert path, local checkpoint notes.
 - [Toolchain design](specs/TOOLCHAIN_DESIGN.md) — the `#[kernel]` / `#[bench]` / `#[test_kernel]` macro surface and how the IR lowers to MSL.
 - [Proposed optimizations](specs/PROPOSED_OPTIMIZATIONS.md) — hot-path patterns that need codegen-layer support, with rationale and implementation sketches.

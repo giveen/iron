@@ -19,7 +19,7 @@
 Companion to `CUDA_BACKEND_SPEC.md` (Eric). The spec is the *design*;
 this is the *engineering plan* — concrete seams, file targets, dev env, sequencing.
 
-**Worktree:** `/Users/tom/dev/ffai-kernels-cuda` on branch `feature/cuda-backend`
+**Worktree:** `/Users/tom/dev/wh-iron-cuda` on branch `feature/cuda-backend`
 (off `5b60388`). Metal path stays the zero-config macOS default; CUDA gated.
 
 **Dev/test hardware:** local-network **DGX Spark (GB10, Grace-Blackwell, sm_121)**.
@@ -31,7 +31,7 @@ not just theoretical. A remote build loop runs cargo on-box (see §5).
 ## 0. Progress
 
 - [x] **GX10 wired** (§5) — ssh alias, CUDA 13.0/sm_121 confirmed, remote build loop, full workspace green on aarch64.
-- [x] **Cooperative-kernel inventory** — **~52 files** in `ffai-kernels-std` use `mpp::`/`coop_tile_`/`simdgroup`/`nax` (mlx/steel/ffai). Sizes Phase 5; most are quant/tile variants of a few primitives (simdgroup-MMA, MPP, NAX, coop_tile).
+- [x] **Cooperative-kernel inventory** — **~52 files** in `wh-iron-std` use `mpp::`/`coop_tile_`/`simdgroup`/`nax` (mlx/steel/iron). Sizes Phase 5; most are quant/tile variants of a few primitives (simdgroup-MMA, MPP, NAX, coop_tile).
 - [x] **Op surface mapped** — `Op` has ~65 emit arms (`emit_block.rs`). Categorized: ~45 pure arith/mem/control (port mechanically), ~13 simd/reduce (warp-shuffle, lucky 32-match), ~10 cooperative MMA (Phase 3 re-tile), 1 `InlineMsl` (Phase 5). Decode intrinsics live in `UnaryOpKind` → pure arithmetic, port verbatim.
 - [x] **Phase 0 seam landed** — `codegen/src/backend.rs` (`Target`, `CodegenBackend` trait, `TargetProfile` encoding §4.2 as data + the metal/cuda intrinsic maps), `cuda/mod.rs` (`CudaGenerator` stub), `MslGenerator` impls the trait. Non-breaking; Metal unchanged.
 - [x] **Phase 1 — smoke kernel GREEN end-to-end on GX10 (sm_121).** `vector_add` (f32): IR → `CudaGenerator` (CUDA C++ op-walker for the elementwise subset) → NVRTC → module → `cuLaunchKernel` → readback → CPU oracle, **max|Δ| = 0.0 (bit-exact)**. Codegen: `cuda/mod.rs` op-walker (ProgramId/Const/Load/Store/BinOp/UnaryOp/Cast/Fma, dtype→CUDA types, binop/intrinsic maps). Runtime: `runtime/src/device/cuda/{mod,ffi}.rs` — `CudaDevice` (hand-rolled `libcuda`+`libnvrtc` FFI: ctx, NVRTC compile w/ `--gpu-architecture=compute_121` + `--include-path`, alloc/upload/launch/download), `cuda` cargo feature + `build.rs` link config, integration test `tests/cuda_smoke.rs`. Plus `scale_add_exp` (constexpr scalar + `__expf`) max|Δ|=1.2e-7. **macOS Metal build unaffected (cuda off by default, no warnings).**
@@ -109,14 +109,14 @@ genuinely-distinct hardware op needing its own lowering.
 
 Today there is **no backend abstraction** — both layers are concrete Metal:
 
-- Codegen entry: `ffai-kernels-codegen/src/lib.rs` re-exports `MslGenerator`,
+- Codegen entry: `wh-iron-codegen/src/lib.rs` re-exports `MslGenerator`,
   `generator_for_mode`, `kernel_uses_n_simd`. Emission lives in `emit.rs` (28KB) +
   `msl/` (`mod.rs` 74KB, `emit_block.rs` 61KB, `preamble.rs`, `features.rs`,
   `matmul.rs`, `reduce.rs`, `fused.rs`, `helpers.rs`, `config.rs`).
-- Runtime entry: `ffai-kernels-runtime/src/lib.rs` → `Context`, concrete
+- Runtime entry: `wh-iron-runtime/src/lib.rs` → `Context`, concrete
   `device/metal_device.rs` (`MetalDevice`), `device/mod.rs` is `#[cfg(macos)]`.
 
-The passes (`passes/`) and the IR (`ffai-kernels-core`) and quant (`ffai-kernels-std::quant`)
+The passes (`passes/`) and the IR (`wh-iron-core`) and quant (`wh-iron-std::quant`)
 are **already backend-neutral** — do not touch them.
 
 ### Seam A — Codegen (`CodegenBackend` trait)
@@ -125,7 +125,7 @@ are **already backend-neutral** — do not touch them.
 `TargetProfile`:
 
 ```rust
-// ffai-kernels-codegen/src/backend.rs (new)
+// wh-iron-codegen/src/backend.rs (new)
 pub trait CodegenBackend {
     fn emit_kernel(&self, k: &Kernel, sched: &TileSchedule) -> Result<String>;
     fn preamble(&self, features: &FeatureSet) -> String;   // decode helpers, math intrinsics
@@ -155,7 +155,7 @@ extraction-vs-fork after reading `emit.rs` + `msl/mod.rs` op dispatch (§4 task 
 `acquire_private`. Abstract the dispatch-relevant subset:
 
 ```rust
-// ffai-kernels-runtime/src/device/mod.rs (promote to trait)
+// wh-iron-runtime/src/device/mod.rs (promote to trait)
 pub trait Device {
     type Buffer;
     fn create() -> Result<Option<Self>> where Self: Sized;
@@ -197,7 +197,7 @@ CPU-oracle harness (backend-agnostic).
 **Pure-DSL kernels** (Phases 1–4) are the bulk and port through the emitter.
 **Cooperative kernels** (`Op::InlineMsl` + `mpp::`/`coop_tile_*`) are Metal-only
 raw-MSL escape hatches → Phase 5 manual CUTLASS reimpl. Inventory these first
-(grep `InlineMsl`/`mpp::`/`coop_tile_` in `ffai-kernels-std`) to size Phase 5.
+(grep `InlineMsl`/`mpp::`/`coop_tile_` in `wh-iron-std`) to size Phase 5.
 
 ---
 
@@ -216,8 +216,8 @@ detected compute capability:
   E8M0/block-32 layout *is* the native Blackwell microscaling layout.
   Phase 4. **Spark validates this for real.**
 
-Formats already in tree (`ffai-kernels-std/src/quant/{codec,format,mod}.rs` +
-`ffai/*_block_scaled.rs`): mxfp4, mxfp8, nvfp4, mxint8, mxint4, E8M0 scales.
+Formats already in tree (`wh-iron-std/src/quant/{codec,format,mod}.rs` +
+`iron/*_block_scaled.rs`): mxfp4, mxfp8, nvfp4, mxint8, mxint4, E8M0 scales.
 
 ---
 
@@ -226,7 +226,7 @@ Formats already in tree (`ffai-kernels-std/src/quant/{codec,format,mod}.rs` +
 0. **Read the op-dispatch core** — `codegen/src/emit.rs` + `msl/mod.rs` op walker.
    Decide extract-shared-emitter vs parallel-cuda-emitter. (blocks Phase 0 design)
 1. **Inventory cooperative kernels** — grep `InlineMsl`/`mpp::`/`coop_tile_` in
-   `ffai-kernels-std` → Phase 5 size + list.
+   `wh-iron-std` → Phase 5 size + list.
 2. **Wire up Spark** (§5) — SSH, CUDA toolkit version, compute cap, NVRTC version.
 3. **Vet `cuda-oxide`** — license (`cuda-bindings`), alpha/Linux-only constraints,
    whether `cuda-core` alone (host runtime) is worth adopting vs hand-rolled FFI.
@@ -247,7 +247,7 @@ Formats already in tree (`ffai-kernels-std/src/quant/{codec,format,mod}.rs` +
 | NVRTC | `libnvrtc.so.13.0.88` |
 | OS / arch | Ubuntu 24.04.4 LTS, **aarch64** |
 | CPU / mem | 20 cores, 121 GiB unified |
-| Rust | 1.95.0 stable + cargo (builds ffai-kernels on-box) |
+| Rust | 1.95.0 stable + cargo (builds wh-iron on-box) |
 | cmake / clang | cmake 3.28.3; **no clang** (NVRTC path fine; cuda-oxide path would need it) |
 
 **sm_121 = real Blackwell → Phase 4 (`tcgen05` scaled-MMA) is testable here.**

@@ -8,10 +8,10 @@ Correctness is checked at four layers, each catching what the layer above cannot
 
 | Layer | Catches | Where it lives | Runs in CI? |
 |---|---|---|---|
-| **DSL / codegen unit tests** | Pass correctness, body-parser arms, IR variants, emit paths; `trybuild` compile-fail fixtures | `crates/ffai-kernels-codegen`, `ffai-kernels-core`, `ffai-kernels-macros` | ✅ |
-| **MSL snapshots** (`insta`) | Codegen output drift — a reviewable text diff in the PR | `crates/ffai-kernels-codegen/tests/msl_snapshots.rs` | ✅ |
-| **GPU correctness** | Numeric disagreement vs a naive CPU oracle, on a real Metal device | `crates/ffai-kernels-std/tests/<kernel>_gpu_correctness.rs` | ✅ (macOS runner) |
-| **MLX side-by-side** (bench) | Throughput + numeric parity vs the upstream MLX kernel | `ffaik bench` | local-only (needs an MLX checkout) |
+| **DSL / codegen unit tests** | Pass correctness, body-parser arms, IR variants, emit paths; `trybuild` compile-fail fixtures | `crates/wh-iron-codegen`, `wh-iron-core`, `wh-iron-macros` | ✅ |
+| **MSL snapshots** (`insta`) | Codegen output drift — a reviewable text diff in the PR | `crates/wh-iron-codegen/tests/msl_snapshots.rs` | ✅ |
+| **GPU correctness** | Numeric disagreement vs a naive CPU oracle, on a real Metal device | `crates/wh-iron-std/tests/<kernel>_gpu_correctness.rs` | ✅ (macOS runner) |
+| **MLX side-by-side** (bench) | Throughput + numeric parity vs the upstream MLX kernel | `iron bench` | local-only (needs an MLX checkout) |
 
 No single layer is sufficient. The unit tests never touch a GPU; snapshots pin *whatever* the codegen emits (including wrong output); `xcrun metal` only checks syntax. **GPU correctness tests are the floor** — see the gaps section below.
 
@@ -30,10 +30,10 @@ Per-kernel, via `cargo` directly (these are the documented exceptions to "always
 
 ```bash
 # One kernel's GPU correctness test:
-cargo test -p ffai-kernels-std --test <kernel>_gpu_correctness
+cargo test -p wh-iron-std --test <kernel>_gpu_correctness
 
 # One kernel's perf bench (the #[ignore]'d companion test):
-cargo test --release -p ffai-kernels-std --test <kernel>_gpu_correctness -- --ignored --nocapture
+cargo test --release -p wh-iron-std --test <kernel>_gpu_correctness -- --ignored --nocapture
 ```
 
 ### CI vs local
@@ -41,17 +41,17 @@ cargo test --release -p ffai-kernels-std --test <kernel>_gpu_correctness -- --ig
 | Job | Workflow | What it runs |
 |---|---|---|
 | `typos` / `clippy` / tests | `.github/workflows/check.yml` | spell-check, lint `-D warnings`, `cargo test --workspace` (Ubuntu — no GPU) |
-| build / test / bench | `.github/workflows/ffai.yml` | `ffaik build`, `ffaik test` (GPU correctness vs CPU oracle), `ffaik bench` — on a **macOS GPU runner** |
+| build / test / bench | `.github/workflows/iron.yml` | `iron build`, `iron test` (GPU correctness vs CPU oracle), `iron bench` — on a **macOS GPU runner** |
 | coverage | `.github/workflows/coverage.yml` | `cargo llvm-cov --workspace --codecov` on macOS, uploads to Codecov; runs on pushes touching `crates/`, `Cargo.*`, `rust-toolchain.toml`, `.github/configs/codecov.yml` |
 | PR title | `.github/workflows/pr.yml` | validates the conventional-commit format |
 | labels | `.github/workflows/auto-label.yml` | release-notes labels from the PR-title prefix |
 
 - The DSL / codegen / GPU-correctness layers all run in CI — including on a macOS runner with a real GPU.
-- **`ffaik bench` benches the ffai-kernels kernels by default**; the MLX side-by-side A/B is opt-in via `ffaik bench --mlx` (it needs an MLX checkout, so the default CI bench runs ffai-kernels-only).
+- **`iron bench` benches the wh-iron kernels by default**; the MLX side-by-side A/B is opt-in via `iron bench --mlx` (it needs an MLX checkout, so the default CI bench runs wh-iron-only).
 
 ### macOS runner environment
 
-The macOS CI jobs (`ffai.yml` build/test/bench, plus `coverage.yml` and
+The macOS CI jobs (`iron.yml` build/test/bench, plus `coverage.yml` and
 `release.yml`) run on the **`macos-26`** GitHub-hosted runner. To see exactly
 what is installed (Xcode versions, SDKs, CLI tools), consult the image manifest:
 [runner-images → macos-26-arm64 readme](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md).
@@ -64,7 +64,7 @@ what is installed (Xcode versions, SDKs, CLI tools), consult the image manifest:
 > compiles it. This is the *runtime* `newLibraryWithSource` compiler, which is the
 > OS's — **selecting a newer Xcode (`DEVELOPER_DIR`) does not change it** (that
 > only swaps the offline `metal` compiler). The `macos-26` runner image is
-> currently macOS 26.4, so `ffaik test` **skips** any cooperative-tensor kernel
+> currently macOS 26.4, so `iron test` **skips** any cooperative-tensor kernel
 > whose pipeline won't build (`Kernel::requires_cooperative_tensors()` →
 > `[SKIP]`), reporting them as skipped rather than failed. They still compile +
 > get correctness-tested wherever the toolchain supports them (a 26.5+ box, and
@@ -75,13 +75,13 @@ what is installed (Xcode versions, SDKs, CLI tools), consult the image manifest:
 
 ### Every non-trivial kernel ships a GPU correctness test — same commit
 
-The test runs the kernel on a real Metal device and compares against a naive CPU reference computed in `f32`. Shared helpers (`ramp`, dtype pack/unpack, `max_abs_diff`, `naive_*`) live in `crates/ffai-kernels-std/tests/common/mod.rs`.
+The test runs the kernel on a real Metal device and compares against a naive CPU reference computed in `f32`. Shared helpers (`ramp`, dtype pack/unpack, `max_abs_diff`, `naive_*`) live in `crates/wh-iron-std/tests/common/mod.rs`.
 
 ```rust
 #![cfg(target_os = "macos")]
 mod common;
 use common::{ramp, pack_bytes, unpack_bytes, max_abs_diff};
-use ffai_kernels_runtime::Context;
+use wh_iron_runtime::Context;
 
 #[test]
 fn my_kernel_matches_naive_cpu_reference_f32() {
@@ -104,22 +104,22 @@ The naive CPU reference **is the contract**. If kernel and reference disagree, d
 
 ### New: declarative `#[test_kernel]` / `#[bench]` (additive, opt-in)
 
-Alongside the hand-written `tests/*_gpu_correctness.rs` files, a kernel can now declare its correctness test and benchmark **next to the kernel** with the `#[test_kernel]` / `#[bench]` attributes. This is being introduced additively — the legacy `tests/*_gpu_correctness.rs` files keep working unchanged, and during migration a kernel can carry both so old and new are A/B-compared on the same IR. `crates/ffai-kernels-std/src/mlx/arange.rs` is the first kernel ported; use it as the template.
+Alongside the hand-written `tests/*_gpu_correctness.rs` files, a kernel can now declare its correctness test and benchmark **next to the kernel** with the `#[test_kernel]` / `#[bench]` attributes. This is being introduced additively — the legacy `tests/*_gpu_correctness.rs` files keep working unchanged, and during migration a kernel can carry both so old and new are A/B-compared on the same IR. `crates/wh-iron-std/src/mlx/arange.rs` is the first kernel ported; use it as the template.
 
 ```rust
-use ffai-kernels::kernel;
+use wh-iron::kernel;
 
 #[kernel]
-pub fn ffai_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) { /* … */ }
+pub fn iron_arange<T>(out: Tensor<T>, start: Tensor<T>, step: Tensor<T>, #[constexpr] n: u32) { /* … */ }
 
 pub mod kernel_tests {
-    use ffai-kernels::{test::*, test_kernel};
-    use super::ffai_arange;
+    use wh-iron::{test::*, test_kernel};
+    use super::iron_arange;
     use crate::utils::{pack_f32, scalar_bytes};
 
     fn setup(start: f32, step: f32, n: usize, dt: DType) -> TestSetup {
         let expected: Vec<f32> = (0..n).map(|i| start + i as f32 * step).collect(); // CPU oracle in f32
-        TestSetup::new(ffai_arange::kernel_ir_for(dt))
+        TestSetup::new(iron_arange::kernel_ir_for(dt))
             .input(TestBuffer::from_vec("out", vec![0u8; n * dt.size_bytes()], dt))
             .input(TestBuffer::from_vec("start", scalar_bytes(start, dt), dt))
             .input(TestBuffer::from_vec("step", scalar_bytes(step, dt), dt))
@@ -129,22 +129,22 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-6)]
-    fn test_ffai_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
+    fn test_iron_arange_ascending(dt: DType) -> TestSetup { setup(0.0, 0.5, 64, dt) }
 
     // Per-dtype tolerances (order matches `dtypes`): f32, f16, bf16.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 1e-2, 1e-1])]
-    fn test_ffai_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
+    fn test_iron_arange_fractional_step(dt: DType) -> TestSetup { setup(0.0, 0.1, 64, dt) }
 }
 
 pub mod kernel_benches {
-    use ffai-kernels::{bench, test::*};
-    use super::ffai_arange;
+    use wh-iron::{bench, test::*};
+    use super::iron_arange;
     use crate::utils::scalar_bytes;
 
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_arange(dt: DType) -> BenchSetup {
         let n = 64 * 1024 * 1024usize;
-        BenchSetup::new(ffai_arange::kernel_ir_for(dt))
+        BenchSetup::new(iron_arange::kernel_ir_for(dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
             .buffer(BenchBuffer::from_vec("start", scalar_bytes(0.0, dt), dt))
             .buffer(BenchBuffer::from_vec("step", scalar_bytes(1.0, dt), dt))
@@ -158,12 +158,12 @@ pub mod kernel_benches {
 Notes:
 - Buffers bind **by name** (matching the kernel parameter names); ordering of `.buffer()`/`.input()` calls doesn't matter. `#[constexpr]` scalars are passed as little-endian uniform buffers, same as the hand-written tests.
 - The CPU oracle is the same contract as above — compute expected in `f32`, let the runner pack to the dtype and diff within tolerance. `tol` accepts a scalar, a per-dtype array, or a `{ f32: …, f16: … }` table.
-- Run them with `ffaik test [-f <filter>]` and `ffaik bench [-f <filter>]`; the new benches render in the same table as legacy rows. The `tests/kernel_tests_harness.rs` cargo bridge runs every `#[test_kernel]` under `cargo test` so the new path is part of the commit gate without `ffaik test`.
+- Run them with `iron test [-f <filter>]` and `iron bench [-f <filter>]`; the new benches render in the same table as legacy rows. The `tests/kernel_tests_harness.rs` cargo bridge runs every `#[test_kernel]` under `cargo test` so the new path is part of the commit gate without `iron test`.
 - This in-process runner is deliberately simple (it re-dispatches per iteration rather than reusing the legacy `GpuRunner`'s resident-buffer + DVFS-pinning path), so new-syntax bench GB/s currently reads lower than the legacy rows — fidelity is a follow-up, correctness is not affected.
 
 ### MSL snapshots for new emit paths
 
-A new DSL primitive, fusion pattern, or dtype path also lands an `insta` fixture in `crates/ffai-kernels-codegen/tests/msl_snapshots.rs` — a hand-built kernel run through `MslGenerator`, with the full MSL pinned via `assert_snapshot!`. Any future codegen change then surfaces as a reviewable text diff. Refresh intentional changes with `cargo insta review` (interactive) or `cargo insta test --accept`.
+A new DSL primitive, fusion pattern, or dtype path also lands an `insta` fixture in `crates/wh-iron-codegen/tests/msl_snapshots.rs` — a hand-built kernel run through `MslGenerator`, with the full MSL pinned via `assert_snapshot!`. Any future codegen change then surfaces as a reviewable text diff. Refresh intentional changes with `cargo insta review` (interactive) or `cargo insta test --accept`.
 
 Fixtures exist to **exercise distinct emit paths**, not to be exhaustive — add one when a new path lands that the existing snapshots don't cover.
 
@@ -173,14 +173,14 @@ Fixtures exist to **exercise distinct emit paths**, not to be exhaustive — add
 
 | Crate | Floor |
 |---|---|
-| `ffai-kernels-macros` | 92% |
-| `ffai-kernels-codegen` / `ffai-kernels-core` | 90% |
-| `ffai-kernels-runtime` | 85% |
-| `ffai-kernels-cli` | 80% |
-| `ffai-kernels-std` | line-coverage exempt — gated by bench-correctness instead |
-| `ffai-kernels` (facade) | excluded |
+| `wh-iron-macros` | 92% |
+| `wh-iron-codegen` / `wh-iron-core` | 90% |
+| `wh-iron-runtime` | 85% |
+| `wh-iron-cli` | 80% |
+| `wh-iron-std` | line-coverage exempt — gated by bench-correctness instead |
+| `wh-iron` (facade) | excluded |
 
-`ffai-kernels-std`'s `ffai/` and `mlx/` kernel-body files are excluded from the line-coverage denominator: the `#[kernel]` proc-macro consumes the body at compile time, the Rust body never executes, so line coverage on them is structurally meaningless. **Their correctness is gated by GPU correctness tests and bench equivalence instead — not by line coverage.**
+`wh-iron-std`'s `iron/` and `mlx/` kernel-body files are excluded from the line-coverage denominator: the `#[kernel]` proc-macro consumes the body at compile time, the Rust body never executes, so line coverage on them is structurally meaningless. **Their correctness is gated by GPU correctness tests and bench equivalence instead — not by line coverage.**
 
 ## ⚠️ Gaps in the test infrastructure
 
@@ -191,7 +191,7 @@ These are the holes a bug can slip through. Know them; close them when you can.
 A kernel that emits an **empty body** — from an inner `macro_rules!` or from a codegen pass dropping a loop body (see [Developing → kernel-authoring hazards](developing.md#kernel-authoring-hazards)) — produces all-zeros output. That output:
 
 - **passes `xcrun metal`** — an empty body is valid MSL;
-- **passes `ffaik build --emit` smoke** — same reason;
+- **passes `iron build --emit` smoke** — same reason;
 - **passes MSL-snapshot drift checks** — the snapshot just pins the wrong-but-stable empty body;
 - **passes a loose integration test** if its tolerance absorbs the noise.
 
@@ -199,7 +199,7 @@ It fails **only** when actual GPU output is compared to an expected value. That 
 
 ### ⚠️ Not every kernel has a GPU correctness test yet
 
-Coverage of `crates/ffai-kernels-std/tests/` is incomplete — some kernels have a bench row but no correctness test, and some have neither. A kernel with no correctness test has *no automated proof it computes the right answer*. When you touch such a kernel, add the test; when you add a kernel, add it in the same commit.
+Coverage of `crates/wh-iron-std/tests/` is incomplete — some kernels have a bench row but no correctness test, and some have neither. A kernel with no correctness test has *no automated proof it computes the right answer*. When you touch such a kernel, add the test; when you add a kernel, add it in the same commit.
 
 ### ⚠️ Perf numbers can be harness artifacts
 

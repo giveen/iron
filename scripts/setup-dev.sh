@@ -1,6 +1,6 @@
 #!/bin/bash
 # setup-dev.sh
-# One-time development environment setup for ffai-kernels.
+# One-time development environment setup for wh-iron.
 # Verifies toolchains, resolves dependencies, runs first build.
 #
 #   ./scripts/setup-dev.sh
@@ -20,7 +20,7 @@ warn() { echo -e "${YELLOW}  ⚠${NC}  $1"; }
 fail() { echo -e "${RED}  ✗${NC} $1"; exit 1; }
 
 echo ""
-echo "Setting up ffai-kernels development environment..."
+echo "Setting up wh-iron development environment..."
 echo ""
 
 # ─────────────────────────────────────────────
@@ -38,9 +38,9 @@ if ! command -v cargo &>/dev/null; then
 fi
 ok "Cargo: $(cargo --version)"
 
-# Verify nightly toolchain (ffai-kernels uses edition 2024)
+# Verify nightly toolchain (wh-iron uses edition 2024)
 if ! rustup show active-toolchain | grep -q "nightly"; then
-    warn "Active toolchain is not nightly. ffai-kernels requires nightly for edition=2024."
+    warn "Active toolchain is not nightly. wh-iron requires nightly for edition=2024."
     echo ""
     echo "Install with:"
     echo "  rustup toolchain install nightly"
