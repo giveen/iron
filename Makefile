@@ -1,4 +1,4 @@
-# Iron Kernels — Makefile
+# Iron — Makefile
 #
 # Common dev-loop targets. See TOOLCHAIN_PLAN.md for the phased
 # build-out and scripts/ for the longer-form scripts.
