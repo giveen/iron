@@ -1,6 +1,6 @@
-# Contributing to Iron Kernels
+# Contributing to Iron
 
-Thanks for your interest. Iron Kernels is a focused project — these guidelines keep contributions coherent and the reviewer queue sane.
+Thanks for your interest. Iron is a focused project — these guidelines keep contributions coherent and the reviewer queue sane.
 
 **TL;DR:**
 - Read the [docs](docs/README.md) before you write code — especially the kernel-authoring hazards in [`developing.md`](docs/developing.md).
@@ -60,7 +60,7 @@ The [`docs/`](docs/README.md) tree is the real reference. At minimum:
 
 ## Dependency policy
 
-Iron Kernels keeps its dependency tree small on purpose. Every external crate is a potential supply-chain attack vector — a compromised or malicious publish can execute arbitrary code during your build or at runtime. Before adding a dependency, ask:
+Iron keeps its dependency tree small on purpose. Every external crate is a potential supply-chain attack vector — a compromised or malicious publish can execute arbitrary code during your build or at runtime. Before adding a dependency, ask:
 
 1. **Can std do it?** `std::sync::Mutex`, `std::collections::HashMap`, manual `Display`/`Error` impls, and raw ANSI escape codes replace a surprising number of popular crates with zero cost.
 2. **How large is the transitive tree?** Run `cargo tree -p <crate>` and count what comes along for the ride. A crate that adds five transitive deps for a two-line abstraction is usually not worth it.
