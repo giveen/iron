@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn load_returns_defaults_without_tile_toml() {
+    fn load_returns_defaults_without_iron_toml() {
         let cfg: IronConfig = Figment::from(Serialized::defaults(IronConfig::default()))
             .merge(Toml::file("/nonexistent/iron.toml"))
             .extract()
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn find_tile_toml_returns_some_from_workspace_root() {
+    fn find_iron_toml_returns_some_from_workspace_root() {
         let found = ConfigLoader::find_iron_toml();
         if let Some(p) = found {
             assert!(p.ends_with("iron.toml"), "unexpected path: {p:?}");

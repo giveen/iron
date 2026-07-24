@@ -150,7 +150,7 @@ The `iron` CLI does **no GPU work itself**. `ProjectRunner` spawns
 
 ```mermaid
 flowchart LR
-    cli["tile CLI<br/>(thin protocol parser)"] -- "spawn + args" --> proc["__iron_runner<br/>RunnerHarness + GpuRunner + inventory"]
+    cli["iron CLI<br/>(thin protocol parser)"] -- "spawn + args" --> proc["__iron_runner<br/>RunnerHarness + GpuRunner + inventory"]
     proc -- "ProtocolMessage JSON lines (stdout)" --> cli
 ```
 

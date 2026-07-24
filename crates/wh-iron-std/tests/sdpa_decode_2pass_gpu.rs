@@ -422,10 +422,10 @@ fn sdpa_decode_2pass_bf16_chained_resident_perf_bench() {
 // ── GPU capture (xctrace-driven; see capture.rs docs) ───────────────────
 
 #[test]
-#[ignore = "GPU capture, requires MTL_CAPTURE_ENABLED=1 + MTILE_GPU_TRACE=/path"]
+#[ignore = "GPU capture, requires MTL_CAPTURE_ENABLED=1 + IRON_GPU_TRACE=/path"]
 fn sdpa_decode_2pass_capture() {
-    let Ok(path) = std::env::var("MTILE_GPU_TRACE") else {
-        eprintln!("MTILE_GPU_TRACE unset; skipping");
+    let Ok(path) = std::env::var("IRON_GPU_TRACE") else {
+        eprintln!("IRON_GPU_TRACE unset; skipping");
         return;
     };
     let _ = std::fs::remove_dir_all(&path);

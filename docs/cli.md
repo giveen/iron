@@ -118,7 +118,7 @@ iron snap [-o <file>] [--from <file.json>] [--note <text>] [-f <substr>]
 
 | Flag | Effect |
 |---|---|
-| `-o, --out <file>` | write the snapshot here (default: `.tile-snapshots/<sha>.json`) |
+| `-o, --out <file>` | write the snapshot here (default: `.iron-snapshots/<sha>.json`) |
 | `--from <file.json>` | promote an existing bench JSON instead of re-running the bench |
 | `--note <text>` | attach a note to the snapshot |
 | `-f, --filter <substr>` | only include kernels whose name contains `<substr>` |
