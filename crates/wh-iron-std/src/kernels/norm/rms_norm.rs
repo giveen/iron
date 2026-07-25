@@ -142,6 +142,43 @@ pub fn iron_rms_norm<T>(
     }
 }
 
+/// Row-wise RMSNorm with only an f16 output surface. Equivalent to
+/// `cast_f32_f16(iron_rms_norm(x, w))`, but avoids materializing the f32 norm
+/// when the next consumer (e.g. a tensor-core projection) reads f16 anyway.
+/// Same OOB handling as [`iron_rms_norm`]: 4 elements/thread, clamped load
+/// base + masked SSQ contribution + guarded store for `col >= n`.
+#[kernel]
+pub fn iron_rms_norm_f16out<T>(
+    x: Tensor<T>,
+    w: Tensor<T>,
+    mut out: Tensor<f16>,
+    eps_buf: Tensor<f32>,
+    #[constexpr] n: u32,
+) {
+    let row = program_id::<0>();
+    let rs = row * n;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < n;
+    let safe_col = select(in_bounds, col, 0u32);
+    let safe_base = rs + safe_col;
+    let base = rs + col;
+    let x0 = load(x[safe_base]).cast::<f32>();
+    let x1 = load(x[safe_base + 1u32]).cast::<f32>();
+    let x2 = load(x[safe_base + 2u32]).cast::<f32>();
+    let x3 = load(x[safe_base + 3u32]).cast::<f32>();
+    let raw_ssq = x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3;
+    let partial_ssq = select(in_bounds, raw_ssq, 0.0f32);
+    let tg_ssq = reduce_sum(partial_ssq);
+    let eps = load(eps_buf[0]);
+    let rms = rsqrt(tg_ssq / n + eps);
+    if in_bounds {
+        store(out[base], (x0 * rms * load(w[col]).cast::<f32>()).cast::<f16>());
+        store(out[base + 1u32], (x1 * rms * load(w[col + 1u32]).cast::<f32>()).cast::<f16>());
+        store(out[base + 2u32], (x2 * rms * load(w[col + 2u32]).cast::<f32>()).cast::<f16>());
+        store(out[base + 3u32], (x3 * rms * load(w[col + 3u32]).cast::<f32>()).cast::<f16>());
+    }
+}
+
 /// Small-head RMSNorm — 2 consecutive elements per thread, so
 /// `N = tpg * 2`. Covers per-head dispatch at head_dim ∈ {64, 128,
 /// 192, 256} (head_dim=64 → tpg=32 hits the single-simdgroup

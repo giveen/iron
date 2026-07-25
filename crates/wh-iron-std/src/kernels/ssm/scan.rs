@@ -925,6 +925,54 @@ pub fn iron_gated_group_rmsnorm_batched(
     }
 }
 
+// Same math as `iron_gated_group_rmsnorm_batched`, but stores the final
+// tensor as f16. This is specifically for the CUDA prefill path where the
+// next op is a tensor-core out_proj GEMM that immediately casts the f32
+// norm output to f16.
+#[kernel]
+pub fn iron_gated_group_rmsnorm_batched_f16out(
+    y: Tensor<f32>,       // [s * di] flat
+    z: Tensor<f32>,       // [s * di] flat
+    w: Tensor<f32>,       // [di]     norm weights (shared across tokens)
+    mut out: Tensor<f16>, // [s * di]
+    eps_buf: Tensor<f32>, // [1]
+    #[constexpr] gs: u32, // group size (512 for Nemotron)
+    #[constexpr] ng: u32, // number of groups per token (8 for Nemotron)
+) {
+    let tg = program_id::<0>();
+    let grp = tg - (tg / ng) * ng;
+    let ti = tg / ng;
+    let rs = ti * ng * gs + grp * gs;
+    let col = tid * 4u32;
+    let in_bounds = col + 3u32 < gs;
+    let safe_col = select(in_bounds, col, 0u32);
+    let sb = rs + safe_col;
+    let y0 = load(y[sb]);
+    let y1 = load(y[sb + 1u32]);
+    let y2 = load(y[sb + 2u32]);
+    let y3 = load(y[sb + 3u32]);
+    let z0 = load(z[sb]);
+    let z1 = load(z[sb + 1u32]);
+    let z2 = load(z[sb + 2u32]);
+    let z3 = load(z[sb + 3u32]);
+    let g0 = y0 * (z0 / (1.0f32 + exp(0.0f32 - z0)));
+    let g1 = y1 * (z1 / (1.0f32 + exp(0.0f32 - z1)));
+    let g2 = y2 * (z2 / (1.0f32 + exp(0.0f32 - z2)));
+    let g3 = y3 * (z3 / (1.0f32 + exp(0.0f32 - z3)));
+    let raw = g0 * g0 + g1 * g1 + g2 * g2 + g3 * g3;
+    let partial = select(in_bounds, raw, 0.0f32);
+    let ssq = reduce_sum(partial);
+    let eps = load(eps_buf[0]);
+    let rms = rsqrt(ssq / (gs.cast::<f32>()) + eps);
+    if in_bounds {
+        let base = rs + col;
+        store(out[base], (g0 * rms * load(w[grp * gs + col])).cast::<f16>());
+        store(out[base + 1u32], (g1 * rms * load(w[grp * gs + col + 1u32])).cast::<f16>());
+        store(out[base + 2u32], (g2 * rms * load(w[grp * gs + col + 2u32])).cast::<f16>());
+        store(out[base + 3u32], (g3 * rms * load(w[grp * gs + col + 3u32])).cast::<f16>());
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // Mamba2 SSD chunked-matmul prefill scan — PORTABLE elementwise kernels.
 //

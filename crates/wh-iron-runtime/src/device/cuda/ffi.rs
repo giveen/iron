@@ -467,6 +467,8 @@ unsafe extern "C" {
     ) -> nvrtcResult;
     pub fn nvrtcGetPTXSize(prog: nvrtcProgram, ptx_size_ret: *mut usize) -> nvrtcResult;
     pub fn nvrtcGetPTX(prog: nvrtcProgram, ptx: *mut c_char) -> nvrtcResult;
+    pub fn nvrtcGetCUBINSize(prog: nvrtcProgram, cubin_size_ret: *mut usize) -> nvrtcResult;
+    pub fn nvrtcGetCUBIN(prog: nvrtcProgram, cubin: *mut c_char) -> nvrtcResult;
     pub fn nvrtcGetProgramLogSize(prog: nvrtcProgram, log_size_ret: *mut usize) -> nvrtcResult;
     pub fn nvrtcGetProgramLog(prog: nvrtcProgram, log: *mut c_char) -> nvrtcResult;
     pub fn nvrtcGetErrorString(result: nvrtcResult) -> *const c_char;

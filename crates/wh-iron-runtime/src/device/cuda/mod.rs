@@ -1320,14 +1320,26 @@ impl CudaDevice {
             "nvrtcCreateProgram",
         )?;
 
-        // Compile to the device's virtual architecture.
-        let arch = {
-            // Blackwell (CC 12.x) block-scaled FP4/FP8 MMA requires the
-            // accelerated `a` target (compute_120a/121a); plain compute_120
-            // fails PTX JIT ("a PTX JIT compilation failed") on those kernels.
-            let accel = if self.cc_major >= 12 { "a" } else { "" };
+        // Compile to the device's virtual architecture: PTX + driver JIT is
+        // the DEFAULT (an A/B on GB10 measured it slightly ahead of native
+        // SASS for the latency-bound decode kernels — 36.3 vs 35.4 tok/s —
+        // and equal on prefill). IRON_NVRTC_NATIVE=1 opts in to native-arch
+        // SASS via nvrtcGetCUBIN (faster first dispatch, no JIT).
+        //
+        // Blackwell (CC 12.x) block-scaled FP4/FP8 MMA requires the
+        // accelerated `a` target (compute_120a/121a / sm_120a/121a) in
+        // either mode; the plain target fails PTX JIT ("a PTX JIT
+        // compilation failed") on those kernels.
+        let accel = if self.cc_major >= 12 { "a" } else { "" };
+        let use_ptx = std::env::var("IRON_NVRTC_NATIVE").is_err();
+        let arch = if use_ptx {
             CString::new(format!(
                 "--gpu-architecture=compute_{}{}{}",
+                self.cc_major, self.cc_minor, accel
+            ))
+        } else {
+            CString::new(format!(
+                "--gpu-architecture=sm_{}{}{}",
                 self.cc_major, self.cc_minor, accel
             ))
         }
@@ -1448,13 +1460,23 @@ impl CudaDevice {
             )));
         }
 
-        // Fetch PTX.
+        // Fetch the compiled image: PTX (default, driver-JIT'd by
+        // cuModuleLoadData below) or native CUBIN (SASS) under
+        // IRON_NVRTC_NATIVE=1. cuModuleLoadData accepts both.
         let ptx = unsafe {
-            let mut ptx_size: usize = 0;
-            nvrtc_check(nvrtcGetPTXSize(prog, &mut ptx_size), "nvrtcGetPTXSize")?;
-            let mut buf = vec![0u8; ptx_size];
-            nvrtc_check(nvrtcGetPTX(prog, buf.as_mut_ptr() as *mut c_char), "nvrtcGetPTX")?;
-            buf
+            if use_ptx {
+                let mut ptx_size: usize = 0;
+                nvrtc_check(nvrtcGetPTXSize(prog, &mut ptx_size), "nvrtcGetPTXSize")?;
+                let mut buf = vec![0u8; ptx_size];
+                nvrtc_check(nvrtcGetPTX(prog, buf.as_mut_ptr() as *mut c_char), "nvrtcGetPTX")?;
+                buf
+            } else {
+                let mut cubin_size: usize = 0;
+                nvrtc_check(nvrtcGetCUBINSize(prog, &mut cubin_size), "nvrtcGetCUBINSize")?;
+                let mut buf = vec![0u8; cubin_size];
+                nvrtc_check(nvrtcGetCUBIN(prog, buf.as_mut_ptr() as *mut c_char), "nvrtcGetCUBIN")?;
+                buf
+            }
         };
         unsafe { nvrtcDestroyProgram(&mut prog) };
 
