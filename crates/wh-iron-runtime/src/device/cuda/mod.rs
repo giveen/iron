@@ -206,14 +206,28 @@ impl Prepared<'_> {
 
 /// Soft cap on total bytes parked in the caching pool. Beyond this we stop
 /// retaining freed buffers (and evict on demand) so the pool can't hoard VRAM.
-/// The 4 GiB default gives a forward's transients plenty of headroom while
-/// leaving model weights + KV resident on a unified-memory box (e.g. the
-/// 120 GB GB10); `IRON_POOL_CAP_MB=N` overrides it per host/workload.
+/// The 8 GiB default (raised from 4 GiB, laguna prefill campaign round 10)
+/// gives a forward's transients plenty of headroom while leaving model
+/// weights + KV resident on a unified-memory box (e.g. the 120 GB GB10).
+/// ROUND-10 FINDING: a single long-running process serving a MIX of request
+/// sizes (e.g. varying prefill lengths across requests -- exactly what a
+/// real server sees) parks distinct size-bucketed buffers per size; at the
+/// old 4 GiB cap this filled up mid-sweep and every subsequent free/alloc
+/// for a size whose bucket wasn't already cached fell back to raw
+/// cuMemAlloc/cuMemFree (each a device-wide sync per this file's own
+/// alloc_raw/free_raw_pooled docs), stalling the compute pipeline and
+/// costing up to 32% throughput on the GB10 (measured: pp2048 -32.3%,
+/// pp4096 -21.1%, pp8192 -8.9% vs isolated-process baseline, spark box,
+/// 2026-07-25). Empirically, 8 GiB (2x old default) fully closed the gap
+/// on that workload (verified equal to 16 GiB and 64 GiB, i.e. well past
+/// the actual threshold, with comfortable margin) while leaving ~100+ GB
+/// of the box's 121 GB unified memory free even with a 71 GB resident
+/// model. `IRON_POOL_CAP_MB=N` still overrides it per host/workload.
 #[inline]
 fn pool_cap_bytes() -> usize {
     use std::sync::OnceLock;
     static CAP: OnceLock<usize> = OnceLock::new();
-    const DEFAULT: usize = 4 * 1024 * 1024 * 1024;
+    const DEFAULT: usize = 8 * 1024 * 1024 * 1024;
     *CAP.get_or_init(|| {
         std::env::var("IRON_POOL_CAP_MB")
             .ok()
