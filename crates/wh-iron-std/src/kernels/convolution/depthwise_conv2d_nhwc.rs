@@ -56,7 +56,16 @@ pub fn depthwise_conv2d_nhwc<T>(
     // Flat NHWC output index → (n, oh, ow, c) with channel fastest, so the
     // flat index equals `((n*out_h + oh)*out_w + ow)*ch + c` and the output
     // store can write `out[idx]` directly.
-    let idx = program_id::<0>();
+    let raw = program_id::<0>();
+    // Over-dispatch guard: `grid_1d` rounds the launch up to a whole
+    // threadgroup, so when the flat output count is not a multiple of the
+    // threadgroup size the tail threads carry `raw` past the last output.
+    // Clamp them onto element 0 (always in-bounds) for the reads and skip
+    // their store — otherwise they index `out`/`input` out of bounds
+    // (nondeterministic inf/NaN in neighbouring GPU memory). Same guard as
+    // `winograd_conv`, generalised to a multi-axis flat index.
+    let in_range = raw < batch * ch * out_h * out_w;
+    let idx = select(in_range, raw, 0u32);
     let c = idx % ch;
     let t1 = idx / ch;
     let ow = t1 % out_w;
@@ -87,7 +96,9 @@ pub fn depthwise_conv2d_nhwc<T>(
             acc = acc + x_m * wt;
         }
     }
-    store(out[idx], acc.cast::<T>());
+    if in_range {
+        store(out[idx], acc.cast::<T>());
+    }
 }
 
 pub mod kernel_tests {

@@ -171,6 +171,12 @@ jobs:
       - name: Add iron to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
 
+      # The macos-26 image ships Xcode without the Metal Toolchain, so the
+      # offline `metal` compiler that `iron build`'s MSL codegen shells out
+      # to is missing ("cannot execute tool 'metal'"). Install it first.
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Build
         run: iron build
 
@@ -240,6 +246,9 @@ jobs:
       - name: Add iron to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
 
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Bench (heavy)
         run: iron bench -vv --allow-dirty --match-group '^(gemm|moe|ssm|quant|kv_cache|hyper_connections|sdpa)$' --json /tmp/bench-heavy.json
 
@@ -284,6 +293,9 @@ jobs:
 
       - name: Add iron to PATH
         run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
+
+      - name: Install Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
 
       - name: Bench (light)
         run: iron bench -vv --allow-dirty --match-group '^(norm|ops|sampling|convolution|rope|vision|audio)$' --json /tmp/bench-light.json

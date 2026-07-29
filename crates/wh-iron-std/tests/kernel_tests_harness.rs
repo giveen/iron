@@ -16,7 +16,7 @@
 
 mod common;
 
-use common::gpu_lock;
+use common::{gpu_lock, is_unsupported_coop_tensor};
 use wh_iron::{Context, runner::run_kernel_test};
 
 #[test]
@@ -43,6 +43,7 @@ fn all_registered_kernel_tests_pass() {
     );
 
     let mut total = 0usize;
+    let mut skipped = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
     // NB: iterate via `wh_iron_std::all_tests()` (not `wh_iron::harness::
@@ -66,6 +67,17 @@ fn all_registered_kernel_tests_pass() {
                     tol,
                     o.n_checked,
                 )),
+                // Some Metal toolchains (the GitHub `macos-26` runner image)
+                // can't build the MPP / bgemm cooperative-tensor kernel family
+                // at PSO creation. Those kernels are valid and run on the dev
+                // machines; skip them here rather than red the whole harness,
+                // so the non-MPP correctness sweep (conv, norm, sdpa, …) still
+                // gates every PR on real GPU. See `common::
+                // is_unsupported_coop_tensor`.
+                Err(e) if is_unsupported_coop_tensor(&e) => {
+                    skipped += 1;
+                    eprintln!("skip {} [{dt}]: Metal toolchain cannot build kernel", t.name());
+                },
                 Err(e) => failures.push(format!("{} [{dt}]: {e}", t.name())),
             }
         }
@@ -80,6 +92,13 @@ fn all_registered_kernel_tests_pass() {
         "all_tests() iterated zero #[test_kernel] entries despite {n_kernels} \
          registered kernels — link / registration regression",
     );
+
+    if skipped > 0 {
+        eprintln!(
+            "note: {skipped}/{total} #[test_kernel] checks skipped — this Metal \
+             toolchain cannot build them (MPP cooperative-tensor kernels)",
+        );
+    }
 
     assert!(
         failures.is_empty(),

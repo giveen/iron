@@ -11,7 +11,7 @@
 mod common;
 use std::collections::BTreeMap;
 
-use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
+use common::{Dt, gpu_lock, is_unsupported_coop_tensor, pack_bytes, pack_u32_bytes, unpack_bytes};
 use wh_iron::{
     Context,
     core::{dtype::DType, ir::KernelMode},
@@ -126,21 +126,30 @@ fn view_u16_bm64_matches_pool_bm64() {
 
     // POOL bm64
     let ctx = Context::new().unwrap();
-    let run =
-        |buffers: BTreeMap<String, Vec<u8>>, kernel_ir: wh_iron::core::ir::Kernel| -> Vec<f32> {
-            let mut k = kernel_ir;
-            k.mode = KernelMode::Reduction;
-            let r = ctx
-                .dispatch_with_grid(
-                    &k,
-                    &buffers,
-                    &BTreeMap::new(),
-                    [n_out / 64, m_total.div_ceil(64), 1],
-                    [128, 1, 1],
-                )
-                .expect("dispatch");
-            unpack_bytes(r.outputs.get("out").unwrap(), dt)
+    let run = |buffers: BTreeMap<String, Vec<u8>>,
+               kernel_ir: wh_iron::core::ir::Kernel|
+     -> Option<Vec<f32>> {
+        let mut k = kernel_ir;
+        k.mode = KernelMode::Reduction;
+        let r = match ctx.dispatch_with_grid(
+            &k,
+            &buffers,
+            &BTreeMap::new(),
+            [n_out / 64, m_total.div_ceil(64), 1],
+            [128, 1, 1],
+        ) {
+            Ok(r) => r,
+            // MPP cooperative-tensor kernel the macos-26 toolchain can't
+            // build; valid + runs on dev machines. See
+            // `common::is_unsupported_coop_tensor`.
+            Err(e) if is_unsupported_coop_tensor(&e.to_string()) => {
+                eprintln!("skip view_u16: toolchain cannot build the MPP kernel ({e})");
+                return None;
+            },
+            Err(e) => panic!("dispatch: {e:?}"),
         };
+        Some(unpack_bytes(r.outputs.get("out").unwrap(), dt))
+    };
     let mut pb: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     pb.insert("x".into(), pack_bytes(&x, dt));
     pb.insert("qs".into(), pack_u32_bytes(&qs));
@@ -152,7 +161,9 @@ fn view_u16_bm64_matches_pool_bm64() {
     pb.insert("m_total".into(), (m_total as u32).to_le_bytes().to_vec());
     pb.insert("n_out".into(), (n_out as u32).to_le_bytes().to_vec());
     pb.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
-    let pool_out = run(pb, iron_moe_bgemm_iq2xxs_bm64::kernel_ir_for(DType::F32));
+    let Some(pool_out) = run(pb, iron_moe_bgemm_iq2xxs_bm64::kernel_ir_for(DType::F32)) else {
+        return;
+    };
 
     // VIEW-u16 bm64
     let raw_bytes: Vec<u8> = raw_u16.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -169,7 +180,10 @@ fn view_u16_bm64_matches_pool_bm64() {
     vb.insert("k_in".into(), (k_in as u32).to_le_bytes().to_vec());
     vb.insert("tensor_byte_off".into(), 0u32.to_le_bytes().to_vec());
     vb.insert("expert_byte_stride".into(), ((nblk * 66) as u32).to_le_bytes().to_vec());
-    let view_out = run(vb, iron_moe_bgemm_iq2xxs_view_u16_bm64::kernel_ir_for(DType::F32));
+    let Some(view_out) = run(vb, iron_moe_bgemm_iq2xxs_view_u16_bm64::kernel_ir_for(DType::F32))
+    else {
+        return;
+    };
 
     let mut worst = 0.0f32;
     let mut wi = 0;

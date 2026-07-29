@@ -19,7 +19,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{Dt, gpu_lock, pack_bytes, pack_u32_bytes, unpack_bytes};
+use common::{Dt, gpu_lock, is_unsupported_coop_tensor, pack_bytes, pack_u32_bytes, unpack_bytes};
 use wh_iron::{Context, core::ir::KernelMode};
 use wh_iron_std::kernels::moe::{
     moe_bgemm_iq2xxs_bm64::iron_moe_bgemm_iq2xxs_bm64,
@@ -66,7 +66,9 @@ fn bm64_replay_real_dump() {
     eprintln!("[replay] qs={} d={} idx={:?}", qs.len(), d.len(), idx);
 
     for dt in [Dt::F32, Dt::F16] {
-        let bm = run_bm64(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dt);
+        let Some(bm) = run_bm64(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dt) else {
+            return;
+        };
         let gv = run_gemv(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dt);
         let mut worst = 0.0f32;
         let mut wr = 0;
@@ -140,7 +142,7 @@ fn run_bm64(
     n_out: usize,
     k_in: usize,
     dt: Dt,
-) -> Vec<f32> {
+) -> Option<Vec<f32>> {
     let mut buffers: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     buffers.insert("x".into(), pack_bytes(x, dt));
     buffers.insert("qs".into(), pack_u32_bytes(qs));
@@ -159,10 +161,19 @@ fn run_bm64(
     k.mode = KernelMode::Reduction;
     let gx = n_out / 64;
     let gy = m_total.div_ceil(64);
-    let r = ctx
-        .dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [gx, gy, 1], [128, 1, 1])
-        .expect("bm64 dispatch");
-    unpack_bytes(r.outputs.get("out").unwrap(), dt)
+    let r = match ctx.dispatch_with_grid(&k, &buffers, &BTreeMap::new(), [gx, gy, 1], [128, 1, 1]) {
+        Ok(r) => r,
+        // `iron_moe_bgemm_iq2xxs_bm64` is an MPP cooperative-tensor kernel
+        // some Metal toolchains can't build (the macos-26 CI image). Valid
+        // kernel, runs on the dev machines — skip when the toolchain can't
+        // compile it rather than fail. See `common::is_unsupported_coop_tensor`.
+        Err(e) if is_unsupported_coop_tensor(&e.to_string()) => {
+            eprintln!("skip moe_bm64_ragged: toolchain cannot build the bm64 MPP kernel ({e})");
+            return None;
+        },
+        Err(e) => panic!("bm64 dispatch: {e:?}"),
+    };
+    Some(unpack_bytes(r.outputs.get("out").unwrap(), dt))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -259,7 +270,9 @@ fn run_case(dtype: Dt) {
         runs.iter().filter(|(_, st, ln)| st / 64 != (st + ln - 1) / 64).collect();
     eprintln!("[ragged] runs straddling a 64-row tile boundary: {tile_straddles:?}");
 
-    let bm = run_bm64(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dtype);
+    let Some(bm) = run_bm64(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dtype) else {
+        return;
+    };
     let gv = run_gemv(&x, &qs, &d, &grid, &signs, &idx, m_total, n_out, k_in, dtype);
     // RELATIVE tolerance: bm64 (f16-staged MMA, f32 accum) vs gemv-rows
     // (f32 dot) differ only by rounding; the values reach ±300 so an

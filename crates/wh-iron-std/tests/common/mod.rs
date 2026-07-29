@@ -26,6 +26,20 @@ pub fn gpu_lock() -> MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// True when a kernel dispatch failed *only* because this Metal toolchain
+/// cannot compile a dynamic-extent `mpp::tensor_ops::matmul2d`
+/// cooperative-tensor body — the
+/// `unsupported deferred-static-alloca-size ... cooperative_tensor`
+/// PSO-creation error the GitHub `macos-26` runner image produces for the
+/// MPP / bgemm kernel family. Those kernels are valid and run on the dev
+/// machines (verified from an Apple7 M1 Max, family < 10, through the M5
+/// Max): on a toolchain that can't build them the correct behaviour is to
+/// SKIP, not fail. Takes the error's text (`IronError::to_string()` or the
+/// `run_kernel_test` String error) so callers on either side can share it.
+/// The `deferred-static-alloca` marker is unique to this compiler error, so
+/// it never false-positives on a genuine numerical failure.
+pub fn is_unsupported_coop_tensor(err: &str) -> bool { err.contains("deferred-static-alloca") }
+
 #[derive(Clone, Copy, Debug)]
 pub enum Dt {
     F32,

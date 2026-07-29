@@ -74,7 +74,16 @@ pub fn conv2d<T>(
     #[constexpr] pad_w: u32,
 ) {
     // Flat output index → (n, oc, oh, ow). One thread per output.
-    let idx = program_id::<0>();
+    let raw = program_id::<0>();
+    // Over-dispatch guard: `grid_1d` rounds the launch up to a whole
+    // threadgroup, so when the flat output count is not a multiple of the
+    // threadgroup size the tail threads carry `raw` past the last output.
+    // Clamp them onto element 0 (always in-bounds) for the reads and skip
+    // their store — otherwise they index `out`/`input` out of bounds
+    // (nondeterministic inf/NaN in neighbouring GPU memory). Same guard as
+    // `winograd_conv`, generalised to a multi-axis flat index.
+    let in_range = raw < batch * out_ch * out_h * out_w;
+    let idx = select(in_range, raw, 0u32);
     let ow = idx % out_w;
     let t1 = idx / out_w;
     let oh = t1 % out_h;
@@ -122,7 +131,9 @@ pub fn conv2d<T>(
         }
     }
 
-    store(out[idx], acc.cast::<T>());
+    if in_range {
+        store(out[idx], acc.cast::<T>());
+    }
 }
 
 // ── Generic variant ──────────────────────────────────────────────────────
@@ -150,7 +161,16 @@ pub fn conv2d_generic<T>(
     #[constexpr] pad_h: u32,
     #[constexpr] pad_w: u32,
 ) {
-    let idx = program_id::<0>();
+    let raw = program_id::<0>();
+    // Over-dispatch guard: `grid_1d` rounds the launch up to a whole
+    // threadgroup, so when the flat output count is not a multiple of the
+    // threadgroup size the tail threads carry `raw` past the last output.
+    // Clamp them onto element 0 (always in-bounds) for the reads and skip
+    // their store — otherwise they index `out`/`input` out of bounds
+    // (nondeterministic inf/NaN in neighbouring GPU memory). Same guard as
+    // `winograd_conv`, generalised to a multi-axis flat index.
+    let in_range = raw < batch * out_ch * out_h * out_w;
+    let idx = select(in_range, raw, 0u32);
     let ow = idx % out_w;
     let t1 = idx / out_w;
     let oh = t1 % out_h;
@@ -192,7 +212,9 @@ pub fn conv2d_generic<T>(
         }
     }
 
-    store(out[idx], acc.cast::<T>());
+    if in_range {
+        store(out[idx], acc.cast::<T>());
+    }
 }
 
 /// Fully general 2D convolution — strides, dilation, padding, and
@@ -247,6 +269,7 @@ pub fn conv2d_grouped<T>(
     weight: Tensor<T>,
     bias: Tensor<T>,
     out: Tensor<T>,
+    #[constexpr] batch: u32,
     #[constexpr] in_ch: u32,
     #[constexpr] in_h: u32,
     #[constexpr] in_w: u32,
@@ -268,7 +291,17 @@ pub fn conv2d_grouped<T>(
     #[constexpr] ocpg: u32,
 ) {
     // Flat output index → (n, oc, oh, ow). One thread per output.
-    let idx = program_id::<0>();
+    let raw = program_id::<0>();
+    // Over-dispatch guard: `grid_1d` rounds the launch up to a whole
+    // threadgroup, so when the flat output count is not a multiple of the
+    // threadgroup size the tail threads carry `raw` past the last output.
+    // Clamp them onto element 0 (always in-bounds) for the reads and skip
+    // their store — otherwise they index `out`/`input` out of bounds
+    // (nondeterministic inf/NaN in neighbouring GPU memory). Same guard as
+    // `winograd_conv`, generalised to a multi-axis flat index. `batch` is a
+    // constexpr purely so this bound is computable in-kernel.
+    let in_range = raw < batch * out_ch * out_h * out_w;
+    let idx = select(in_range, raw, 0u32);
     let ow = idx % out_w;
     let t1 = idx / out_w;
     let oh = t1 % out_h;
@@ -315,7 +348,9 @@ pub fn conv2d_grouped<T>(
             }
         }
     }
-    store(out[idx], acc.cast::<T>());
+    if in_range {
+        store(out[idx], acc.cast::<T>());
+    }
 }
 
 pub mod kernel_tests {
@@ -511,6 +546,7 @@ pub mod kernel_tests {
             .input(TestBuffer::from_vec("weight", pack_f32(&weight_f, dt), dt))
             .input(TestBuffer::from_vec("bias", pack_f32(&bias_f, dt), dt))
             .input(TestBuffer::zeros("out", n_out, dt))
+            .constexpr("batch", batch as u32)
             .constexpr("in_ch", in_ch as u32)
             .constexpr("in_h", in_h as u32)
             .constexpr("in_w", in_w as u32)
@@ -622,6 +658,7 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::random("weight", ch * kh * kw, dt))
             .buffer(BenchBuffer::random("bias", ch, dt))
             .buffer(BenchBuffer::zeros("out", n_out, dt).output())
+            .constexpr("batch", batch as u32)
             .constexpr("in_ch", ch as u32)
             .constexpr("in_h", in_h as u32)
             .constexpr("in_w", in_w as u32)

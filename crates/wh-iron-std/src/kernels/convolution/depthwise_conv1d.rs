@@ -45,7 +45,9 @@ pub fn iron_depthwise_conv1d<T>(
     #[constexpr] pad: u32,
     #[constexpr] dilation: u32,
 ) {
-    let idx = program_id::<0>();
+    let raw = program_id::<0>();
+    let in_range = raw < channels * out_len;
+    let idx = select(in_range, raw, 0u32);
     let op = idx % out_len;
     let c = idx / out_len;
     let in_base = c * in_len;
@@ -65,7 +67,9 @@ pub fn iron_depthwise_conv1d<T>(
         let w = load(weight[w_base + kx]).cast::<f32>();
         acc = acc + x_m * w;
     }
-    store(out[idx], acc.cast::<T>());
+    if in_range {
+        store(out[idx], acc.cast::<T>());
+    }
 }
 
 pub mod kernel_tests {
@@ -150,9 +154,18 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
     fn test_depthwise_conv1d_conformer(dt: DType) -> TestSetup { setup(dt, 256, 200, 15, 1, 7, 1) }
 
-    // Strided + dilated variant (codec / downsample).
+    // Strided + dilated variant (codec / downsample). channels·out_len =
+    // 8·15 = 120, deliberately NOT a multiple of the 256 threadgroup — so
+    // `grid_1d` over-dispatches 136 tail threads, exercising the bounds
+    // guard. Regression cover for the pre-guard OOB flake (max|Δ|=inf).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
     fn test_depthwise_conv1d_strided(dt: DType) -> TestSetup { setup(dt, 8, 32, 3, 2, 1, 2) }
+
+    // Small prime-ish tail: channels·out_len = 3·17 = 51, a second, very
+    // differently-sized over-dispatch case so the guard is covered
+    // independent of the strided shape's arithmetic.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 1e-2, 5e-2])]
+    fn test_depthwise_conv1d_odd_tail(dt: DType) -> TestSetup { setup(dt, 3, 17, 3, 1, 1, 1) }
 }
 
 pub mod kernel_benches {
