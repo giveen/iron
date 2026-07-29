@@ -1,0 +1,79 @@
+name: Build
+
+# Reusable. Two stages:
+#   compile  — cargo-build the `iron` + `__iron_runner` binaries once, cache
+#              them, and upload as an artifact every downstream job reuses.
+#   codegen  — run `iron build`: MSL codegen + `xcrun metal` compile-check of
+#              every registered kernel × dtype. Reuses the compiled binary
+#              from `compile` (no recompile).
+# This replaces the old iron.yml `compile` + `build` pair (they were a
+# pipeline, not a redundancy) and hands the same artifact to test /
+# correctness / bench so the CLI is built exactly once per CI run.
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Name to upload the built iron binaries under.
+        required: false
+        default: iron-binary
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR_FORCE: 1
+
+jobs:
+  compile:
+    name: Compile CLI
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: dtolnay/rust-toolchain@stable
+
+      # A hit on the binary cache (keyed on every Rust input) skips the cargo
+      # build entirely (~3-5 min). The dep cache below is only restored on a
+      # miss, so a clean build still gets warm ~/.cargo.
+      - name: Cache iron binary
+        id: binary-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/ci/iron
+            target/ci/__iron_runner
+          key: iron-binary-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/**/*.rs', 'rust-toolchain.toml') }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        with:
+          shared-key: iron-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build iron CLI and runner
+        if: steps.binary-cache.outputs.cache-hit != 'true'
+        run: cargo build --profile ci -p wh-iron-cli -p wh-iron-std
+
+      - name: Upload iron binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: |
+            target/ci/iron
+            target/ci/__iron_runner
+          if-no-files-found: error
+          retention-days: 1
+
+  codegen:
+    name: Codegen
+    runs-on: macos-26
+    timeout-minutes: 30
+    needs: compile
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-iron
+        with:
+          artifact: ${{ inputs.artifact }}
+      - name: iron build
+        run: iron build

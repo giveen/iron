@@ -1,12 +1,15 @@
-name: PR
+name: PR Conventions
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# `pull_request_target` so the label job can write to PRs from forks.
-# Safe here because neither job checks out PR code — they only read
-# `pull_request.title`.
+# `pull_request_target` so these jobs get a write token even for fork PRs
+# (labels, comments). Safe because none of them check out or run PR HEAD
+# code: lint-title / apply-label read only `pull_request.title` from the
+# event payload, and commit-hygiene checks out the BASE ref (default) to run
+# the repo's own script, reading the PR title/body/commits via the `gh` API —
+# never executing PR-provided code.
 on:
   pull_request_target:
     types: [opened, edited, reopened, synchronize]
@@ -73,3 +76,24 @@ jobs:
           else
             echo "No matching prefix in '$PR_TITLE'; leaving unlabeled (will fall to 'Other Changes')."
           fi
+
+  # ── Commit / PR-text hygiene ────────────────────────────────────────
+  # Moved here from lint.yml: it is inherently PR-only, and pull_request_target
+  # gives it a write token on fork PRs so its label + findings-comment work
+  # (they silently no-op under pull_request's read-only fork token). Reads the
+  # PR title/body/commits via the gh API; the checkout is the BASE ref only,
+  # to run the repo's own script — no PR HEAD code is executed.
+  commit-hygiene:
+    name: Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - name: Run hygiene check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/commit_hygiene.py

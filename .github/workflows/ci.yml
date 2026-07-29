@@ -1,0 +1,144 @@
+name: CI
+
+# Single entry point that orchestrates the reusable workflows so we get real
+# cross-job ordering (which separate top-level workflows can't express) and
+# build the iron binary exactly once per run:
+#
+#   changes
+#   lint ──┬── build ──┬── codegen        (iron build: MSL + xcrun metal check)
+#          │           └── correctness ── coverage-kernels  (non-PR only)
+#          ├── test
+#          └── coverage-core
+#                 └─(tag only)─ release   (needs build + test + correctness)
+#
+# Independent compiles (test, coverage-core) run in PARALLEL — they build
+# different profiles/features, so serializing them wouldn't let one reuse
+# another's artifacts. Only real dependencies are serialized: correctness /
+# codegen reuse `build`'s uploaded iron binary (no recompile); coverage-kernels
+# waits on correctness so the GPU is known-good before the heavy instrumented
+# sweep. The iron binary is compiled exactly ONCE per run and reused downstream.
+#
+# lint runs on EVERY PR and release. build / test / correctness / coverage-core
+# run on code PRs (docs-only PRs are skipped via the `changes` filter) and
+# always on pushes to main/dev, tags, and manual dispatch. coverage-kernels is
+# the expensive instrumented + full-GPU-sweep run (~15-20 min), so it is
+# NON-PR only (push main/dev, tags, dispatch) — an on-main signal, not a per-PR
+# blocker. codecov gates PRs via its project (no-regression) + patch (new code
+# >= 80%) status checks on the core-logic coverage. release publishes only on a
+# `v*` tag, and only after the gates are green.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast ubuntu classifier: is there anything worth spending macOS minutes on?
+  # Pure docs / markdown / baseline-JSON PRs answer "no" and skip the heavy
+  # jobs; lint still runs on them.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'rustfmt.toml'
+              - 'iron.toml'
+              - 'scripts/**'
+              - '.github/workflows/**'
+              - '.github/actions/**'
+              - '.github/configs/**'
+
+  lint:
+    name: Lint
+    uses: ./.github/workflows/lint.yml
+
+  build:
+    name: Build
+    needs: [lint, changes]
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    uses: ./.github/workflows/build.yml
+
+  test:
+    name: Test
+    needs: [lint, changes]
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    uses: ./.github/workflows/test.yml
+
+  # Core-logic coverage: fast, ubuntu, no GPU. Runs on every code PR and gates
+  # merges via codecov. Excludes wh-iron-std — its host/dispatch paths only
+  # execute on a GPU and are covered by coverage-kernels on main.
+  coverage-core:
+    name: Coverage (core)
+    needs: [lint, changes]
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write # codecov OIDC upload
+    uses: ./.github/workflows/coverage.yml
+    with:
+      runner: ubuntu-latest
+      cargo-args: "--workspace --exclude wh-iron-std"
+      metal: false
+      cache-key: coverage-core
+
+  correctness:
+    name: Correctness
+    # Needs `build` for the compiled iron binary artifact.
+    needs: [build, changes]
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    uses: ./.github/workflows/correctness.yml
+    with:
+      runner: macos-26
+      backend: metal
+    # Future: add CUDA / HIP runners as extra callers, e.g.
+    #   correctness-cuda:
+    #     uses: ./.github/workflows/correctness.yml
+    #     with: { runner: <self-hosted-nvidia>, backend: cuda }
+
+  # Kernel HOST/dispatch coverage: instrumented + full GPU sweep on macOS
+  # (~15-20 min). Optional — NON-PR only, and slotted after correctness so the
+  # GPU is known-good before we spend the run. This is the coverable half of
+  # wh-iron-std ("kernels"); on PRs its numbers carry forward from main.
+  coverage-kernels:
+    name: Coverage (kernels)
+    needs: [correctness]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write # codecov OIDC upload
+    uses: ./.github/workflows/coverage.yml
+    with:
+      runner: macos-26
+      cargo-args: "-p wh-iron-std"
+      metal: true
+      cache-key: coverage-kernels
+
+  release:
+    name: Release
+    needs: [build, test, correctness]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ github.ref_name }}

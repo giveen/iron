@@ -1,0 +1,72 @@
+name: Bench
+
+# Manual, full-suite GPU benchmark. Not run on PRs (perf needs dedicated,
+# consistent hardware to be meaningful — that arrives with the future
+# per-arch runners). Dispatch it by hand to capture a baseline for a chip.
+#
+# `runner` is an input so the same workflow drives macOS / CUDA / HIP hosts
+# once those runners exist; it reuses build.yml so the iron binary is built
+# the same way as everywhere else.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner label to bench on (e.g. macos-26).
+        required: false
+        default: macos-26
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR_FORCE: 1
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  bench:
+    name: Bench (full suite)
+    needs: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-iron
+
+      # Whole suite in one pass — no heavy/light shard split. If we bench,
+      # we bench everything.
+      - name: iron bench
+        run: iron bench -vv --allow-dirty --json /tmp/bench.json
+
+      - name: Snapshot result
+        run: |
+          iron snap \
+            --from /tmp/bench.json -o /tmp/bench-snapshot.json \
+            --note "manual bench @ ${{ github.sha }} (${{ github.ref_name }})"
+
+      # Best-effort trend vs the committed baseline for this chip (never
+      # fails the run — the runner chip often has no committed baseline).
+      - name: Diff vs baseline
+        run: |
+          set -uo pipefail
+          DEVICE_NAME=$(iron device --json | jq -r '.device')
+          SLUG=$(printf '%s' "$DEVICE_NAME" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+          BL="baselines/${SLUG}.json"
+          echo "chip='${DEVICE_NAME}' slug='${SLUG}' baseline='${BL}'"
+          if [ -f "$BL" ]; then
+            iron diff "$BL" /tmp/bench.json || true
+          else
+            echo "No committed baseline for this chip — snapshot uploaded as the new capture."
+          fi
+
+      - name: Upload bench snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-snapshot
+          path: |
+            /tmp/bench.json
+            /tmp/bench-snapshot.json
+          if-no-files-found: error

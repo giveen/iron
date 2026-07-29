@@ -1,0 +1,78 @@
+name: Lint
+
+# Reusable: fast, cheap, Linux-only gates that run on every PR and release
+# before the heavier build/test/correctness jobs. Called by ci.yml.
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR: 1
+
+jobs:
+  typos:
+    name: Typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: crate-ci/typos@v1
+        with:
+          config: .github/configs/typos-cli.toml
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            static.crates.io:443
+            crates.io:443
+            index.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+          cache: "false"
+      - run: cargo fmt --check --all
+
+  # `--all-features` pulls in the cuda / hip / vulkan backends, which only
+  # compile-check on Linux (no CUDA/HIP SDK on the macOS test runners), so
+  # clippy stays on ubuntu. Lints only; runs no tests.
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            static.crates.io:443
+            crates.io:443
+            index.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: clippy
+      - run: cargo clippy --all-targets --all-features -- -D warnings

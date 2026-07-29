@@ -1,0 +1,48 @@
+name: Setup Iron CLI
+description: >-
+  Download the pre-built `iron` + `__iron_runner` binaries (uploaded once by
+  the build workflow), put them on PATH, and — on macOS — install the Metal
+  Toolchain the offline `metal` compiler and the runtime `makeLibrary`
+  JIT both need. Used by every job that runs `iron build` / `iron test` /
+  `iron bench` so none of them re-compile the CLI. The calling JOB must run
+  `actions/checkout` first — a local composite action is read from the
+  checked-out workspace, and the iron commands read repo files (iron.toml,
+  baselines/).
+
+inputs:
+  artifact:
+    description: Name of the uploaded iron-binary artifact to download.
+    required: false
+    default: iron-binary
+
+runs:
+  using: composite
+  steps:
+    - name: Download iron binary
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact }}
+        path: target/ci
+
+    - name: Make iron executable
+      shell: bash
+      run: chmod +x target/ci/iron target/ci/__iron_runner
+
+    - name: Add iron to PATH
+      shell: bash
+      run: echo "${GITHUB_WORKSPACE}/target/ci" >> "$GITHUB_PATH"
+
+    # The macos-26 image ships Xcode WITHOUT the Metal Toolchain component;
+    # `xcrun metal` ("cannot execute tool 'metal'") and the runtime
+    # `makeLibrary(source:)` JIT for cooperative-tensor kernels both need it.
+    # No-op on non-macOS runners (future CUDA/HIP), so the action stays
+    # backend-agnostic. `sw_vers` is logged because the cooperative-tensor
+    # skips are an OS-version gap (< 26.5 can't lower dynamic-extent coop
+    # tensors) — when the image rolls to 26.5+ the skips should vanish, and
+    # this line makes that visible instead of mysterious.
+    - name: Install Metal Toolchain
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        sw_vers
+        xcodebuild -downloadComponent MetalToolchain

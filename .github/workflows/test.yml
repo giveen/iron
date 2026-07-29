@@ -1,0 +1,76 @@
+name: Test
+
+# Reusable. The Rust test suite, split by what each half actually needs:
+#
+#   logic (ubuntu)          — `cargo nextest --workspace`. The GPU integration
+#                             tests are `#![cfg(target_os = "macos")]`, so on
+#                             Linux they compile to nothing and this runs only
+#                             the fast, backend-agnostic logic: core IR,
+#                             codegen, macros, runtime, CLI, and the
+#                             codegen-every-registered-benchspec check.
+#
+#   gpu-integration (macOS) — the macOS-only cargo GPU integration tests
+#                             (tests/*_gpu.rs, the gdn-wy / moe pipeline and
+#                             ragged-correctness scenarios). Excludes
+#                             `kernel_tests_harness` (`all_registered_kernel_
+#                             tests_pass`) — that per-kernel CPU-oracle sweep
+#                             is owned by correctness.yml's `iron test`, so we
+#                             don't double-run it here.
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR: 1
+
+jobs:
+  iron:
+    name: Iron Core (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            static.crates.io:443
+            crates.io:443
+            index.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: test
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --no-fail-fast
+
+  gpu-integration:
+    name: GPU integration (macOS)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          # harden-runner blocking mode is Linux-only; audit on macOS.
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: test-macos
+      # Runtime `makeLibrary` JIT of the MPP/bgemm cooperative-tensor kernels
+      # needs the Metal Toolchain (missing from the base macos-26 image).
+      - name: Install Metal Toolchain
+        run: |
+          sw_vers
+          xcodebuild -downloadComponent MetalToolchain
+      - uses: taiki-e/install-action@nextest
+      # Run wh-iron-std's GPU integration tests; skip the whole-inventory
+      # kernel harness (correctness.yml covers those kernels via `iron test`).
+      - run: cargo nextest run -p wh-iron-std -E 'not binary(kernel_tests_harness)' --no-fail-fast

@@ -13,6 +13,17 @@ coverage:
         target: 80%
         threshold: 1%
         if_ci_failed: success
+        # PR patch gates on CORE-logic flags only. wh-iron-std's kernel
+        # HOST/dispatch code is coverable only on a GPU, and that run
+        # (coverage-kernels) is NON-PR — so a std-only PR has no fresh std
+        # upload and must NOT fail patch on carried-forward lines. std is
+        # instead protected by its project ratchet (below), enforced on main.
+        flags:
+          - codegen
+          - core
+          - macros
+          - runtime
+          - cli
 
 # Per-crate gates. Each crate ratchets against its own current % via
 # `target: auto`, so coverage can only go up. Aspirational floors stay
@@ -60,6 +71,20 @@ flag_management:
     - name: cli
       paths:
         - crates/wh-iron-cli/
+      statuses:
+        - type: project
+          target: auto
+          threshold: 0.5%
+          if_ci_failed: success
+    # wh-iron-std MINUS the `#[kernel]` DSL bodies (excluded globally in
+    # `ignore:` below — the proc-macro consumes them, so they never execute
+    # as Rust). This flag is the kernel HOST / dispatch / registry code, the
+    # coverable half of the "kernels" the >= 80% goal refers to. It is measured
+    # only by ci.yml's `coverage-kernels` job (macOS + GPU, NON-PR), so on PRs
+    # it carries forward from main; this project ratchet is what enforces it.
+    - name: std
+      paths:
+        - crates/wh-iron-std/
       statuses:
         - type: project
           target: auto

@@ -89,18 +89,25 @@ pub fn run(args: &TestArgs, harness: &crate::harness::Harness) -> Result<(), cra
     }
 
     if results.is_empty() && error_msgs.is_empty() {
+        // A user-supplied filter that matches nothing is a benign warning.
         if let Some(pattern) = &filter_args.filter {
             eprintln!(
                 "{} no tests matched filter {pattern:?}",
                 paint_stderr("warning:", Style::new().fg(Color::Yellow).bold()),
             );
-        } else {
-            eprintln!(
-                "{} no #[test_kernel] tests registered",
-                paint_stderr("warning:", Style::new().fg(Color::Yellow).bold()),
-            );
+            return Ok(());
         }
-        return Ok(());
+        // No filter AND zero registered `#[test_kernel]`s is NOT success — it
+        // means the kernel inventory failed to link (dead-strip / registration
+        // regression), so the runner had nothing to dispatch. A correctness
+        // gate that exercised zero kernels must fail loudly, never report
+        // green. Mirrors the cargo harness's `total > 0` / `n_kernels > 0`
+        // assertions, which this CLI path is the CI stand-in for.
+        return Err(crate::CliError::Other(
+            "no #[test_kernel] tests registered — kernel inventory did not link \
+             (dead-strip / registration regression). Refusing to report success."
+                .into(),
+        ));
     }
 
     // Group consecutive results by kernel name to produce forge-style suite blocks.

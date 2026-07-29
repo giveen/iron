@@ -1,0 +1,54 @@
+name: Correctness
+
+# Reusable, per-backend GPU kernel correctness: `iron test` dispatches every
+# registered `#[test_kernel]` on the GPU and checks it against the CPU oracle.
+# This is the canonical cross-backend correctness gate — distinct from the
+# cargo suite in test.yml. Parameterised by runner + backend so adding an
+# NVIDIA (CUDA) or AMD (HIP/ROCm) runner later is a one-line matrix entry in
+# ci.yml; today ci.yml calls it once with the macOS/Metal defaults.
+#
+# NOTE: the iron binary artifact is built on the macOS runner (build.yml), so
+# it only runs on macOS today. A Linux CUDA/HIP backend will need build.yml to
+# also produce a matching binary — tracked for when those runners land.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label to execute on (e.g. macos-26).
+        required: false
+        default: macos-26
+        type: string
+      backend:
+        description: GPU backend to test (metal | cuda | hip).
+        required: false
+        default: metal
+        type: string
+      artifact:
+        description: iron-binary artifact to download.
+        required: false
+        default: iron-binary
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CLICOLOR_FORCE: 1
+
+jobs:
+  correctness:
+    name: iron test (${{ inputs.backend }})
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - uses: ./.github/actions/setup-iron
+        with:
+          artifact: ${{ inputs.artifact }}
+      - name: iron test
+        run: |
+          if [ "${{ inputs.backend }}" = "metal" ]; then
+            iron test
+          else
+            iron test --backend "${{ inputs.backend }}"
+          fi

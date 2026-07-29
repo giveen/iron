@@ -1,35 +1,41 @@
 name: Release
 
-# Trigger on semver tags pushed to main (e.g. v0.2.0, v1.0.0-rc.1).
-# Also runnable manually to re-publish a tag that already exists.
+# Reusable. Builds the release binary and publishes the GitHub Release.
+#
+# The tag trigger lives in ci.yml, not here: on a `v*` tag push ci.yml runs
+# lint + build + test + correctness and only THEN calls this workflow, so a
+# release can never publish from a red commit. `workflow_dispatch` stays for
+# re-publishing an existing tag by hand (ungated, intentional).
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v0.2.0).
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v0.2.0)'
+        description: Tag to release (e.g. v0.2.0).
         required: true
 
 permissions:
-  contents: write   # create/update GitHub Releases and upload assets
+  contents: write # create/update GitHub Releases and upload assets
 
 jobs:
-  build:
-    name: Build iron binary
+  publish:
+    name: Build + publish iron binary
     runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
         with:
-          # Use the explicit tag when triggered manually; otherwise the push
-          # event already has the tag checked out.
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: false   # release builds are rare; don't pollute the cache
+          save-if: false # release builds are rare; don't pollute the cache
 
       - name: Build release binary
         run: cargo build --release -p wh-iron-cli
@@ -42,12 +48,11 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${{ inputs.tag }}"
 
-          # Create the release (idempotent: --target prevents re-creating if
-          # the tag already exists from a previous manual run).
+          # Idempotent: create, or upload assets to an existing release.
           gh release create "$TAG" \
             --title "$TAG" \
             --generate-notes \

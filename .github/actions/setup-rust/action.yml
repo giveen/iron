@@ -1,0 +1,40 @@
+name: Setup Rust
+description: >-
+  Install the pinned Rust toolchain and restore the cargo build cache. Shared
+  by the lint and build workflows so toolchain + cache config lives in one
+  place. The calling JOB must run `actions/checkout` first — a local composite
+  action is read from the checked-out workspace, so it can't check itself out.
+
+inputs:
+  components:
+    description: Comma-separated rustup components (e.g. "clippy" or "rustfmt").
+    required: false
+    default: ""
+  cache-key:
+    description: >-
+      Distinguishing key for Swatinem/rust-cache (shared-key). Jobs with
+      incompatible artifacts (instrumented vs plain) must use different keys.
+    required: false
+    default: "shared"
+  cache:
+    description: Set "false" to skip the cargo cache entirely (e.g. release builds).
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # rust-toolchain.toml pins the channel/edition; this action installs the
+    # default stable and cargo picks up the toml override automatically. The
+    # `components` input adds rustfmt / clippy when a job needs them.
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    - uses: Swatinem/rust-cache@v2
+      if: ${{ inputs.cache == 'true' }}
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        # Only the default branch writes the cache; PRs read it. Keeps the
+        # cache from thrashing on every feature branch.
+        save-if: ${{ github.ref == 'refs/heads/main' }}

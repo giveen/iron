@@ -1,24 +1,55 @@
 name: Coverage
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+# Reusable, parameterized instrumented coverage. ci.yml calls it TWICE:
+#
+#   core    — ubuntu, `--workspace --exclude wh-iron-std`, no GPU. Fast,
+#             runs on every code PR. Covers the backend-agnostic logic:
+#             core IR, codegen, macros, runtime, CLI.
+#   kernels — macos-26, `-p wh-iron-std`, Metal Toolchain + GPU. wh-iron-std's
+#             kernel HOST / dispatch / registry paths only *execute* on a GPU,
+#             so this is the instrumented + full-GPU-sweep run. Heavy
+#             (~15-20 min), so ci.yml gates it to non-PR events (push
+#             main/dev, tags, dispatch) and slots it AFTER correctness — an
+#             on-main signal, not a per-PR blocker.
+#
+# Both upload to codecov; flag_management in codecov.yml assigns files to
+# per-crate flags by path and carries forward flags a run didn't measure, so
+# a PR's core-only upload keeps main's std numbers intact.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/**/*.rs'
-      - 'crates/**/Cargo.toml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - '.github/configs/codecov.yml'
-      - '.github/workflows/coverage.yml'
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label (ubuntu-latest or macos-26).
+        required: false
+        default: ubuntu-latest
+        type: string
+      cargo-args:
+        description: >-
+          cargo-llvm-cov package selection, e.g.
+          "--workspace --exclude wh-iron-std" (core) or "-p wh-iron-std" (kernels).
+        required: false
+        default: "--workspace"
+        type: string
+      metal:
+        description: Install the Metal Toolchain (only the macOS GPU run needs it).
+        required: false
+        default: false
+        type: boolean
+      cache-key:
+        description: >-
+          Swatinem shared-key. Instrumented artifacts are not cache-compatible
+          with the plain build/test caches, and the two coverage runs use
+          different profiles, so each gets its own key.
+        required: false
+        default: coverage
+        type: string
   workflow_dispatch: {}
 
 permissions:
   contents: read
+  # codecov-action v5 uploads tokenlessly on public repos via GitHub OIDC,
+  # which needs an id-token.
+  id-token: write
 
 env:
   CLICOLOR: 1
@@ -26,9 +57,9 @@ env:
 
 jobs:
   coverage:
-    name: llvm-cov (macOS)
-    runs-on: macos-26
-    timeout-minutes: 30
+    name: llvm-cov (${{ inputs.runner }})
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
     steps:
       - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
@@ -44,17 +75,24 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Instrumented artifacts are NOT cache-compatible with the regular
-          # `cargo test` artifacts; key this cache separately so the Tests +
-          # Kernels jobs in check.yml don't get poisoned.
-          key: coverage
+          # rust-cache auto-includes runner.os in the key, so the ubuntu and
+          # macOS runs never share a cache even with the same key.
+          key: ${{ inputs.cache-key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@cargo-llvm-cov
 
+      # Only the macOS kernel run touches the GPU; the macos-26 image needs the
+      # Metal Toolchain for the runtime kernel-compile path the tests exercise.
+      - name: Install Metal Toolchain
+        if: ${{ inputs.metal }}
+        run: |
+          sw_vers
+          xcodebuild -downloadComponent MetalToolchain
+
       - name: Generate coverage (codecov format)
         run: |
-          cargo llvm-cov --workspace --codecov \
+          cargo llvm-cov ${{ inputs.cargo-args }} --codecov \
             --output-path coverage.json \
             --ignore-filename-regex '(crates/wh-iron/src/(lib|prelude)\.rs|crates/wh-iron-std/src/kernels/.*\.rs|tests/|benches/|build\.rs)'
 
