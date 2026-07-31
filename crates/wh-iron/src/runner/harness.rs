@@ -980,8 +980,22 @@ fn run_one_bench(
 
 const COMPARE_ELEM_CAP: usize = 1 << 15;
 
+/// Bit-equal values (covers matching infinities) and NaN-on-both-sides count
+/// as agreement; any one-sided NaN/inf maps to +inf so garbage fails loudly
+/// instead of `f32::max` silently discarding NaN operands (IEEE maxNum
+/// returns the non-NaN side). Mirrors `backend.rs`'s max_abs_diff.
 fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| {
+            if x == y || (x.is_nan() && y.is_nan()) {
+                0.0
+            } else {
+                let d = (x - y).abs();
+                if d.is_nan() { f32::INFINITY } else { d }
+            }
+        })
+        .fold(0.0f32, f32::max)
 }
 
 #[allow(clippy::too_many_arguments)]

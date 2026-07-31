@@ -69,6 +69,26 @@ impl super::MslGenerator {
             wl!(out, "    return T(0.5f * xf * (1.0f + metal::precise::tanh(arg)));");
             wl!(out, "}}");
         }
+        if feat.needs_tanh {
+            wl!(out);
+            // Metal's native `tanh` (fast-math build) returns WRONG finite
+            // values approaching the saturation boundary and NaN beyond
+            // it, instead of the correct asymptotic ±1: verified via GPU
+            // probe on this toolchain: `tanh(44.0f)` returns 0.0 (should
+            // be ~1.0), `tanh(44.4f)` returns NaN. Almost certainly the
+            // same `exp(2x)` evaluation-form instability the GELU helper
+            // above already works around for half/bfloat, just with a
+            // wider (but still finite-argument) blast radius for float32.
+            // tanh saturates to 1.0 within f32 ULP by |x| ≈ 10, so
+            // clamping the argument to ±20 before the builtin call is a
+            // mathematically exact no-op everywhere the builtin isn't
+            // broken, and sidesteps the broken region entirely.
+            wl!(out, "template<typename T>");
+            wl!(out, "inline T iron_tanh(T x) {{");
+            wl!(out, "    float xf = metal::clamp(float(x), -20.0f, 20.0f);");
+            wl!(out, "    return T(metal::precise::tanh(xf));");
+            wl!(out, "}}");
+        }
         if feat.needs_relu {
             wl!(out);
             wl!(out, "template<typename T>");
@@ -155,6 +175,35 @@ impl super::MslGenerator {
             wl!(out, "}}");
             wl!(out, "template<typename T>");
             wl!(out, "inline T iron_expm1_impl(T x) {{ return T(iron_expm1_impl(float(x))); }}");
+        }
+        if feat.needs_atan2 {
+            wl!(out);
+            // Metal's native `atan2` (built under the default fast-math
+            // mode) returns NaN at the `y=0,x=0` and `|y|=|x|=inf` edges -
+            // both are almost certainly a `y/x` internal to Apple's
+            // implementation evaluating to the indeterminate `0/0` or
+            // `inf/inf` before the quadrant correction runs. Every other
+            // case (finite atan2, `atan2(y!=0, 0)`, `atan2(0, x!=0)`,
+            // single-sided infinities) is correct on-device: verified via
+            // GPU probe: so special-case only the two broken edges and
+            // defer to the native builtin otherwise. Signs follow IEEE
+            // 754 / C99 Annex F: the zero/inf edges are `copysign(PI or
+            // PI/4-family constant selected by x's sign, y)`.
+            wl!(out, "inline float iron_atan2_impl(float y, float x) {{");
+            wl!(out, "    const float PI = 3.14159265358979323846f;");
+            wl!(out, "    if (x == 0.0f && y == 0.0f) {{");
+            wl!(out, "        return metal::copysign(metal::signbit(x) ? PI : 0.0f, y);");
+            wl!(out, "    }}");
+            wl!(out, "    if (metal::isinf(x) && metal::isinf(y)) {{");
+            wl!(out, "        float mag = metal::signbit(x) ? (0.75f * PI) : (0.25f * PI);");
+            wl!(out, "        return metal::copysign(mag, y);");
+            wl!(out, "    }}");
+            wl!(out, "    return metal::atan2(y, x);");
+            wl!(out, "}}");
+            wl!(out, "template<typename T>");
+            wl!(out, "inline T iron_atan2_impl(T y, T x) {{");
+            wl!(out, "    return T(iron_atan2_impl(float(y), float(x)));");
+            wl!(out, "}}");
         }
         if feat.needs_simd_product {
             wl!(out);

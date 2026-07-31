@@ -7,7 +7,7 @@
 
 use wh_iron_core::{
     dtype::DType,
-    ir::{ActKind, Block, Kernel, Op, UnaryOpKind},
+    ir::{ActKind, BinOpKind, Block, Kernel, Op, UnaryOpKind},
 };
 
 use super::MslGenerator;
@@ -44,9 +44,21 @@ pub(super) struct KernelFeatures {
     pub needs_gelu: bool,
     pub needs_relu: bool,
     pub needs_sigmoid: bool,
+    /// See `ActKind::msl_fn`'s doc: Metal's native `tanh` builtin returns
+    /// wrong finite values / NaN for float arguments past ~44. `iron_tanh`
+    /// clamps before calling the builtin.
+    pub needs_tanh: bool,
     pub needs_erf: bool,
     pub needs_erfinv: bool,
     pub needs_expm1: bool,
+    /// Metal's native `atan2` (compiled under the default fast-math mode)
+    /// returns NaN at the `y=0,x=0` and `|y|=|x|=inf` edges instead of the
+    /// IEEE-754/C99 Annex F values: verified via GPU probe: `atan2(0.0,
+    /// 0.0)` and `atan2(inf, inf)` both come back NaN on-device even though
+    /// every other quadrant/zero case (`atan2(1,0)`, `atan2(0,5)`, ...) is
+    /// correct. `iron_atan2_impl` special-cases just those two edges and
+    /// otherwise defers to the native builtin.
+    pub needs_atan2: bool,
     pub needs_simd_product: bool,
     /// MetalPerformancePrimitives (`mpp::tensor_ops::matmul2d` / NAX) needed.
     /// Detected by scanning `Op::InlineMsl::source` for `"mpp::"` — kernels
@@ -68,9 +80,11 @@ impl MslGenerator {
             needs_gelu: false,
             needs_relu: false,
             needs_sigmoid: false,
+            needs_tanh: false,
             needs_erf: false,
             needs_erfinv: false,
             needs_expm1: false,
+            needs_atan2: false,
             needs_simd_product: false,
             needs_mpp: false,
         };
@@ -184,11 +198,12 @@ impl MslGenerator {
                 ActKind::Gelu => feat.needs_gelu = true,
                 ActKind::Relu => feat.needs_relu = true,
                 ActKind::Sigmoid => feat.needs_sigmoid = true,
-                ActKind::Tanh => {},
+                ActKind::Tanh => feat.needs_tanh = true,
             },
             Op::UnaryOp { op: UnaryOpKind::Erf, .. } => feat.needs_erf = true,
             Op::UnaryOp { op: UnaryOpKind::ErfInv, .. } => feat.needs_erfinv = true,
             Op::UnaryOp { op: UnaryOpKind::Expm1, .. } => feat.needs_expm1 = true,
+            Op::BinOp { op: BinOpKind::ATan2, .. } => feat.needs_atan2 = true,
             Op::FusedElementwise { ops } =>
                 for inner in ops {
                     self.analyze_op(inner, feat);

@@ -9,6 +9,17 @@
 //! kernel reads which expert to index from a GPU-resident
 //! `expert_index: Tensor<u32>` at runtime.
 //!
+//! ## NVFP4 decode speed note (butter overlay)
+//!
+//! The DSL body below expands `iron_decode_e2m1` per-nibble (select-chain).
+//! Butter's Laguna Path B ships a **half bit-twiddle pack qdot** overlay
+//! (`float2(as_type<half2>(p))*16384`, bit-exact vs this codebook) under
+//! `butter-dev/Sources/IronSwift/Resources/kernel_overlays/` that replaces
+//! the emitted `iron_nvfp4_dequant_gemv_expert_indexed_{bf16,f16,f32}` in
+//! `kernels_extra.metallib`. Prefer that path for 8-expert concurrent decode
+//! until a pack-level fast path lands in this DSL / MSL emit (Metal-only;
+//! half reinterpret is not portable to CUDA/Vulkan without a backend split).
+//!
 //! Each kernel body is the `mlx/block_scaled_matmul.rs` qgemv for that format
 //! (same one-TG-per-output-row pack-/element-strided reduction), with two extra
 //! per-row offsets — exactly like the int4 expert-indexed kernel:

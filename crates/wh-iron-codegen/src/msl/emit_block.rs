@@ -280,11 +280,13 @@ impl MslGenerator {
                     let l = self.vname(Some(*lhs), block, extra_names);
                     let r = self.vname(Some(*rhs), block, extra_names);
                     match op {
-                        BinOpKind::Max
-                        | BinOpKind::Min
-                        | BinOpKind::Pow
-                        | BinOpKind::ATan2
-                        | BinOpKind::Rem => {
+                        // `iron_atan2_impl` (preamble) instead of the
+                        // native builtin: Metal's `atan2` returns NaN at
+                        // the y=0,x=0 and inf/inf edges. See `preamble.rs`.
+                        BinOpKind::ATan2 => {
+                            wl!(out, "{pad}auto {v} = iron_atan2_impl({l}, {r});")
+                        },
+                        BinOpKind::Max | BinOpKind::Min | BinOpKind::Pow | BinOpKind::Rem => {
                             wl!(out, "{pad}auto {v} = {}({l}, {r});", op.msl_symbol())
                         },
                         BinOpKind::And => wl!(out, "{pad}auto {v} = ({l} && {r});"),

@@ -83,11 +83,13 @@ impl MslGenerator {
                     resolved_vid,
                 );
                 match kind {
-                    BinOpKind::Max
-                    | BinOpKind::Min
-                    | BinOpKind::Pow
-                    | BinOpKind::ATan2
-                    | BinOpKind::Rem => format!("{}({l}, {r})", kind.msl_symbol()),
+                    // `iron_atan2_impl` (preamble) instead of the native
+                    // builtin: Metal's `atan2` returns NaN at the
+                    // y=0,x=0 and inf/inf edges. See `preamble.rs`.
+                    BinOpKind::ATan2 => format!("iron_atan2_impl({l}, {r})"),
+                    BinOpKind::Max | BinOpKind::Min | BinOpKind::Pow | BinOpKind::Rem => {
+                        format!("{}({l}, {r})", kind.msl_symbol())
+                    },
                     BinOpKind::And => format!("({l} && {r})"),
                     BinOpKind::Or => format!("({l} || {r})"),
                     BinOpKind::Xor => format!("((bool){l} != (bool){r})"),

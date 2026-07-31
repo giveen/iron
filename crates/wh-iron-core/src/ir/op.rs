@@ -114,19 +114,27 @@ pub enum ActKind {
 }
 
 impl ActKind {
-    /// MSL helper function name. `Tanh` is a Metal built-in; others need a preamble helper.
+    /// MSL helper function name. All variants route through a preamble
+    /// helper: `Tanh` used to call the Metal built-in directly, but that
+    /// builtin returns wrong finite values (0 instead of 1) for arguments
+    /// in roughly [44, 44.3] and NaN beyond that, instead of saturating to
+    /// ±1 (verified via GPU probe: `tanh(44.0)` = 0, `tanh(44.4)` = NaN,
+    /// vs. the correct 1.0 for both). `iron_tanh` clamps the argument to a
+    /// range where the builtin is known-correct before calling it: tanh
+    /// is already 1.0 to within f32 precision well before the clamp bound,
+    /// so this is a numerical no-op everywhere the builtin isn't broken.
     pub fn msl_fn(self) -> &'static str {
         match self {
             ActKind::Silu => "iron_silu",
             ActKind::Gelu => "iron_gelu",
             ActKind::Relu => "iron_relu",
-            ActKind::Tanh => "tanh",
+            ActKind::Tanh => "iron_tanh",
             ActKind::Sigmoid => "iron_sigmoid",
         }
     }
 
     /// Whether this activation needs a preamble helper function emitted before the kernel.
-    pub fn needs_helper(self) -> bool { !matches!(self, ActKind::Tanh) }
+    pub fn needs_helper(self) -> bool { true }
 }
 
 /// Binary operation kind.
