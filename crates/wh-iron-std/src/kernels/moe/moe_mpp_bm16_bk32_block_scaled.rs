@@ -215,7 +215,11 @@ pub mod kernel_tests {
         shape: BlockTestShape,
         dt: DType,
     ) -> TestSetup {
-        block_indexed_setup_ex(kernel, fmt, shape, dt, /* x_scale= */ 1.0, /* w_scale= */ 1.0)
+        block_indexed_setup_ex(
+            kernel, fmt, shape, dt,  // x_scale=
+            1.0, // w_scale=
+            1.0,
+        )
     }
 
     /// Same as `block_indexed_setup` with activation- and weight-magnitude
