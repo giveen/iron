@@ -19,12 +19,21 @@
 //! the pack; no extra bit-extraction arithmetic beyond a simple shift+mask.
 //! Requires `32 % BITS == 0` (i.e. BITS divides a u32 evenly).
 //!
-//! **Element-strided** (BITS ∈ {3, 5, 6}) — threads stride over individual
+//! **Element-strided** (BITS ∈ {5, 6}) — threads stride over individual
 //! elements using the two-word bit-stream formula from `dequant_gather.rs`.
 //! Used when BITS does not divide 32 evenly; element-striding is cleaner and
 //! achieves the same cache behaviour (adjacent threads share the same u32
 //! words → L1 multicast) while avoiding the idle-thread problem of the old
 //! group-strided approach.
+//!
+//! **Block-aligned** (BITS == 3) — threads stride over 32-value blocks
+//! instead of individual elements: 32 * 3 bits = 96 bits = exactly 3 u32
+//! words, so a block's `w0`/`w1`/`w2` load once and all 32 3-bit fields
+//! are extracted via compile-time-constant shifts/masks (no per-element
+//! global load, no per-element `bit_off / 32u32` division — see the
+//! `BITS == 3u32` arm below for the derivation). Falls back to the
+//! per-element formula for a trailing partial block when `in_dim` is not
+//! a multiple of 32.
 //!
 //! ## Variant axis
 //!
@@ -80,8 +89,173 @@ pub fn iron_dequant_gemv<T>(
                 }
             }
         }
+    } else if BITS == 3u32 {
+        // Block-aligned int3 fast path. 32 values * 3 bits = 96 bits =
+        // exactly 3 u32 words, so a 32-value block never straddles a
+        // word boundary from the outside: each block loads w0/w1/w2
+        // exactly once (vs. up to 64 unconditional weight loads for the
+        // same 32 values under the old per-element two-word formula),
+        // and every 3-bit field's word/shift is a compile-time literal
+        // (no per-element `bit_off / 32u32` division). The 32 shift
+        // amounts below are the closed-form solution of the old
+        // per-element formula (`bit_off = i*3`, `word = bit_off/32`,
+        // `bit_in_w = bit_off%32`) evaluated for i in 0..32 — 10 fields
+        // land fully inside w0, 1 straddles w0/w1, 10 fully inside w1, 1
+        // straddles w1/w2, 10 fully inside w2 (10+1+10+1+10 = 32).
+        //
+        // Group-size cadence: a block is only ever covered by a single
+        // scale/bias pair when `group_size` is a multiple of 32 (true
+        // for every group_size used by this kernel today: the
+        // element-strided correctness test uses 32, production MoE/attn
+        // weights use 64). The tail loop below (for `in_dim` not a
+        // multiple of 32) falls back to the original per-element
+        // two-word formula, so the kernel stays correct for arbitrary
+        // `in_dim` even though the fast path only covers full blocks.
+        let mask = 7u32; // (1u32 << 3) - 1u32
+        let vals_per_block = 32u32;
+        let words_per_block = 3u32; // BITS
+        let n_blocks_per_row = in_dim / vals_per_block;
+        let aligned_in_dim = n_blocks_per_row * vals_per_block;
+        let row_u32_off = row * (in_dim * BITS / 32u32);
+        let b_iters = (n_blocks_per_row + lsize - 1u32) / lsize;
+        for b_iter in range(0u32, b_iters, 1u32) {
+            let blk = b_iter * lsize + tid;
+            if blk < n_blocks_per_row {
+                let d0 = blk * vals_per_block;
+                let g = d0 / group_size;
+                let scale = load(scales[row_group_off + g]).cast::<f32>();
+                let bias = load(biases[row_group_off + g]).cast::<f32>();
+                let word_base = row_u32_off + blk * words_per_block;
+                let w0 = load(weight[word_base]);
+                let w1 = load(weight[word_base + 1u32]);
+                let w2 = load(weight[word_base + 2u32]);
+
+                let q0 = w0 & mask;
+                let q1 = (w0 >> 3u32) & mask;
+                let q2 = (w0 >> 6u32) & mask;
+                let q3 = (w0 >> 9u32) & mask;
+                let q4 = (w0 >> 12u32) & mask;
+                let q5 = (w0 >> 15u32) & mask;
+                let q6 = (w0 >> 18u32) & mask;
+                let q7 = (w0 >> 21u32) & mask;
+                let q8 = (w0 >> 24u32) & mask;
+                let q9 = (w0 >> 27u32) & mask;
+                let q10 = ((w0 >> 30u32) & 3u32) | ((w1 & 1u32) << 2u32);
+                let q11 = (w1 >> 1u32) & mask;
+                let q12 = (w1 >> 4u32) & mask;
+                let q13 = (w1 >> 7u32) & mask;
+                let q14 = (w1 >> 10u32) & mask;
+                let q15 = (w1 >> 13u32) & mask;
+                let q16 = (w1 >> 16u32) & mask;
+                let q17 = (w1 >> 19u32) & mask;
+                let q18 = (w1 >> 22u32) & mask;
+                let q19 = (w1 >> 25u32) & mask;
+                let q20 = (w1 >> 28u32) & mask;
+                let q21 = ((w1 >> 31u32) & 1u32) | ((w2 & 3u32) << 1u32);
+                let q22 = (w2 >> 2u32) & mask;
+                let q23 = (w2 >> 5u32) & mask;
+                let q24 = (w2 >> 8u32) & mask;
+                let q25 = (w2 >> 11u32) & mask;
+                let q26 = (w2 >> 14u32) & mask;
+                let q27 = (w2 >> 17u32) & mask;
+                let q28 = (w2 >> 20u32) & mask;
+                let q29 = (w2 >> 23u32) & mask;
+                let q30 = (w2 >> 26u32) & mask;
+                let q31 = (w2 >> 29u32) & mask;
+
+                acc = acc + (q0.cast::<f32>() * scale + bias) * load(input[d0]).cast::<f32>();
+                acc =
+                    acc + (q1.cast::<f32>() * scale + bias) * load(input[d0 + 1u32]).cast::<f32>();
+                acc =
+                    acc + (q2.cast::<f32>() * scale + bias) * load(input[d0 + 2u32]).cast::<f32>();
+                acc =
+                    acc + (q3.cast::<f32>() * scale + bias) * load(input[d0 + 3u32]).cast::<f32>();
+                acc =
+                    acc + (q4.cast::<f32>() * scale + bias) * load(input[d0 + 4u32]).cast::<f32>();
+                acc =
+                    acc + (q5.cast::<f32>() * scale + bias) * load(input[d0 + 5u32]).cast::<f32>();
+                acc =
+                    acc + (q6.cast::<f32>() * scale + bias) * load(input[d0 + 6u32]).cast::<f32>();
+                acc =
+                    acc + (q7.cast::<f32>() * scale + bias) * load(input[d0 + 7u32]).cast::<f32>();
+                acc =
+                    acc + (q8.cast::<f32>() * scale + bias) * load(input[d0 + 8u32]).cast::<f32>();
+                acc =
+                    acc + (q9.cast::<f32>() * scale + bias) * load(input[d0 + 9u32]).cast::<f32>();
+                acc = acc
+                    + (q10.cast::<f32>() * scale + bias) * load(input[d0 + 10u32]).cast::<f32>();
+                acc = acc
+                    + (q11.cast::<f32>() * scale + bias) * load(input[d0 + 11u32]).cast::<f32>();
+                acc = acc
+                    + (q12.cast::<f32>() * scale + bias) * load(input[d0 + 12u32]).cast::<f32>();
+                acc = acc
+                    + (q13.cast::<f32>() * scale + bias) * load(input[d0 + 13u32]).cast::<f32>();
+                acc = acc
+                    + (q14.cast::<f32>() * scale + bias) * load(input[d0 + 14u32]).cast::<f32>();
+                acc = acc
+                    + (q15.cast::<f32>() * scale + bias) * load(input[d0 + 15u32]).cast::<f32>();
+                acc = acc
+                    + (q16.cast::<f32>() * scale + bias) * load(input[d0 + 16u32]).cast::<f32>();
+                acc = acc
+                    + (q17.cast::<f32>() * scale + bias) * load(input[d0 + 17u32]).cast::<f32>();
+                acc = acc
+                    + (q18.cast::<f32>() * scale + bias) * load(input[d0 + 18u32]).cast::<f32>();
+                acc = acc
+                    + (q19.cast::<f32>() * scale + bias) * load(input[d0 + 19u32]).cast::<f32>();
+                acc = acc
+                    + (q20.cast::<f32>() * scale + bias) * load(input[d0 + 20u32]).cast::<f32>();
+                acc = acc
+                    + (q21.cast::<f32>() * scale + bias) * load(input[d0 + 21u32]).cast::<f32>();
+                acc = acc
+                    + (q22.cast::<f32>() * scale + bias) * load(input[d0 + 22u32]).cast::<f32>();
+                acc = acc
+                    + (q23.cast::<f32>() * scale + bias) * load(input[d0 + 23u32]).cast::<f32>();
+                acc = acc
+                    + (q24.cast::<f32>() * scale + bias) * load(input[d0 + 24u32]).cast::<f32>();
+                acc = acc
+                    + (q25.cast::<f32>() * scale + bias) * load(input[d0 + 25u32]).cast::<f32>();
+                acc = acc
+                    + (q26.cast::<f32>() * scale + bias) * load(input[d0 + 26u32]).cast::<f32>();
+                acc = acc
+                    + (q27.cast::<f32>() * scale + bias) * load(input[d0 + 27u32]).cast::<f32>();
+                acc = acc
+                    + (q28.cast::<f32>() * scale + bias) * load(input[d0 + 28u32]).cast::<f32>();
+                acc = acc
+                    + (q29.cast::<f32>() * scale + bias) * load(input[d0 + 29u32]).cast::<f32>();
+                acc = acc
+                    + (q30.cast::<f32>() * scale + bias) * load(input[d0 + 30u32]).cast::<f32>();
+                acc = acc
+                    + (q31.cast::<f32>() * scale + bias) * load(input[d0 + 31u32]).cast::<f32>();
+            }
+        }
+        // Tail: any elements past the last full 32-value block, for
+        // `in_dim` not a multiple of 32 (not exercised by any current
+        // caller, kept for general correctness). Same formula as the
+        // pre-rewrite element-strided path.
+        let n_tail_iters = (in_dim - aligned_in_dim + lsize - 1u32) / lsize;
+        for _iter in range(0u32, n_tail_iters, 1u32) {
+            let d = aligned_in_dim + _iter * lsize + tid;
+            if d < in_dim {
+                let g = d / group_size;
+                let scale = load(scales[row_group_off + g]).cast::<f32>();
+                let bias = load(biases[row_group_off + g]).cast::<f32>();
+                let bit_off = d * BITS;
+                let word_idx = bit_off / 32u32;
+                let bit_in_w = bit_off & 31u32;
+                let bits_in_w0 = 32u32 - bit_in_w;
+                let lo_bits = select(bits_in_w0 >= BITS, BITS, bits_in_w0);
+                let spill = BITS - lo_bits;
+                let w0t = load(weight[row_u32_off + word_idx]);
+                let w1idx = select(spill > 0u32, word_idx + 1u32, word_idx);
+                let w1t = load(weight[row_u32_off + w1idx]);
+                let lo = (w0t >> bit_in_w) & ((1u32 << lo_bits) - 1u32);
+                let hi = (w1t & ((1u32 << spill) - 1u32)) << lo_bits;
+                let q = lo | hi;
+                acc = acc + (q.cast::<f32>() * scale + bias) * load(input[d]).cast::<f32>();
+            }
+        }
     } else {
-        // Element-strided: two-word bit-stream for odd widths.
+        // Element-strided: two-word bit-stream for odd widths (int5, int6).
         let mask = (1u32 << BITS) - 1u32;
         let u32_per_row = in_dim * BITS / 32u32;
         let row_u32_off = row * u32_per_row;
