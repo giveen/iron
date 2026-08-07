@@ -26,11 +26,24 @@ use wh_iron::kernel;
 /// `block_scaled_matmul`); X-load, the MMA loop, and write-back are
 /// format-independent. Decodes through `kernels/primitives.rs`. Produces
 /// `iron_<FMT>_qmm_mma`.
+///
+/// NOTE: the `fp4_orphan` row (params byte-identical to `fp4_float` right
+/// below it) used to be tagged plain `fp4`, which generated
+/// `iron_fp4_qmm_mma` — colliding with the dedicated, production-shipped
+/// `iron_fp4_qmm_mma` in `fp_quantized_mma.rs` (different signature: `k, n,
+/// gs_per_row` vs this family's `k, n, block_size[, global]`). That other
+/// kernel wins the registry (confirmed via emitted MSL / manifest.json), so
+/// this row was already dead: unlike `fp4_float`, nothing in this file's
+/// `kernel_tests`/`kernel_benches` references it by name. Renamed off the
+/// colliding name and kept per repo convention (kernels stay available,
+/// never silently deleted) rather than removed outright — flagged here as
+/// a candidate for actual deletion in a follow-up, since `fp4_float`
+/// already covers the identical parameterization with real test coverage.
 #[kernel(variants(
     (FMT,          BITS,  WT,  ST,  WDEC, SKIND) = [
         (mxfp4,        4u32, u32, u8,  0u32, 0u32),
         (nvfp4,        4u32, u32, u8,  0u32, 1u32),
-        (fp4,          4u32, u32, f32, 0u32, 2u32),
+        (fp4_orphan,   4u32, u32, f32, 0u32, 2u32),
         (fp4_float,    4u32, u32, f32, 0u32, 2u32),
         (fp4_f16,      4u32, u32, f16, 0u32, 2u32),
         (int2,         2u32, u32, f32, 1u32, 2u32),

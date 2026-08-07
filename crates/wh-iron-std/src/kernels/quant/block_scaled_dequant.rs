@@ -23,8 +23,18 @@ use wh_iron::kernel;
 
 /// mxfp4 — E2M1 elements (block 32), E8M0 pow-2 block scale.
 /// `scales[b]` is the biased exponent; effective scale `2^(bits - 127)`.
+///
+/// NOTE: named `iron_block_scaled_mxfp4_dequant` (not the bare
+/// `iron_mxfp4_dequant`) to avoid colliding with the DSv4-specific,
+/// fixed-block-32, LUT-indexed kernel of the same bare name in
+/// `mxfp4_dequant.rs`. Both are legitimate, differently-shaped kernels
+/// (this one is generic-block-size with an inline E2M1 decode, matching
+/// the rest of this file's format family); prior to this rename they
+/// shared one `#[kernel]` registry name, and the DSv4 one won the
+/// artifact — this one's test was green but validated a kernel body
+/// that never shipped under its own name. See kernel-name-collision fix.
 #[kernel]
-pub fn iron_mxfp4_dequant<T>(
+pub fn iron_block_scaled_mxfp4_dequant<T>(
     codes: Tensor<u32>,
     scales: Tensor<u8>,
     out: Tensor<T>,
@@ -458,8 +468,8 @@ pub mod kernel_tests {
 
     // cols 64 is divisible by both block sizes (16 and 32).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
-    fn test_mxfp4_dequant(dt: DType) -> TestSetup {
-        dequant_setup(iron_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4, 64, dt)
+    fn test_block_scaled_mxfp4_dequant(dt: DType) -> TestSetup {
+        dequant_setup(iron_block_scaled_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4, 64, dt)
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 5e-2, 2e-1])]
@@ -648,8 +658,14 @@ pub mod kernel_benches {
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
-    fn bench_mxfp4_dequant(dt: DType) -> BenchSetup {
-        dequant_bench(iron_mxfp4_dequant::kernel_ir_for(dt), QFormat::Mxfp4, 4096, 4096, dt)
+    fn bench_block_scaled_mxfp4_dequant(dt: DType) -> BenchSetup {
+        dequant_bench(
+            iron_block_scaled_mxfp4_dequant::kernel_ir_for(dt),
+            QFormat::Mxfp4,
+            4096,
+            4096,
+            dt,
+        )
     }
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_nvfp4_dequant(dt: DType) -> BenchSetup {

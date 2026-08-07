@@ -29,6 +29,21 @@
 //!    or returns an IR that fails type inference / pass pipeline would
 //!    surface here.
 //!
+//! 4. **Duplicate kernel names** — the `#[kernel]` macro registers each
+//!    `KernelEntry` under the bare function identifier only (no module
+//!    path), and MSL codegen/dispatch is name-keyed. Two `#[kernel] pub
+//!    fn`s in different files sharing a bare name compile fine at the
+//!    Rust level (different modules) but silently collide in the
+//!    registry: only one body's MSL ships under that name, and the
+//!    other's `#[test_kernel]` — resolving the kernel IR via its own
+//!    Rust module path — stays green while validating an artifact that
+//!    never runs on-device. Tests 1–3 above each collect kernel names
+//!    into a `HashSet`, which dedupes silently and would not catch
+//!    this; this test counts registrations per name directly. Confirmed
+//!    against the `iron_mxfp4_dequant` collision between
+//!    `quant/block_scaled_dequant.rs` and `quant/mxfp4_dequant.rs`
+//!    (fixed by renaming the former to `iron_block_scaled_mxfp4_dequant`).
+//!
 //! Runs on Ubuntu (host-side codegen, no Metal runtime needed) — this
 //! is the only structural-consistency safety net for non-macOS CI.
 
@@ -422,5 +437,39 @@ fn kernel_annotations_have_matching_inventory_submit() {
         "{} `#[kernel]` annotations are unregistered:\n  {}",
         errors.len(),
         errors.join("\n  ")
+    );
+}
+
+// ── Test 4: no two registered kernels share a name ──────────────────────
+
+#[test]
+fn no_duplicate_kernel_names_in_registry() {
+    // Unlike Tests 1-3, which each collapse kernel names into a
+    // `HashSet` (silently deduping any collision), this counts
+    // registrations per name so a true collision is visible.
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for entry in all_kernels() {
+        *counts.entry(entry.name().to_string()).or_insert(0) += 1;
+    }
+    assert!(!counts.is_empty(), "inventory empty — link issue?");
+
+    let mut dupes: Vec<(String, usize)> = counts.into_iter().filter(|&(_, n)| n > 1).collect();
+    dupes.sort();
+
+    assert!(
+        dupes.is_empty(),
+        "{} kernel name(s) registered more than once under the same bare \
+         `#[kernel] pub fn` name. MSL codegen/dispatch is keyed on this bare name \
+         (no module-path disambiguation), so only one of the colliding bodies ships \
+         and the other's `#[test_kernel]` — which resolves the kernel IR via its own \
+         Rust module path — stays green while validating an artifact that never runs \
+         on-device. Rename one of the colliding `#[kernel]` functions to a distinct \
+         name:\n  {}",
+        dupes.len(),
+        dupes
+            .iter()
+            .map(|(name, n)| format!("{name} (registered {n}x)"))
+            .collect::<Vec<_>>()
+            .join("\n  ")
     );
 }
