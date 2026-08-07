@@ -1,0 +1,4 @@
+# Project typo-lint exceptions.
+[default.extend-words]
+# Apple's neural accelerator block, referenced by the MPP/steel tests.
+NAX = "NAX"

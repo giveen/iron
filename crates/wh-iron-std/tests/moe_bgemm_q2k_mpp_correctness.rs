@@ -109,6 +109,7 @@ fn bgemm_q2k_mpp_matches_gemv_oracle() {
     let mut na = 0.0f64;
     let mut nb = 0.0f64;
     let mut nan = 0;
+    let mut max_diff = 0.0f32;
     for (a, b) in want.iter().zip(&got) {
         if !a.is_finite() || !b.is_finite() {
             nan += 1;
@@ -117,9 +118,15 @@ fn bgemm_q2k_mpp_matches_gemv_oracle() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64).powi(2);
         nb += (*b as f64).powi(2);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
-    eprintln!("nan={nan} cos={cos:.6}");
+    eprintln!("nan={nan} cos={cos:.6} max_diff={max_diff:.6e}");
     assert_eq!(nan, 0);
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99");
+    // Cosine is scale-blind (`cosine(v, k*v) == 1.0`); max_abs_diff catches
+    // a uniform-scale bug cosine alone would miss. Calibrated 2026-08-06 on
+    // Metal (M5 Max), ~3x observed max|Δ| (filled after run).
+    const CAL_MAX_DIFF: f32 = 7.0e-5; // observed 2.288818e-5
+    assert!(max_diff <= CAL_MAX_DIFF, "max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }

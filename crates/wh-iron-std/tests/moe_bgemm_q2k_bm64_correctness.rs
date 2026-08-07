@@ -103,4 +103,16 @@ fn bgemm_q2k_bm64_matches_pool_kernel() {
     eprintln!("nan={nan} cos={cos:.6} maxAbsDiff={maxd:.6}");
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999");
+    // maxd was computed but never asserted — cosine alone is scale-blind
+    // (`cosine(v, k*v) == 1.0`), so a uniform-scale bug (dropped dequant
+    // scale, miswired group index) would sail through. Calibrated
+    // 2026-08-06 on Metal (M5 Max), ~3x observed max|Δ|.
+    // Observed 0.0 (bit-identical — bm64 and the mpp pool kernel share the
+    // same scalar reduction order at this shape). Floor kept nonzero (not
+    // literally `0.0`) so the assertion tolerates legitimate ULP-level
+    // reordering on other hardware without going fully scale-blind again —
+    // still ~1e4-1e5x tighter than a 2% uniform-scale bug at these
+    // magnitudes (want[0..6] up to ~181).
+    const CAL_MAX_DIFF: f32 = 1.0e-3; // observed 0.0
+    assert!(maxd <= CAL_MAX_DIFF, "max|Δ| {maxd:.3e} > {CAL_MAX_DIFF:.3e}");
 }

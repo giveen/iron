@@ -163,10 +163,16 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_matches_m1_clean_tile() {
     // MPP cooperative-tensor accumulator vs scalar reduction — fp
     // accumulation order differs, so cosine is the right metric (same
     // criterion the bm16 simdgroup-matrix variant uses).
+    //
+    // Cosine alone is scale-blind: `cosine(v, k*v) == 1.0` for any positive
+    // `k`, so a uniform-scale bug (dropped `group_size` factor, miswired
+    // scale broadcast) sails through. `max_abs_diff` closes that gap — see
+    // the calibration comment below.
     let mut dot = 0.0_f64;
     let mut na = 0.0_f64;
     let mut nb = 0.0_f64;
     let mut nan_count = 0usize;
+    let mut max_diff = 0.0_f32;
     for (a, b) in y_m1.iter().zip(&y_mpp) {
         if !a.is_finite() || !b.is_finite() {
             nan_count += 1;
@@ -175,13 +181,24 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_matches_m1_clean_tile() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64) * (*a as f64);
         nb += (*b as f64) * (*b as f64);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("y_m1[0..8]  = {:?}", &y_m1[..8]);
     eprintln!("y_mpp[0..8] = {:?}", &y_mpp[..8]);
     eprintln!("nan_count = {nan_count} / {}", t_rows * n_out);
+    eprintln!("max_diff = {max_diff:.6e}");
     assert_eq!(nan_count, 0, "MPP kernel produced non-finite values");
     assert!(cos >= 0.999, "MPP MoE vs m1 cosine = {cos:.6} (want ≥ 0.999)");
+    // Calibrated 2026-08-06 on Metal (M5 Max), n_experts=4/T=64/N=64/K=64,
+    // clean-tile int4 f32. ~3x observed max|Δ| — headroom against
+    // legitimate cross-hardware accumulation-order variance, not run-to-run
+    // noise (Metal dispatch here is deterministic).
+    const CAL_F32_CLEAN_TILE: f32 = 1.0e-7; // observed 2.980232e-8
+    assert!(
+        max_diff <= CAL_F32_CLEAN_TILE,
+        "max|Δ| {max_diff:.3e} > {CAL_F32_CLEAN_TILE:.3e} (f32 clean tile)"
+    );
 }
 
 /// bf16 activations. `mpp::tensor_ops::matmul2d` mishandles `bfloat`
@@ -297,6 +314,7 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_bf16_matches_m1_clean_tile() {
     let mut na = 0.0_f64;
     let mut nb = 0.0_f64;
     let mut nan_count = 0usize;
+    let mut max_diff = 0.0_f32;
     for (a, b) in y_m1.iter().zip(&y_mpp) {
         if !a.is_finite() || !b.is_finite() {
             nan_count += 1;
@@ -305,11 +323,22 @@ fn moe_gather_qmm_mma_int4_bm16_mpp_bf16_matches_m1_clean_tile() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64) * (*a as f64);
         nb += (*b as f64) * (*b as f64);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("bf16 y_m1[0..8]  = {:?}", &y_m1[..8]);
     eprintln!("bf16 y_mpp[0..8] = {:?}", &y_mpp[..8]);
     eprintln!("bf16 cosine      = {cos:.6}");
+    eprintln!("bf16 max_diff    = {max_diff:.6e}");
     assert_eq!(nan_count, 0, "MPP bf16 kernel produced non-finite values");
     assert!(cos >= 0.997, "MPP MoE bf16 vs m1 cosine = {cos:.6} (want ≥ 0.997)");
+    // Calibrated 2026-08-06 on Metal (M5 Max). bf16 rounding of x/scales/
+    // biases dominates the error budget here (~1e3x the f32-cell bound
+    // above), so the bound is set from this cell's own observation, not
+    // reused from the f32 cell. ~3x observed max|Δ|.
+    const CAL_BF16_CLEAN_TILE: f32 = 2.0e-3; // observed 6.111562e-4
+    assert!(
+        max_diff <= CAL_BF16_CLEAN_TILE,
+        "max|Δ| {max_diff:.3e} > {CAL_BF16_CLEAN_TILE:.3e} (bf16 clean tile)"
+    );
 }

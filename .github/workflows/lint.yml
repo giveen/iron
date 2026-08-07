@@ -76,3 +76,23 @@ jobs:
           components: clippy
           cache-key: clippy
       - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Structural check for the buffer-binding gap that corrupted a gdn CI run:
+  # a name-bound kernel dispatch resolves a missing buffer to a pooled,
+  # non-zero-initialized allocation instead of erroring, so a standalone
+  # test that predates a kernel's newest params silently reads garbage.
+  # Static source scan, no build required — fast and Rust-toolchain-free.
+  buffer-bindings:
+    name: Buffer bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.0.0
+      - run: python3 scripts/check_test_buffer_bindings.py

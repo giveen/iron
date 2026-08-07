@@ -105,6 +105,7 @@ fn gemv_rows_iq2xxs_matches_oracle() {
     let mut na = 0.0f64;
     let mut nb = 0.0f64;
     let mut nan = 0;
+    let mut max_diff = 0.0f32;
     for (a, b) in want.iter().zip(&got) {
         if !a.is_finite() || !b.is_finite() {
             nan += 1;
@@ -113,11 +114,17 @@ fn gemv_rows_iq2xxs_matches_oracle() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64).powi(2);
         nb += (*b as f64).powi(2);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("want[0..6]={:?}", &want[..6]);
     eprintln!("got[0..6]={:?}", &got[..6]);
-    eprintln!("nan={nan} cos={cos:.6}");
+    eprintln!("nan={nan} cos={cos:.6} max_diff={max_diff:.6e}");
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99");
+    // Cosine is scale-blind; max_abs_diff catches a uniform-scale bug
+    // cosine alone would miss. Calibrated 2026-08-06 on Metal (M5 Max),
+    // ~3x observed max|Δ| (filled after run).
+    const CAL_MAX_DIFF: f32 = 3.0e-3; // observed 8.544922e-4
+    assert!(max_diff <= CAL_MAX_DIFF, "max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }

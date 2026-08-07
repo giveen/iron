@@ -58,6 +58,16 @@ struct Case {
     indices: Option<Vec<u32>>,
     /// Cosine threshold. Defaults to 0.999.
     min_cos: f64,
+    /// Calibrated max_abs_diff bound — cosine alone is scale-blind
+    /// (`cosine(v, k*v) == 1.0` for any positive `k`), so a uniform-scale
+    /// bug (dropped `group_size` factor, miswired scale/bias broadcast)
+    /// would sail through cosine but not this. Values below are calibrated
+    /// 2026-08-06 on Metal (M5 Max): ~3x the observed max|Δ| per case
+    /// (output magnitude and dtype rounding both vary by case, so each
+    /// needs its own bound — see the per-`#[test]` comments for the
+    /// observed value that produced it). Defaults to an intentionally
+    /// unreachable value so a new `Case` MUST set this explicitly.
+    max_abs_diff: f32,
     /// Label for error messages.
     label: &'static str,
 }
@@ -81,6 +91,7 @@ impl Case {
             dt,
             indices: None,
             min_cos: 0.999,
+            max_abs_diff: f32::MAX,
             label,
         }
     }
@@ -209,6 +220,7 @@ fn run_case(case: &Case) {
     let mut na = 0.0_f64;
     let mut nb = 0.0_f64;
     let mut nan_count = 0usize;
+    let mut max_diff = 0.0_f32;
     for (a, b) in y_m1.iter().zip(&y_mpp) {
         if !a.is_finite() || !b.is_finite() {
             nan_count += 1;
@@ -217,12 +229,14 @@ fn run_case(case: &Case) {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64) * (*a as f64);
         nb += (*b as f64) * (*b as f64);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("[{}] y_m1[0..8]  = {:?}", case.label, &y_m1[..y_m1.len().min(8)]);
     eprintln!("[{}] y_mpp[0..8] = {:?}", case.label, &y_mpp[..y_mpp.len().min(8)]);
     eprintln!("[{}] nan_count   = {} / {}", case.label, nan_count, t_rows * n_out);
     eprintln!("[{}] cosine      = {:.6}", case.label, cos);
+    eprintln!("[{}] max|Δ|      = {:.6e}", case.label, max_diff);
     assert_eq!(nan_count, 0, "[{}] MPP BM=8 produced non-finite values", case.label);
     assert!(
         cos >= case.min_cos,
@@ -231,7 +245,28 @@ fn run_case(case: &Case) {
         cos,
         case.min_cos
     );
+    assert!(
+        max_diff <= case.max_abs_diff,
+        "[{}] MPP MoE BM=8 vs m1 max|Δ| = {:.3e} (want ≤ {:.3e})",
+        case.label,
+        max_diff,
+        case.max_abs_diff
+    );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// max_abs_diff calibration (2026-08-06, Metal, M5 Max): each case below
+// sets `case.max_abs_diff` to ~3x the max|Δ| observed across repeated runs
+// (Metal dispatch here is deterministic — repeat runs reproduced the same
+// value bit-for-bit, so the multiplier is headroom against a legitimate
+// different-but-still-correct summation order on other hardware, not
+// run-to-run noise). Observed values are noted per case; all are far below
+// what a uniform-scale bug would produce at these output magnitudes (a
+// dropped `group_size` factor or miswired scale broadcast would show up
+// as O(1)-relative error, not the O(1e-4..1e-2) seen here), which is the
+// point: cosine alone is invariant to that class of bug (see the
+// `run_case` doc comment above `max_abs_diff` for the full rationale).
+// ─────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────
 // Case 1: f32 small — the canonical T=8 decode shape (topK=8). Single TG,
@@ -240,14 +275,22 @@ fn run_case(case: &Case) {
 // 4 experts at 2 rows/expert).
 // ─────────────────────────────────────────────────────────────────────────
 #[test]
-fn bm8_f32_small_t8() { run_case(&Case::new("f32_small_t8", 4, 8, 64, 64, 32, Dt::F32)); }
+fn bm8_f32_small_t8() {
+    let mut case = Case::new("f32_small_t8", 4, 8, 64, 64, 32, Dt::F32);
+    case.max_abs_diff = 7.0e-8; // observed 2.235174e-8
+    run_case(&case);
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Case 2: f16 small — same shape as case 1, f16 dtype. f16 quant
 // accumulation lands within the cosine envelope easily.
 // ─────────────────────────────────────────────────────────────────────────
 #[test]
-fn bm8_f16_small_t8() { run_case(&Case::new("f16_small_t8", 4, 8, 64, 64, 32, Dt::F16)); }
+fn bm8_f16_small_t8() {
+    let mut case = Case::new("f16_small_t8", 4, 8, 64, 64, 32, Dt::F16);
+    case.max_abs_diff = 2.0e-4; // observed 6.096065e-5
+    run_case(&case);
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Case 3: bf16 small — same shape, bf16 dtype. bf16 has a 7-bit mantissa
@@ -258,6 +301,7 @@ fn bm8_f16_small_t8() { run_case(&Case::new("f16_small_t8", 4, 8, 64, 64, 32, Dt
 fn bm8_bf16_small_t8() {
     let mut case = Case::new("bf16_small_t8", 4, 8, 64, 64, 32, Dt::Bf16);
     case.min_cos = 0.997;
+    case.max_abs_diff = 1.5e-3; // observed 4.410371e-4
     run_case(&case);
 }
 
@@ -268,7 +312,11 @@ fn bm8_bf16_small_t8() {
 // tgid_y) → different output regions, all must match m1).
 // ─────────────────────────────────────────────────────────────────────────
 #[test]
-fn bm8_f16_multi_tile() { run_case(&Case::new("f16_multi_tile", 8, 16, 128, 128, 64, Dt::F16)); }
+fn bm8_f16_multi_tile() {
+    let mut case = Case::new("f16_multi_tile", 8, 16, 128, 128, 64, Dt::F16);
+    case.max_abs_diff = 4.0e-4; // observed 1.136512e-4
+    run_case(&case);
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Case 5: f16 ragged T (T=5) — not a multiple of BM=8. The last TG covers
@@ -282,6 +330,7 @@ fn bm8_f16_ragged_t5() {
     // Rows 0-1 → e0, rows 2-3 → e1, row 4 → e2. Tests both
     // boundary-between-experts and single-row trailing expert.
     case.indices = Some(vec![0, 0, 1, 1, 2]);
+    case.max_abs_diff = 2.0e-4; // observed 6.096065e-5
     run_case(&case);
 }
 
@@ -298,6 +347,7 @@ fn bm8_f16_production_shape() {
     // 128-expert space, monotonic so expert_offsets stays correct.
     let mut case = Case::new("f16_production_shape", 128, 8, 512, 2048, 64, Dt::F16);
     case.indices = Some(vec![3, 17, 42, 55, 71, 88, 99, 120]);
+    case.max_abs_diff = 1.5e-3; // observed 4.729703e-4
     run_case(&case);
 }
 
@@ -310,5 +360,6 @@ fn bm8_bf16_production_shape() {
     let mut case = Case::new("bf16_production_shape", 128, 8, 512, 2048, 64, Dt::Bf16);
     case.indices = Some(vec![3, 17, 42, 55, 71, 88, 99, 120]);
     case.min_cos = 0.997;
+    case.max_abs_diff = 1.0e-2; // observed 3.414169e-3
     run_case(&case);
 }

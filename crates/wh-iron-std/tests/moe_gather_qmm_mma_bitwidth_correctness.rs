@@ -13,6 +13,17 @@
 //! Shape: n_experts=4, T=64, N=64, K=64, group_size=32 — every dim a
 //! multiple of the BM=BN=BK=32 tile, and `K*bits % 32 == 0` for all four
 //! bit-widths so the bit-stream rows are word-aligned.
+//!
+//! NOTE: the `#[kernel(variants(BITS = [2, 3, 5, 6, 8], ...))]` macro at
+//! `moe_gather_qmm.rs:2316` generates FIVE variants (b2 included), but this
+//! file only covers b3/b5/b6/b8. `b2` is intentionally NOT here — it has
+//! its own inline `#[test_kernel]` unit test at `moe_gather_qmm.rs:4133`
+//! (`test_moe_gather_qmm_mma_b2`), with per-dtype `max_abs_diff` tolerance
+//! from the `#[test_kernel]` harness rather than this file's CPU-oracle +
+//! cosine/max_abs_diff pair. Both mechanisms are real coverage, but they're
+//! different oracles with different strength — if you're auditing "the
+//! bit-width-generalized family" for gaps, check both locations, not just
+//! this file's `use` list.
 
 #![cfg(target_os = "macos")]
 
@@ -145,13 +156,28 @@ fn run_bitwidth(
         .expect("dispatch");
     let actual = unpack_bytes(r.outputs.get("out").expect("out"), Dt::F32);
 
+    let max_diff = expected.iter().zip(&actual).fold(0.0f32, |m, (e, a)| m.max((e - a).abs()));
     let cos = cosine(&expected, &actual);
     eprintln!(
-        "[gather_qmm_mma b{bits}] cos={cos:.6}  exp[0..4]={:?} got[0..4]={:?}",
+        "[gather_qmm_mma b{bits}] cos={cos:.6} max|Δ|={max_diff:.6e} exp[0..4]={:?} got[0..4]={:?}",
         &expected[..4],
         &actual[..4]
     );
     assert!(cos >= 0.999, "gather_qmm_mma b{bits} vs CPU oracle cosine = {cos:.6} (want ≥ 0.999)");
+    // Cosine is scale-blind (`cosine(v, k*v) == 1.0`); max_abs_diff catches
+    // a uniform-scale bug (dropped `group_size` factor, miswired bit-width
+    // stride) cosine alone would miss. Calibrated 2026-08-06 on Metal (M5
+    // Max), ~3x observed max|Δ| — all four bit-widths (b3/b5/b6/b8) share
+    // this `run_bitwidth` helper and the same shape/dtype (f32 only), so
+    // one bound covers the family; the b3 case has the largest quantization
+    // range and dominates the observed max (see per-bitwidth comment below).
+    // observed: b3=5.588e-9, b5=5.960e-8, b6=1.192e-7, b8=4.768e-7 (largest
+    // bit-width has the largest per-code quant range, hence largest error)
+    const CAL_MAX_DIFF: f32 = 2.0e-6; // ~3x the b8 max
+    assert!(
+        max_diff <= CAL_MAX_DIFF,
+        "gather_qmm_mma b{bits} vs CPU oracle max|Δ| = {max_diff:.3e} (want ≤ {CAL_MAX_DIFF:.3e})"
+    );
 }
 
 #[test]

@@ -86,6 +86,15 @@ fn cosine(a: &[f32], b: &[f32]) -> f64 {
     dot / (na.sqrt() * nb.sqrt() + 1e-12)
 }
 
+/// Max absolute per-element difference. Cosine is scale-blind
+/// (`cosine(v, k*v) == 1.0` for any positive `k`), so a uniform-scale bug
+/// (dropped `group_size` factor, miswired scale/bias broadcast) would sail
+/// through cosine but not this. Calibrated 2026-08-06 on Metal (M5 Max):
+/// each caller below asserts against ~3x the observed max|Δ| for its dtype.
+fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+}
+
 // ── skip guard ─────────────────────────────────────────────────────────────
 
 /// Returns true and prints a skip message if the machine lacks Apple10+ GPU
@@ -207,13 +216,16 @@ fn moe_gather_qmm_mma_int8_bm16_mpp_matches_cpu_oracle_f32() {
     );
 
     let cos = cosine(&expected, &actual);
+    let max_diff = max_abs_diff(&expected, &actual);
     eprintln!(
-        "[int8 MPP f32] cos={cos:.6}  exp[0..4]={:?} got[0..4]={:?}",
+        "[int8 MPP f32] cos={cos:.6} max|Δ|={max_diff:.6e} exp[0..4]={:?} got[0..4]={:?}",
         &expected[..4],
         &actual[..4]
     );
     assert!(actual.iter().any(|&v| v != 0.0), "all-zero output (kernel body not reached?)");
     assert!(cos >= 0.999, "int8 MPP f32 vs CPU oracle cosine = {cos:.6} (want ≥ 0.999)");
+    const CAL_MAX_DIFF: f32 = 6.0e-7; // observed 1.788139e-7
+    assert!(max_diff <= CAL_MAX_DIFF, "int8 MPP f32 max|Δ| = {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }
 
 // ── f16 ────────────────────────────────────────────────────────────────────
@@ -248,8 +260,11 @@ fn moe_gather_qmm_mma_int8_bm16_mpp_matches_cpu_oracle_f16() {
     );
 
     let cos = cosine(&expected, &actual);
-    eprintln!("[int8 MPP f16] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    eprintln!("[int8 MPP f16] cos={cos:.6} max|Δ|={max_diff:.6e}");
     assert!(cos >= 0.999, "int8 MPP f16 vs CPU oracle cosine = {cos:.6} (want ≥ 0.999)");
+    const CAL_MAX_DIFF: f32 = 9.0e-4; // observed 2.750754e-4
+    assert!(max_diff <= CAL_MAX_DIFF, "int8 MPP f16 max|Δ| = {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }
 
 // ── bf16 ───────────────────────────────────────────────────────────────────
@@ -287,6 +302,9 @@ fn moe_gather_qmm_mma_int8_bm16_mpp_matches_cpu_oracle_bf16() {
     );
 
     let cos = cosine(&expected, &actual);
-    eprintln!("[int8 MPP bf16] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    eprintln!("[int8 MPP bf16] cos={cos:.6} max|Δ|={max_diff:.6e}");
     assert!(cos >= 0.997, "int8 MPP bf16 vs CPU oracle cosine = {cos:.6} (want ≥ 0.997)");
+    const CAL_MAX_DIFF: f32 = 6.0e-3; // observed 2.000928e-3
+    assert!(max_diff <= CAL_MAX_DIFF, "int8 MPP bf16 max|Δ| = {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }

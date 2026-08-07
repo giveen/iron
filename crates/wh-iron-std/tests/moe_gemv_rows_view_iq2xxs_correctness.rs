@@ -135,6 +135,17 @@ fn cosine(want: &[f32], got: &[f32]) -> (f64, usize) {
     (dot / (na.sqrt() * nb.sqrt() + 1e-12), nan)
 }
 
+/// Max absolute per-element difference. Cosine is scale-blind
+/// (`cosine(v, k*v) == 1.0` for any positive `k`), so a uniform-scale bug
+/// (dropped dequant scale, wrong super-scale byte offset) would sail
+/// through cosine but not this. Calibrated 2026-08-06 on Metal (M5 Max):
+/// ~3x observed max|Δ|, shared by both callers below since they read the
+/// same view bytes through different (u8 vs u16) load paths and should
+/// agree on error magnitude.
+fn max_abs_diff(want: &[f32], got: &[f32]) -> f32 {
+    want.iter().zip(got).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max)
+}
+
 fn skip_no_gpu() -> bool {
     let probe = Context::new().expect("Context::new");
     let skip = probe.chip_family().is_none_or(|lvl| lvl < 10);
@@ -175,13 +186,16 @@ fn gemv_rows_view_iq2xxs_u8_matches_oracle() {
     let got = unpack_bytes(r.outputs.get("out").unwrap(), Dt::F32);
 
     let (cos, nan) = cosine(&c.want, &got);
+    let max_diff = max_abs_diff(&c.want, &got);
     eprintln!(
-        "[u8] want[0..6]={:?} got[0..6]={:?} nan={nan} cos={cos:.6}",
+        "[u8] want[0..6]={:?} got[0..6]={:?} nan={nan} cos={cos:.6} max|Δ|={max_diff:.6e}",
         &c.want[..6],
         &got[..6]
     );
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99");
+    const CAL_MAX_DIFF: f32 = 2.5e-3; // observed 7.324219e-4
+    assert!(max_diff <= CAL_MAX_DIFF, "[u8] max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }
 
 #[test]
@@ -215,11 +229,14 @@ fn gemv_rows_view_u16_iq2xxs_matches_oracle() {
     let got = unpack_bytes(r.outputs.get("out").unwrap(), Dt::F32);
 
     let (cos, nan) = cosine(&c.want, &got);
+    let max_diff = max_abs_diff(&c.want, &got);
     eprintln!(
-        "[u16] want[0..6]={:?} got[0..6]={:?} nan={nan} cos={cos:.6}",
+        "[u16] want[0..6]={:?} got[0..6]={:?} nan={nan} cos={cos:.6} max|Δ|={max_diff:.6e}",
         &c.want[..6],
         &got[..6]
     );
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99");
+    const CAL_MAX_DIFF: f32 = 2.5e-3; // observed 7.324219e-4
+    assert!(max_diff <= CAL_MAX_DIFF, "[u16] max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }

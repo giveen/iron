@@ -143,6 +143,7 @@ fn bgemm_iq2xxs_view_matches_gemv_oracle() {
     let mut na = 0.0f64;
     let mut nb = 0.0f64;
     let mut nan = 0;
+    let mut max_diff = 0.0f32;
     for (a, b) in want.iter().zip(&got) {
         if !a.is_finite() || !b.is_finite() {
             nan += 1;
@@ -151,13 +152,22 @@ fn bgemm_iq2xxs_view_matches_gemv_oracle() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64).powi(2);
         nb += (*b as f64).powi(2);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("want[0..6]={:?}", &want[..6]);
     eprintln!("got[0..6]={:?}", &got[..6]);
-    eprintln!("nan={nan} cos={cos:.6}");
+    eprintln!("nan={nan} cos={cos:.6} max_diff={max_diff:.6e}");
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99");
+    // Cosine is scale-blind (`cosine(v, k*v) == 1.0`); max_abs_diff catches
+    // a uniform-scale bug (dropped dequant scale, wrong super-scale byte
+    // offset) cosine alone would miss. Calibration shared with the
+    // prod-dims/nonzero-offset case below (same dequant, same oracle
+    // structure) — see that case's comment for the observed values and
+    // methodology. Calibrated 2026-08-06 on Metal (M5 Max).
+    const CAL_MAX_DIFF: f32 = 6.0e-4; // observed 1.831055e-4
+    assert!(max_diff <= CAL_MAX_DIFF, "max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF:.3e}");
 }
 
 /// Production-shape variant: k_in=4096 (16 blocks/row, exercises block
@@ -271,6 +281,7 @@ fn bgemm_iq2xxs_view_prod_dims_nonzero_offset() {
     let mut na = 0.0f64;
     let mut nb = 0.0f64;
     let mut nan = 0;
+    let mut max_diff = 0.0f32;
     for (a, b) in want.iter().zip(&got) {
         if !a.is_finite() || !b.is_finite() {
             nan += 1;
@@ -279,11 +290,20 @@ fn bgemm_iq2xxs_view_prod_dims_nonzero_offset() {
         dot += (*a as f64) * (*b as f64);
         na += (*a as f64).powi(2);
         nb += (*b as f64).powi(2);
+        max_diff = max_diff.max((a - b).abs());
     }
     let cos = dot / (na.sqrt() * nb.sqrt() + 1e-12);
     eprintln!("prod want[0..6]={:?}", &want[..6]);
     eprintln!("prod got[0..6]={:?}", &got[..6]);
-    eprintln!("prod nan={nan} cos={cos:.6}");
+    eprintln!("prod nan={nan} cos={cos:.6} max_diff={max_diff:.6e}");
     assert_eq!(nan, 0, "non-finite output");
     assert!(cos >= 0.99, "cosine {cos:.6} < 0.99 (prod-dims/nonzero-offset)");
+    // Cosine is scale-blind; max_abs_diff catches a uniform-scale bug
+    // cosine alone would miss. Calibrated 2026-08-06 on Metal (M5 Max),
+    // ~3x observed max|Δ| (filled after run). Same dequant/oracle shape as
+    // the k_in=256/offset=0 case above, just at production dims — separate
+    // constant because output magnitude scales with k_in (16 blocks/row here
+    // vs 1).
+    const CAL_MAX_DIFF_PROD: f32 = 4.0e-3; // observed 1.220703e-3
+    assert!(max_diff <= CAL_MAX_DIFF_PROD, "max|Δ| {max_diff:.3e} > {CAL_MAX_DIFF_PROD:.3e}");
 }
