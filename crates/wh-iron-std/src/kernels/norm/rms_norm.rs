@@ -410,17 +410,37 @@ pub mod kernel_tests {
     }
 
     fn make_inputs(rows: usize, n: usize) -> (Vec<f32>, Vec<f32>) {
+        make_inputs_custom(rows, n, |r, i| ((i % 17) as f32 - 8.0) * 0.1 + r as f32 * 0.03)
+    }
+
+    /// Same weight fixture as [`make_inputs`], but the per-`(row, col)` value
+    /// comes from a caller-supplied generator instead of the fixed ramp — so
+    /// boundary-case tests (all-zero row, near-zero-variance row) can reuse
+    /// the same weight construction and buffer-assembly path.
+    fn make_inputs_custom(
+        rows: usize,
+        n: usize,
+        row_gen: impl Fn(usize, usize) -> f32,
+    ) -> (Vec<f32>, Vec<f32>) {
         let w: Vec<f32> = (0..n).map(|i| 1.0 + ((i % 11) as f32 - 5.0) * 0.02).collect();
         let mut x = Vec::with_capacity(rows * n);
         for r in 0..rows {
-            x.extend((0..n).map(|i| ((i % 17) as f32 - 8.0) * 0.1 + r as f32 * 0.03));
+            x.extend((0..n).map(|i| row_gen(r, i)));
         }
         (w, x)
     }
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
-        let eps = 1e-5f32;
         let (w, x) = make_inputs(rows, n);
+        setup_with_rows(n, dt, w, x)
+    }
+
+    /// `setup`, but taking pre-built `(w, x)` — the boundary-case tests below
+    /// feed a custom row generator through [`make_inputs_custom`] instead of
+    /// the default ramp.
+    fn setup_with_rows(n: usize, dt: DType, w: Vec<f32>, x: Vec<f32>) -> TestSetup {
+        let eps = 1e-5f32;
+        let rows = x.len() / n;
         let w_dt = unpack_f32(&pack_f32(&w, dt), dt);
         let expected = expected_rms(&x, &w_dt, rows, n, eps, dt);
         TestSetup::new(iron_rms_norm::kernel_ir_for(dt))
@@ -436,6 +456,35 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
     fn test_iron_rms_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
+
+    // ── Boundary cases (RST oracle-coverage sweep) ────────────────────────
+    //
+    // All-zero row: `rsqrt(0/n + eps) = rsqrt(eps)`, finite and well
+    // defined — `iron_rms_norm`'s single-pass sum-of-squares (no mean
+    // subtraction) has no catastrophic-cancellation exposure, but the
+    // zero/near-zero edge of `rsqrt` is still worth pinning as a regression
+    // guard. `out` should come out all-zero (`0 * rsqrt(eps) * w = 0`).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
+    fn test_iron_rms_norm_all_zero_row(dt: DType) -> TestSetup {
+        let (w, x) = make_inputs_custom(4, 512, |_r, _i| 0.0);
+        setup_with_rows(512, dt, w, x)
+    }
+
+    // Near-zero-variance, large-offset row: every value is `offset + tiny
+    // noise`. `iron_rms_norm` accumulates `sum(x^2)` directly (no mean
+    // subtraction), so unlike `iron_layer_norm`'s `E[x^2] - E[x]^2` this
+    // kernel has no cancellation to trip — `mean(x^2)` at a large constant
+    // offset is dominated by `offset^2` and stays comfortably positive
+    // under `rsqrt`. This locks that in as a regression guard: offset=1e4
+    // is well past where `iron_layer_norm`'s two-pass form goes unstable
+    // (see `layer_norm.rs`'s boundary test), and `iron_rms_norm` still
+    // reconstructs the noise pattern correctly at every dtype.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
+    fn test_iron_rms_norm_near_zero_variance_large_offset(dt: DType) -> TestSetup {
+        let offset = 1.0e4_f32;
+        let (w, x) = make_inputs_custom(4, 512, |_r, i| offset + ((i % 5) as f32 - 2.0) * 1.0e-4);
+        setup_with_rows(512, dt, w, x)
+    }
 
     // Non-power-of-two TPG: n=1536 (Qwen2.5-1.5B hidden) → tpg = n/4 = 384
     // = 2^7·3, which is NOT a power of two. The threadgroup barrier-tree

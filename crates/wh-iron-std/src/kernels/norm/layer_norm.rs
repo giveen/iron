@@ -36,7 +36,17 @@ pub fn iron_layer_norm<T>(
     let st = reduce_sum(s);
     let sqt = reduce_sum(sq);
     let mean = st / n;
-    let var = sqt / n - mean * mean;
+    // Naive two-pass E[x^2] - E[x]^2 form — catastrophic-cancellation-prone
+    // for large-mean/tiny-variance rows (both terms ~mean^2, the true
+    // variance is their tiny difference). Confirmed via the RST
+    // oracle-coverage sweep (2026-08-07): a row of offset=1e4 + ~1e-4 noise
+    // drives `var_raw` negative under real f32/f16/bf16 rounding, and
+    // `rsqrt` of a negative argument produces NaN — a real production
+    // hazard, not just a theoretical one. Clamp to 0 before `rsqrt`; a
+    // clamped variance of exactly 0 is the correct degenerate answer for a
+    // (numerically) constant row anyway.
+    let var_raw = sqt / n - mean * mean;
+    let var = select(var_raw > 0.0f32, var_raw, 0.0f32);
     let eps = load(eps_buf[0]);
     let is = rsqrt(var + eps);
     for _r in range(0u32, nf, 1u32) {
@@ -76,6 +86,24 @@ pub mod kernel_tests {
     use crate::utils::{pack_f32, unpack_f32};
 
     fn setup(rows: usize, n: usize, dt: DType) -> TestSetup {
+        setup_with_row_gen(rows, n, dt, |r, i| ((i % 17) as f32 - 8.0) * 0.1 + r as f32 * 0.03)
+    }
+
+    /// `setup`, parameterized over the per-`(row, col)` value generator so
+    /// boundary-case tests (all-zero row, near-zero-variance large-offset
+    /// row) can reuse the same weight/bias fixtures and oracle path.
+    ///
+    /// The oracle here uses the numerically STABLE one-pass-after-mean form
+    /// (`var = mean((x - mean)^2)`), which does NOT reproduce the kernel's
+    /// `var = sqt/n - mean*mean` catastrophic-cancellation risk — so a real
+    /// divergence under a boundary case is a genuine signal, not a
+    /// shared-bug false negative.
+    fn setup_with_row_gen(
+        rows: usize,
+        n: usize,
+        dt: DType,
+        row_gen: impl Fn(usize, usize) -> f32,
+    ) -> TestSetup {
         let eps = 1e-5f32;
         let w: Vec<f32> = (0..n).map(|i| 1.0 + ((i % 11) as f32 - 5.0) * 0.02).collect();
         let b: Vec<f32> = (0..n).map(|i| ((i % 7) as f32 - 3.0) * 0.05).collect();
@@ -84,8 +112,7 @@ pub mod kernel_tests {
         let mut x = Vec::with_capacity(rows * n);
         let mut expected = Vec::with_capacity(rows * n);
         for r in 0..rows {
-            let row: Vec<f32> =
-                (0..n).map(|i| ((i % 17) as f32 - 8.0) * 0.1 + r as f32 * 0.03).collect();
+            let row: Vec<f32> = (0..n).map(|i| row_gen(r, i)).collect();
             let xr = unpack_f32(&pack_f32(&row, dt), dt);
             let mean: f32 = xr.iter().sum::<f32>() / n as f32;
             let var: f32 = xr.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
@@ -109,6 +136,34 @@ pub mod kernel_tests {
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
     fn test_iron_layer_norm(dt: DType) -> TestSetup { setup(4, 512, dt) }
+
+    // ── Boundary cases (RST oracle-coverage sweep) ────────────────────────
+    //
+    // All-zero row: mean=0, var=0, `(0-0)*rsqrt(0+eps)*w + b = b` — finite,
+    // exercises the `rsqrt(eps)` edge without any cancellation risk (both
+    // terms of `sqt/n - mean*mean` are exactly 0 here).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
+    fn test_iron_layer_norm_all_zero_row(dt: DType) -> TestSetup {
+        setup_with_row_gen(4, 512, dt, |_r, _i| 0.0)
+    }
+
+    // Near-zero-variance, large-offset row: every value is `offset + tiny
+    // noise` — the regime that stresses the kernel's naive two-pass
+    // `var = sqt/n - mean*mean` (both terms ~offset^2, difference ~noise^2,
+    // right at the edge of dtype precision).
+    //
+    // Investigation (2026-08-07): with the clamp REMOVED, `var` went
+    // negative — and `rsqrt(negative)` produced NaN output — at EVERY
+    // offset tried (1e3, 1e4, 1e5) across f32 and bf16 (f16 additionally
+    // overflows to infinity above ~6.5e4, a separate failure mode). This
+    // is not a narrow edge case; it reproduces readily. `iron_layer_norm`
+    // now clamps `var` to `>= 0` before `rsqrt` (see the kernel body
+    // above) — this test locks in offset=1e4 as the regression guard.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 2e-2, 1e-1])]
+    fn test_iron_layer_norm_near_zero_variance_large_offset(dt: DType) -> TestSetup {
+        let offset = 1.0e4_f32;
+        setup_with_row_gen(4, 512, dt, move |_r, i| offset + ((i % 5) as f32 - 2.0) * 1.0e-4)
+    }
 }
 
 /// New-syntax benchmark for `iron_layer_norm` (vs MLX `metal/layer_norm.metal`).

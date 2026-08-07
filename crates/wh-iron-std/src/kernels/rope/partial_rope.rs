@@ -151,6 +151,49 @@ pub mod kernel_tests {
         inverse: bool,
         dt: DType,
     ) -> TestSetup {
+        setup_with_yarn(
+            n_tokens,
+            n_heads,
+            head_dim,
+            n_nope,
+            half_rot,
+            base_position,
+            theta_base,
+            inverse,
+            // Disabled YaRN (full-layer path): freq_scale=1, ext_factor=0
+            // collapses the ramp to a no-op, so `cpu_reference` (which
+            // hardcodes theta = pos*inv_freq with no YaRN blend at all) is
+            // still the correct oracle here.
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            dt,
+        )
+    }
+
+    /// `setup`, parameterized over the 4 YaRN constexprs (`freq_scale`,
+    /// `ext_factor`, `corr_low`, `corr_high`) instead of hardcoding the
+    /// disabled values. Still uses `cpu_reference` as its oracle — valid
+    /// only when the YaRN ramp is a no-op (`ext_factor=0`, as with every
+    /// existing call site). Real-value YaRN cases use `setup_yarn` below,
+    /// which swaps in the independent `yarn_cpu_reference` oracle instead.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_with_yarn(
+        n_tokens: usize,
+        n_heads: usize,
+        head_dim: usize,
+        n_nope: usize,
+        half_rot: usize,
+        base_position: u32,
+        theta_base: f32,
+        inverse: bool,
+        freq_scale: f32,
+        ext_factor: f32,
+        corr_low: f32,
+        corr_high: f32,
+        dt: DType,
+    ) -> TestSetup {
         let n = n_tokens * n_heads * head_dim;
         let qk: Vec<f32> = (0..n).map(|i| (i as f32 * 0.011 - 0.4).sin() * 1.2).collect();
         let qk_dt = unpack_f32(&pack_f32(&qk, dt), dt);
@@ -169,7 +212,6 @@ pub mod kernel_tests {
         // `out` buffer is initialized to a copy of `qk` so the
         // untouched nope dims pass through — kernel only writes the
         // rope pairs (the in-place pattern callers rely on).
-        // freq_scale=1, ext_factor=0 → YaRN disabled (full-layer path).
         TestSetup::new(iron_partial_rope::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("qk", pack_f32(&qk, dt), dt))
@@ -181,10 +223,130 @@ pub mod kernel_tests {
             .constexpr("base_position", base_position)
             .constexpr("theta_base", theta_base)
             .constexpr("inverse_flag", inv_flag)
-            .constexpr("freq_scale", 1.0f32)
-            .constexpr("ext_factor", 0.0f32)
-            .constexpr("corr_low", 0.0f32)
-            .constexpr("corr_high", 0.0f32)
+            .constexpr("freq_scale", freq_scale)
+            .constexpr("ext_factor", ext_factor)
+            .constexpr("corr_low", corr_low)
+            .constexpr("corr_high", corr_high)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_3d(n_heads as u32, half_rot as u32, n_tokens as u32, [1, 1, 1])
+    }
+
+    /// Independent CPU oracle for the YaRN NTK-by-parts ramp, applied
+    /// directly to `inv_freq` — per Peng et al., "YaRN: Efficient Context
+    /// Window Extension of Large Language Models" (arXiv:2309.00071), the
+    /// "NTK-by-parts interpolation" construction in §3.3-3.4: blend the
+    /// per-dimension-pair EXTRAPOLATED and INTERPOLATED frequencies by a
+    /// ramp derived from the correction range, then multiply by position.
+    ///
+    /// This is NOT a transliteration of the kernel's `theta`-space algebra
+    /// (which blends `theta_interp`/`theta_extrap` directly, post
+    /// position-multiply) — this oracle blends the FREQUENCIES first, which
+    /// is the formulation the paper specifies. The two are mathematically
+    /// equivalent only when `ext_factor == 1.0`: expanding the kernel's
+    /// `theta_raw = theta_interp*(1-ramp_mix) + theta_extrap*ramp_mix` with
+    /// `ramp_mix = (1-y_cl)*ext_factor` at `ext_factor=1` gives
+    /// `theta_raw = pos * (inv_freq_interp*y_cl + inv_freq_extrap*(1-y_cl))`,
+    /// which is exactly `pos * inv_freq` below with `ramp = y_cl`. Production
+    /// compressed-layer YaRN always runs at `ext_factor=1.0` (DSv4 reference
+    /// `yarnParams`), so this is a valid independent oracle for the
+    /// real-value test cases below — it is deliberately NOT used for the
+    /// disabled-value (`ext_factor=0`) tests, which stay on `cpu_reference`
+    /// (at `ext_factor=0` the two formulations diverge, and `cpu_reference`'s
+    /// no-YaRN-at-all form is what the kernel actually collapses to there).
+    #[allow(clippy::too_many_arguments)]
+    fn yarn_cpu_reference(
+        qk: &[f32],
+        n_tokens: usize,
+        n_heads: usize,
+        head_dim: usize,
+        n_nope: usize,
+        half_rot: usize,
+        base_position: u32,
+        theta_base: f32,
+        inverse: bool,
+        freq_scale: f32,
+        corr_low: f32,
+        corr_high: f32,
+    ) -> Vec<f32> {
+        let mut out = qk.to_vec();
+        for token in 0..n_tokens {
+            let position = (base_position as usize + token) as f32;
+            for head in 0..n_heads {
+                for p in 0..half_rot {
+                    let p_f = p as f32;
+                    let inv_freq_extrap = theta_base.powf(-2.0 * p_f / (2.0 * half_rot as f32));
+                    let inv_freq_interp = freq_scale * inv_freq_extrap;
+                    let ramp = ((p_f - corr_low) / (corr_high - corr_low)).clamp(0.0, 1.0);
+                    let inv_freq = inv_freq_interp * ramp + inv_freq_extrap * (1.0 - ramp);
+                    let theta_raw = position * inv_freq;
+                    let theta = if inverse { -theta_raw } else { theta_raw };
+                    let c = theta.cos();
+                    let s = theta.sin();
+                    let tok_base = token * n_heads * head_dim;
+                    let lo = tok_base + head * head_dim + n_nope + 2 * p;
+                    let hi = lo + 1;
+                    let x_lo = qk[lo];
+                    let x_hi = qk[hi];
+                    out[lo] = x_lo * c - x_hi * s;
+                    out[hi] = x_lo * s + x_hi * c;
+                }
+            }
+        }
+        out
+    }
+
+    /// Real-value YaRN setup — uses `yarn_cpu_reference` (valid at
+    /// `ext_factor=1.0`) instead of the disabled-path `cpu_reference`.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_yarn(
+        n_tokens: usize,
+        n_heads: usize,
+        head_dim: usize,
+        n_nope: usize,
+        half_rot: usize,
+        base_position: u32,
+        theta_base: f32,
+        inverse: bool,
+        freq_scale: f32,
+        ext_factor: f32,
+        corr_low: f32,
+        corr_high: f32,
+        dt: DType,
+    ) -> TestSetup {
+        assert_eq!(ext_factor, 1.0, "yarn_cpu_reference is only a valid oracle at ext_factor=1.0");
+        let n = n_tokens * n_heads * head_dim;
+        let qk: Vec<f32> = (0..n).map(|i| (i as f32 * 0.011 - 0.4).sin() * 1.2).collect();
+        let qk_dt = unpack_f32(&pack_f32(&qk, dt), dt);
+        let expected = yarn_cpu_reference(
+            &qk_dt,
+            n_tokens,
+            n_heads,
+            head_dim,
+            n_nope,
+            half_rot,
+            base_position,
+            theta_base,
+            inverse,
+            freq_scale,
+            corr_low,
+            corr_high,
+        );
+        let inv_flag: u32 = if inverse { 1 } else { 0 };
+        TestSetup::new(iron_partial_rope::kernel_ir_for(dt))
+            .mode(KernelMode::Grid3D)
+            .input(TestBuffer::from_vec("qk", pack_f32(&qk, dt), dt))
+            .input(TestBuffer::from_vec("out", pack_f32(&qk, dt), dt))
+            .constexpr("head_dim", head_dim as u32)
+            .constexpr("n_nope", n_nope as u32)
+            .constexpr("half_rot", half_rot as u32)
+            .constexpr("n_heads", n_heads as u32)
+            .constexpr("base_position", base_position)
+            .constexpr("theta_base", theta_base)
+            .constexpr("inverse_flag", inv_flag)
+            .constexpr("freq_scale", freq_scale)
+            .constexpr("ext_factor", ext_factor)
+            .constexpr("corr_low", corr_low)
+            .constexpr("corr_high", corr_high)
             .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
             .grid_3d(n_heads as u32, half_rot as u32, n_tokens as u32, [1, 1, 1])
     }
@@ -211,6 +373,43 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
     fn test_partial_rope_hca(dt: DType) -> TestSetup {
         setup(2, 64, 512, 448, 32, 16, 160_000.0, false, dt)
+    }
+
+    // ── YaRN ramp — real DSv4 compressed-layer values ────────────────────
+    //
+    // Every test above disables the YaRN ramp (freq_scale=1, ext_factor=0),
+    // so `ramp_mix` is always forced to 0 and the blend arithmetic
+    // (theta_interp/theta_extrap/y_cl/ramp_mix) has never executed with real
+    // values. Real production values for a DSv4 compressed layer
+    // (qkRopeHeadDim=64, yarnOriginalContext=65536, compressRopeTheta=160000,
+    // yarnFactor=16, betaFast=32, betaSlow=1 — see `yarnParams(ratio:)` in
+    // the DSv4 reference):
+    //   freq_scale = 1/yarnFactor = 0.0625
+    //   ext_factor = 1.0
+    //   corr_low   = floor(corrDim(betaFast)) = floor(15.4533) = 15.0
+    //   corr_high  = ceil(corrDim(betaSlow))  = ceil(24.7084)  = 25.0
+    // where corrDim(beta) = n_rot * ln(n_ctx / (beta*2*pi)) / (2*ln(base)).
+    // Verified independently via python3 `math.log` before writing this.
+    //
+    // Tolerance calibration (2026-08-07): ran at f32/f16/bf16 for both
+    // forward and inverse, observed max abs err: f32=3.35e-6, f16=4.88e-4,
+    // bf16=2.44e-4 (bf16 forward happened to land exactly on 0.00e0 — the
+    // inverse run is the binding bf16 number). tol = observed * ~3x margin:
+    // [1e-5, 1.5e-3, 1e-3]. bf16 widened to 6e-3 after CI's GPU measured
+    // 1.95e-3 on the same case (8x the M5 observation — same
+    // cross-hardware accumulation-order spread the aura tolerances hit).
+    // The freq_scale-corruption mutation check still fails at this bound
+    // (corrupted error: 7.81e-3), so the oracle keeps its teeth.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1.5e-3, 6e-3])]
+    fn test_partial_rope_yarn_compressed_forward(dt: DType) -> TestSetup {
+        setup_yarn(2, 64, 512, 448, 32, 64, 160_000.0, false, 0.0625, 1.0, 15.0, 25.0, dt)
+    }
+
+    // Same real YaRN params, inverse rotation (the attention-output O-LoRA
+    // undo path) — exercises `theta_signed` flip combined with a live ramp.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 1.5e-3, 6e-3])]
+    fn test_partial_rope_yarn_compressed_inverse(dt: DType) -> TestSetup {
+        setup_yarn(2, 64, 512, 448, 32, 64, 160_000.0, true, 0.0625, 1.0, 15.0, 25.0, dt)
     }
 }
 

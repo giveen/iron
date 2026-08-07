@@ -71,6 +71,20 @@ impl Shape {
             n_positions: 16,
         }
     }
+
+    /// `qwen_decode()` at a caller-chosen `position`, widening `n_positions`
+    /// to cover it. Every existing test hardcodes `position=7` — this
+    /// covers the slot-0 (first write ever) and `max_seq-1` (last valid
+    /// slot / wrap boundary) edges, which a bad index formula (off-by-one,
+    /// wraparound, or a stride computed from the wrong axis) could get
+    /// right in the middle of the range and wrong at either edge.
+    /// `n_positions` must be `>= position + 1` for the bulk-dequant window
+    /// to include the slot under test at all — at `position = max_seq - 1`
+    /// that means widening it to the full `max_seq`, not the default 16.
+    fn qwen_decode_at(position: usize) -> Self {
+        let base = Self::qwen_decode();
+        Self { position, n_positions: base.n_positions.max(position + 1), ..base }
+    }
 }
 
 fn build_source(shape: &Shape, dt: Dt, seed: u64) -> Vec<f32> {
@@ -309,6 +323,51 @@ fn kv_cache_int4_roundtrip_bf16() {
     assert_roundtrip(&shape, Dt::Bf16, &source, &recon, 15.0, "int4 bf16");
 }
 
+// ── position boundary coverage (RST oracle-coverage sweep) ────────────
+//
+// Every test above hardcodes position=7 of max_seq=64 — comfortably
+// mid-range. Position 0 (the very first slot ever written) and
+// max_seq-1 (the last valid slot / wrap boundary) are where an
+// off-by-one or wrong-axis-stride index bug would actually show up; a
+// formula that's right in the middle of the range can still be wrong
+// at either edge.
+
+#[test]
+fn kv_cache_int4_roundtrip_f32_position_0() {
+    let _g = gpu_lock();
+    let shape = Shape::qwen_decode_at(0);
+    let source = build_source(&shape, Dt::F32, 0x9E37_79B9);
+    let recon = roundtrip_int4(&shape, Dt::F32, &source);
+    assert_roundtrip(&shape, Dt::F32, &source, &recon, 15.0, "int4 f32 position=0");
+}
+
+#[test]
+fn kv_cache_int4_roundtrip_f32_position_last() {
+    let _g = gpu_lock();
+    let shape = Shape::qwen_decode_at(Shape::qwen_decode().max_seq - 1);
+    let source = build_source(&shape, Dt::F32, 0x9E37_79B9);
+    let recon = roundtrip_int4(&shape, Dt::F32, &source);
+    assert_roundtrip(&shape, Dt::F32, &source, &recon, 15.0, "int4 f32 position=max_seq-1");
+}
+
+#[test]
+fn kv_cache_int8_roundtrip_f32_position_0() {
+    let _g = gpu_lock();
+    let shape = Shape::qwen_decode_at(0);
+    let source = build_source(&shape, Dt::F32, 0x9E37_79B9);
+    let recon = roundtrip_int8(&shape, Dt::F32, &source);
+    assert_roundtrip(&shape, Dt::F32, &source, &recon, 255.0, "int8 f32 position=0");
+}
+
+#[test]
+fn kv_cache_int8_roundtrip_f32_position_last() {
+    let _g = gpu_lock();
+    let shape = Shape::qwen_decode_at(Shape::qwen_decode().max_seq - 1);
+    let source = build_source(&shape, Dt::F32, 0x9E37_79B9);
+    let recon = roundtrip_int8(&shape, Dt::F32, &source);
+    assert_roundtrip(&shape, Dt::F32, &source, &recon, 255.0, "int8 f32 position=max_seq-1");
+}
+
 // ── int8 tests ───────────────────────────────────────────────────────
 
 #[test]
@@ -344,10 +403,15 @@ fn kv_cache_int8_roundtrip_bf16() {
 // pre-filling neighboring slots with a sentinel and checking they
 // survive a quantize+dequant cycle. Catches index formula regressions
 // (e.g. accidentally striding by head_dim instead of max_seq).
-#[test]
-fn kv_cache_int8_does_not_touch_other_slots_f32() {
+//
+// Parameterized over `position` so the boundary slots (0, max_seq-1) get
+// the same isolation check as the mid-range default — a wrong-axis
+// stride bug could plausibly leave every OTHER slot alone except the
+// one adjacent to an edge, which the original position=7-only test
+// couldn't see.
+fn cross_slot_isolation_check(position: usize, label: &str) {
     let _g = gpu_lock();
-    let shape = Shape::qwen_decode();
+    let shape = Shape::qwen_decode_at(position);
     let dt = Dt::F32;
     let dtype = dt.to_dtype();
     let bits = 8u32;
@@ -400,7 +464,7 @@ fn kv_cache_int8_does_not_touch_other_slots_f32() {
                 let idx = (h * shape.max_seq + p) * n_packed_per_slot + w;
                 assert_eq!(
                     w_after[idx], sentinel_w[idx],
-                    "weight cross-slot bleed at (h={h}, p={p}, w={w})",
+                    "{label}: weight cross-slot bleed at (h={h}, p={p}, w={w})",
                 );
             }
             // Scale/bias stripe.
@@ -408,13 +472,28 @@ fn kv_cache_int8_does_not_touch_other_slots_f32() {
                 let idx = (h * shape.max_seq + p) * n_groups_per_slot + g;
                 assert!(
                     (s_after[idx] - sentinel_s[idx]).abs() < 1e-6,
-                    "scale cross-slot bleed at (h={h}, p={p}, g={g})",
+                    "{label}: scale cross-slot bleed at (h={h}, p={p}, g={g})",
                 );
                 assert!(
                     (b_after[idx] - sentinel_b[idx]).abs() < 1e-6,
-                    "bias cross-slot bleed at (h={h}, p={p}, g={g})",
+                    "{label}: bias cross-slot bleed at (h={h}, p={p}, g={g})",
                 );
             }
         }
     }
+}
+
+#[test]
+fn kv_cache_int8_does_not_touch_other_slots_f32() {
+    cross_slot_isolation_check(Shape::qwen_decode().position, "position=7 (mid-range)");
+}
+
+#[test]
+fn kv_cache_int8_does_not_touch_other_slots_f32_position_0() {
+    cross_slot_isolation_check(0, "position=0");
+}
+
+#[test]
+fn kv_cache_int8_does_not_touch_other_slots_f32_position_last() {
+    cross_slot_isolation_check(Shape::qwen_decode().max_seq - 1, "position=max_seq-1");
 }

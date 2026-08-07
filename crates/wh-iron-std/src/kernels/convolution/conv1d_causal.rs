@@ -184,6 +184,34 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
     fn test_conv1d_causal_step(dt: DType) -> TestSetup { conv1d_setup(128, 4, dt) }
 
+    // ── kernel_size boundary coverage (RST oracle-coverage sweep) ─────────
+    //
+    // The three underflow guards in `iron_conv1d_causal_step` exist
+    // specifically for `kernel_size < 2` (see the "Iron post-mortem
+    // 2026-05-19" comments on the guard sites) — a stray `kernel_size == 0`
+    // or `== 1` would otherwise underflow an unsigned subtraction into
+    // ~4e9 and pin the GPU in a runaway loop. Only kernel_size=4 was ever
+    // tested, so these guards had never actually executed with the values
+    // they're defending against. `conv1d_setup` is already parameterized
+    // by `kernel_size` — these are 1-line additions against the existing
+    // oracle (which already special-cases `kernel_size < 2` the same way).
+
+    // kernel_size=1: conv_taps=0 (no state contribution), shift_taps=0,
+    // and the tail store is skipped entirely (`state_in` is 0 elements —
+    // the kernel provably never reads or writes `state` in this case).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
+    fn test_conv1d_causal_step_kernel_size_1(dt: DType) -> TestSetup { conv1d_setup(128, 1, dt) }
+
+    // kernel_size=2: conv_taps=1, shift_taps=0 (kernel_size>2 is false),
+    // tail store DOES run (kernel_size>1 true), writing state[0].
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
+    fn test_conv1d_causal_step_kernel_size_2(dt: DType) -> TestSetup { conv1d_setup(128, 2, dt) }
+
+    // kernel_size=3: conv_taps=2, shift_taps=1 (the shift loop runs its
+    // first real iteration here), tail store writes state[1].
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-5, 5e-3, 5e-2])]
+    fn test_conv1d_causal_step_kernel_size_3(dt: DType) -> TestSetup { conv1d_setup(128, 3, dt) }
+
     fn conv1d_causal_prefill_oracle(
         xbc: &[f32],
         w: &[f32],

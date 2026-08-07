@@ -251,26 +251,36 @@ pub fn iron_aura_encode<T>(
 }
 
 /// New-syntax correctness for the AURA fused encode kernel. Mirrors the
-/// affine-quantize tests' strategy: the **packed codes** go through a
-/// branchless boundary-count whose last bit and bit-packing are sensitive to
-/// Metal fast-math FMA fusion, so they stayed covered by the legacy bit-exact
-/// `tests/iron_aura_encode_gpu_correctness.rs` (since removed) A/B test. Here we
-/// pin the part that is robustly checkable — the per-vector
-/// **norm-correction factor** (`norms_out`), which the decoder multiplies
-/// back through.
+/// affine-quantize tests' strategy, but — unlike the norms-only version this
+/// module previously shipped — now ALSO pins the **packed codes**
+/// (`packed_out`) bit-exact, not just the per-vector **norm-correction
+/// factor** (`norms_out`).
+///
+/// History: the bit-exact `packed_out` check lived in the legacy
+/// `tests/aura_encode_gpu_correctness.rs` (removed when kernel correctness
+/// migrated off the legacy `*_gpu_correctness.rs` format). That migration
+/// dropped `packed_out` coverage citing Metal fast-math FMA-fusion
+/// sensitivity as the reason it wasn't ported. That reasoning doesn't
+/// actually block a bit-exact check here: `packed_out` holds **integer**
+/// codebook indices — either exactly right or exactly wrong, no float
+/// tolerance needed — so FMA fusion in the norm/rotation stage only matters
+/// if it flips WHICH bin a rotated coordinate lands in. `smooth_input` (below)
+/// keeps every rotated coordinate comfortably clear of the Lloyd-Max
+/// boundaries, so the bin assignment is stable under fast-math reordering,
+/// and `packed_out` is safe to check bit-exact again.
 ///
 /// Setup uses an **identity rotation** so the Stage-2 matmul is `rotated =
 /// unit_val` exactly (no reorder ambiguity in the quant index), and a smooth
 /// input chosen to land each rotated coordinate comfortably mid-bin — so the
-/// codebook index feeding `norms_out` is stable under input dtype rounding.
-/// `input` / `rotation` / `codebook` / `norms_out` are `Tensor<T>` and
-/// dtype-rounded here to match the kernel's cast-at-load. The identity rotation
-/// is exact in all dtypes; `norms_out` is compared at the per-dtype tol.
-/// `boundaries` stays `Tensor<f32>` — the 60-byte 4-bit (~1 KB worst-case
-/// 8-bit) buffer isn't bandwidth-bound, and the bf16-boundary rounding
-/// measurably degrades 4-bit AURA quality at decode time. `packed_out` is
-/// provided but NOT expected (fast-math packing — the legacy f32 A/B test owns
-/// the bit-exact check).
+/// codebook index feeding both `norms_out` and `packed_out` is stable under
+/// input dtype rounding. `input` / `rotation` / `codebook` / `norms_out` are
+/// `Tensor<T>` and dtype-rounded here to match the kernel's cast-at-load. The
+/// identity rotation is exact in all dtypes; `norms_out` is compared at the
+/// per-dtype tol. `boundaries` stays `Tensor<f32>` — the 60-byte 4-bit (~1 KB
+/// worst-case 8-bit) buffer isn't bandwidth-bound, and the bf16-boundary
+/// rounding measurably degrades 4-bit AURA quality at decode time.
+/// `packed_out` is compared bit-exact (`u32` equality — `TestBuffer::expect`
+/// on a `U32` buffer does exact comparison, no float tolerance involved).
 ///
 /// Grid (Reduction, TPG = dim): `grid_3d(rows, 1, 1, [dim,1,1])`.
 pub mod kernel_tests {
@@ -335,19 +345,23 @@ pub mod kernel_tests {
         r
     }
 
-    /// CPU oracle for `norms_out` only. Replicates Stages 1/2/3/5 of the
-    /// kernel: L2-normalise the row, apply the rotation Π (`rotated[d] =
-    /// Σ_j Π[d,j]·unit[j]`), boundary-count each rotated coordinate into a
-    /// codebook index, then `corrected = norm / ‖centroids‖`. With an identity
-    /// Π this reduces to `rotated = unit_val`.
-    fn norms_oracle(
+    /// CPU oracle for Stages 1/2/3/5 of the kernel — shared by the
+    /// `norms_out` AND `packed_out` expectations so both agree on which
+    /// centroid landed. L2-normalise the row, apply the rotation Π
+    /// (`rotated[d] = Σ_j Π[d,j]·unit[j]`), boundary-count each rotated
+    /// coordinate into a codebook index (Stage 3 — this is the SAME per-dim
+    /// index Stage 4 packs into `packed_out`), then `corrected = norm /
+    /// ‖centroids‖` (Stage 5). With an identity Π this reduces to `rotated =
+    /// unit_val`. Returns `(indices [rows*dim], norms [rows])`.
+    fn encode_oracle(
         input: &[f32],
         rotation: &[f32],
         boundaries: &[f32],
         codebook: &[f32],
         rows: usize,
         dim: usize,
-    ) -> Vec<f32> {
+    ) -> (Vec<u32>, Vec<f32>) {
+        let mut indices = vec![0u32; rows * dim];
         let mut norms = vec![0.0_f32; rows];
         for r in 0..rows {
             let row = &input[r * dim..(r + 1) * dim];
@@ -361,20 +375,51 @@ pub mod kernel_tests {
                 for j in 0..dim {
                     rotated += rotation[d * dim + j] * row[j] * inv_norm;
                 }
-                // Index = count of boundaries the rotated value exceeds.
-                let mut idx = 0usize;
+                // Stage 3: index = count of boundaries the rotated value exceeds.
+                let mut idx = 0u32;
                 for &bnd in boundaries {
                     if rotated > bnd {
                         idx += 1;
                     }
                 }
-                let centroid = codebook[idx];
+                indices[r * dim + d] = idx;
+                let centroid = codebook[idx as usize];
                 recon_sq += centroid * centroid;
             }
             let recon_norm = recon_sq.sqrt();
             norms[r] = if recon_norm > 1.0e-8 { norm_val / recon_norm } else { norm_val };
         }
-        norms
+        (indices, norms)
+    }
+
+    /// Bit-pack a flat `[rows, dim]` index array into `[rows, packed_width]`
+    /// u32 words using `bits`-wide fields per index — mirrors the kernel's
+    /// Stage-4 `bit_offset = d*bits` / `word_idx` / `shift` / cross-word-spill
+    /// packing (ported from
+    /// `aura_dequant_rotated.rs::kernel_tests::pack_bitstream_indices`, which
+    /// independently derives the identical layout for the decode side, so the
+    /// packing algorithm itself isn't re-derived sloppily here).
+    fn pack_indices(indices: &[u32], rows: usize, dim: usize, bits: usize) -> Vec<u32> {
+        let packed_width = (dim * bits).div_ceil(32);
+        let mut packed = vec![0u32; rows * packed_width];
+        let mask = (1u32 << bits) - 1;
+        for r in 0..rows {
+            for d in 0..dim {
+                let idx = indices[r * dim + d] & mask;
+                let bit_offset = d * bits;
+                let word_idx = bit_offset / 32;
+                let shift = (bit_offset & 31) as u32;
+                let bits_in_w0 = 32 - shift as usize;
+                let row_base = r * packed_width;
+                if bits_in_w0 >= bits {
+                    packed[row_base + word_idx] |= idx << shift;
+                } else {
+                    packed[row_base + word_idx] |= idx << shift;
+                    packed[row_base + word_idx + 1] |= idx >> bits_in_w0;
+                }
+            }
+        }
+        packed
     }
 
     /// Small AURA-encode shape: dim a multiple of 32. int4. Caller supplies the
@@ -394,9 +439,10 @@ pub mod kernel_tests {
         // `boundaries` is Tensor<f32> — no rounding, the GPU loads the same
         // float the oracle reads.
         let rotation_r = unpack_f32(&pack_f32(rotation, dt), dt);
-        let expected_norms_f32 =
-            norms_oracle(&input_r, &rotation_r, &boundaries, &codebook_r, rows, dim);
+        let (expected_indices, expected_norms_f32) =
+            encode_oracle(&input_r, &rotation_r, &boundaries, &codebook_r, rows, dim);
         let expected_norms = unpack_f32(&pack_f32(&expected_norms_f32, dt), dt);
+        let expected_packed = pack_indices(&expected_indices, rows, dim, BITS);
 
         TestSetup::new(iron_aura_encode_int4::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
@@ -416,9 +462,11 @@ pub mod kernel_tests {
             .input(TestBuffer::zeros("norms_out", rows, dt))
             .constexpr("dim", dim as u32)
             .constexpr("packed_width", packed_width as u32)
-            // Only verify the norm-correction factor (now `T`). `packed_out` is
-            // fast-math-sensitive — covered bit-exact by the legacy A/B test.
+            // norm-correction factor (T, per-dtype tol) AND the packed
+            // codebook indices (u32, bit-exact — integer equality, no float
+            // tolerance involved).
             .expect(TestBuffer::from_vec("norms_out", pack_f32(&expected_norms, dt), dt))
+            .expect(TestBuffer::from_vec("packed_out", u32_bytes(&expected_packed), DType::U32))
             .grid_3d(rows as u32, 1, 1, [dim as u32, 1, 1])
     }
 

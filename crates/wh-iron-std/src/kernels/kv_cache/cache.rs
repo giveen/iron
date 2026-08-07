@@ -523,19 +523,23 @@ pub mod kernel_tests {
             // Only check scale + bias (closed form); weights pinned by dequant.
             .expect(TestBuffer::from_vec("out_s", pack_f32(&exp_s, dt), dt))
             .expect(TestBuffer::from_vec("out_b", pack_f32(&exp_b, dt), dt))
-            .grid_1d(total_groups, 256)
+            // One thread per group, dispatched as a single threadgroup of
+            // exactly `total_groups` threads — `iron_quantize_kv` has no
+            // `g_global < total_groups` bounds guard, so `grid_1d(total_groups,
+            // 256)` (the original form here) over-dispatched to 256 threads
+            // and let the 252 extra threads write out-of-range `dst_sb_idx`
+            // values past `out_s`/`out_b`'s real size. That's what actually
+            // broke this oracle (not a layout mismatch, despite the comment
+            // this replaced) — confirmed by fixing the grid alone.
+            .grid_1d(total_groups, total_groups as u32)
     }
 
-    // Bench-only: the scale/bias closed-form oracle's out_s/out_b layout
-    // didn't match the kernel's write indexing — quantize correctness stays
-    // pinned by the legacy kv_cache GPU test. Kept (unregistered) so the
-    // shared setup helper retains a use site.
-    #[allow(dead_code)]
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.0)]
     fn test_quantize_kv_int4(dt: DType) -> TestSetup {
         quant_scale_bias_setup(iron_quantize_kv_int4::kernel_ir_for(dt), 4, dt)
     }
 
-    #[allow(dead_code)] // bench-only (see test_quantize_kv_int4 note)
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = 0.0)]
     fn test_quantize_kv_int8(dt: DType) -> TestSetup {
         quant_scale_bias_setup(iron_quantize_kv_int8::kernel_ir_for(dt), 8, dt)
     }
