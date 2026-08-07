@@ -148,7 +148,22 @@ pub mod kernel_tests {
         packed
     }
 
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1)]
+    // Both the kernel (`simd_sum` over f32 lane accumulators, then
+    // `.cast::<T>()`) and the CPU oracle (f32 accumulation, then
+    // `pack_f32(.., dt)`) do the reduction entirely in f32 and only
+    // narrow to T at the very last step, so the error budget is small:
+    // (a) f32 order-of-summation noise from the reduction tree vs. the
+    // oracle's sequential loop (observed ~2e-7, consistent with f32
+    // epsilon over a 128-term dim reduction), plus (b) up to ~1 ULP of
+    // the target dtype from a final-cast rounding-boundary crossing if
+    // that f32 noise happens to straddle one (not observed here, but not
+    // guaranteed absent on other backends). Bounds are ~3x the observed
+    // max err over repeated runs (deterministic on Metal) at this
+    // fixture's output magnitude (~0.77): f32 covers (a) directly;
+    // f16/bf16 add ~2-4x the dtype's 1-ULP-at-this-magnitude headroom
+    // for (b) on top of that. Still tight enough to catch a multi-%
+    // scale/index bug, unlike the old flat 1e-1 (~13% of peak output).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 2e-3, 1.5e-2])]
     fn test_aura_score_int4(dt: DType) -> TestSetup {
         // GQA: 4 q-heads over 2 kv-heads (repeat 2); dim 128, 8 tokens.
         let (dim, q_heads, kv_heads, tokens) = (128usize, 4usize, 2usize, 8usize);

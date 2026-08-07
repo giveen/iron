@@ -177,6 +177,35 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     (dot / denom) as f32
 }
 
+// Cosine similarity is scale-invariant: `cosine(v, k*v) == 1.0` for any
+// positive scalar `k`, so a uniform-scale bug (wrong dequant scale, a
+// dropped `group_size` factor, an off-by-one on the bias term applied
+// uniformly, etc.) sails through a cosine-only check. `max_abs_diff`
+// closes that gap — it's sensitive to exactly the class of bug cosine
+// is blind to. Every case below asserts both.
+fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+}
+
+// Calibrated 2026-08-06 on Metal (M5 Max). Output magnitudes here are large
+// (up to ~1.1e4 for T=8, ~2.1e4 for T=16 — `build_quant_inputs` sums 512
+// quantized columns per output element), so `max_abs_diff` needs to scale
+// with that, not with a generic "small tensor" constant. Each bound is
+// ~3x the max|Δ| observed across repeated runs (Metal dispatch here is
+// deterministic — repeat runs reproduced the same value bit-for-bit, so
+// the multiplier is headroom against a legitimate different-but-still-
+// correct summation order on other hardware, not run-to-run noise).
+// All bounds land far below what a uniform-scale bug would produce (a
+// 2% scale error alone would add ~230-420 of error at these magnitudes),
+// which is the actual point of adding them: cosine similarity is
+// invariant to uniform scaling and would not have caught that class of
+// bug (see the `max_abs_diff` doc comment above).
+const CAL_F16_T8: f32 = 12.0; // observed 3.966e0
+const CAL_F16_T16: f32 = 26.0; // observed 8.656e0
+const CAL_BF16_T8: f32 = 105.0; // observed 3.475e1
+const CAL_BF16_T16: f32 = 217.0; // observed 7.233e1
+const CAL_F32_T8: f32 = 0.03; // observed 8.301e-3
+
 // ── Deterministic q4 weights — same per-pack pattern as the sibling ──────
 //    dynamic-M correctness test (`qmm_mma_dynamic_m_correctness.rs`).
 
@@ -241,8 +270,10 @@ fn bm8_f16_t8_single_tile() {
         .collect();
     assert_eq!(actual.len(), expected.len(), "T=8 element count");
     let cos = cosine(&expected, &actual);
-    println!("[f16 T=8 single-tile] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    println!("[f16 T=8 single-tile] cos={cos:.6} max|Δ|={max_diff:.3e}");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999 (f16 T=8)");
+    assert!(max_diff <= CAL_F16_T8, "max|Δ| {max_diff:.3e} > {CAL_F16_T8:.3e} (f16 T=8)");
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -286,8 +317,10 @@ fn bm8_f16_t16_multi_tile() {
         .collect();
     assert_eq!(actual.len(), expected.len(), "T=16 element count");
     let cos = cosine(&expected, &actual);
-    println!("[f16 T=16 multi-tile] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    println!("[f16 T=16 multi-tile] cos={cos:.6} max|Δ|={max_diff:.3e}");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999 (f16 T=16)");
+    assert!(max_diff <= CAL_F16_T16, "max|Δ| {max_diff:.3e} > {CAL_F16_T16:.3e} (f16 T=16)");
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -329,8 +362,10 @@ fn bm8_bf16_t8_single_tile() {
         .collect();
     assert_eq!(actual.len(), expected.len(), "T=8 element count");
     let cos = cosine(&expected, &actual);
-    println!("[bf16 T=8 single-tile] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    println!("[bf16 T=8 single-tile] cos={cos:.6} max|Δ|={max_diff:.3e}");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999 (bf16 T=8)");
+    assert!(max_diff <= CAL_BF16_T8, "max|Δ| {max_diff:.3e} > {CAL_BF16_T8:.3e} (bf16 T=8)");
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -372,8 +407,10 @@ fn bm8_bf16_t16_multi_tile() {
         .collect();
     assert_eq!(actual.len(), expected.len(), "T=16 element count");
     let cos = cosine(&expected, &actual);
-    println!("[bf16 T=16 multi-tile] cos={cos:.6}");
+    let max_diff = max_abs_diff(&expected, &actual);
+    println!("[bf16 T=16 multi-tile] cos={cos:.6} max|Δ|={max_diff:.3e}");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999 (bf16 T=16)");
+    assert!(max_diff <= CAL_BF16_T16, "max|Δ| {max_diff:.3e} > {CAL_BF16_T16:.3e} (bf16 T=16)");
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -418,4 +455,5 @@ fn bm8_f32_t8_reference() {
     }
     println!("[f32 T=8 ref] cos={cos:.6} max|Δ|={max_diff:.3e}");
     assert!(cos >= 0.999, "cosine {cos:.6} < 0.999 (f32 T=8)");
+    assert!(max_diff <= CAL_F32_T8, "max|Δ| {max_diff:.3e} > {CAL_F32_T8:.3e} (f32 T=8)");
 }

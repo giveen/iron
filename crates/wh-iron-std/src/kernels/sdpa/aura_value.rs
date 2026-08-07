@@ -174,21 +174,38 @@ pub mod kernel_tests {
             .grid_3d(dim as u32, q_heads as u32, 1, [1, 1, 1])
     }
 
+    // Tolerance rationale (shared by all four `test_aura_value_int4*`
+    // cases below — same kernel, same fixture shape, only head-count /
+    // sparse-threshold vary): the kernel accumulates `w * norm * centroid`
+    // over `tokens` in an f32 register and only narrows to T at the final
+    // `store`; the CPU oracle does the identical f32 accumulation, then
+    // `pack_f32(.., dt)`. So the error budget is (a) f32 order-of-summation
+    // noise (observed ~1.2-2.4e-7 across these fixtures, consistent with
+    // f32 epsilon over an 8-term token reduction) plus (b) up to ~1 ULP of
+    // the target dtype if that f32 noise straddles a final-cast rounding
+    // boundary (not observed on Metal here, deterministic across repeated
+    // runs, but not guaranteed absent on other backends). Bounds are ~3x
+    // the observed max err, sized to this fixture family's output
+    // magnitude (~2.0-4.0 peak): f32 covers (a) directly; f16/bf16 add
+    // headroom for (b) at that magnitude. All four bounds sit roughly two
+    // orders of magnitude below what a multi-% scale/index bug would
+    // produce (~0.04-0.08 at 2%), unlike the old flat 1e-1 (2-5% of peak
+    // output — loose enough to hide exactly that class of bug).
     // GQA: 4 q-heads over 2 kv-heads (repeat 2), every token kept.
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1)]
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 6e-3, 5e-2])]
     fn test_aura_value_int4(dt: DType) -> TestSetup { value_setup(dt, 4, 2, 0.0) }
 
     // MHA: q-heads == kv-heads (repeat 1) — the identity head mapping.
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1)]
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 6e-3, 5e-2])]
     fn test_aura_value_int4_mha(dt: DType) -> TestSetup { value_setup(dt, 4, 4, 0.0) }
 
     // Wide GQA fan-out: 8 q-heads over 2 kv-heads (repeat 4).
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1)]
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 6e-3, 5e-2])]
     fn test_aura_value_int4_gqa4(dt: DType) -> TestSetup { value_setup(dt, 8, 2, 0.0) }
 
     // Sparse threshold 0.1 skips the lowest-weight tokens — exercises the
     // `w >= sparse_threshold` skip branch the other configs leave dormant.
-    #[test_kernel(dtypes = [f32, f16, bf16], tol = 1e-1)]
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-6, 6e-3, 5e-2])]
     fn test_aura_value_int4_sparse(dt: DType) -> TestSetup { value_setup(dt, 4, 2, 0.1) }
 }
 
