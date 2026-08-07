@@ -823,7 +823,10 @@ pub mod kernel_benches {
             .constexpr("max_seq", MAX_SEQ as u32)
             .constexpr("group_size", GROUP_SIZE as u32)
             .constexpr("position", POSITION as u32)
-            .grid_1d(total_groups, 256)
+            // One threadgroup of exactly `total_groups` threads — the quantize
+            // kernels have no bounds guard, so a 256-thread dispatch writes
+            // past `out_s`/`out_b` (see `quant_scale_bias_setup`).
+            .grid_1d(total_groups, total_groups as u32)
             .bytes_moved((N_KV_HEADS * HEAD_DIM * dt.size_bytes()) as u64)
     }
 
@@ -874,7 +877,10 @@ pub mod kernel_benches {
             .constexpr("max_seq", MAX_SEQ as u32)
             .constexpr("group_size", GROUP_SIZE as u32)
             .constexpr("position", POSITION as u32)
-            .grid_1d(total_groups, 256)
+            // One threadgroup of exactly `total_groups` threads — the quantize
+            // kernels have no bounds guard, so a 256-thread dispatch writes
+            // past `out_s` (see `quant_scale_bias_setup`).
+            .grid_1d(total_groups, total_groups as u32)
             .bytes_moved((N_KV_HEADS * HEAD_DIM * dt.size_bytes()) as u64)
     }
 
