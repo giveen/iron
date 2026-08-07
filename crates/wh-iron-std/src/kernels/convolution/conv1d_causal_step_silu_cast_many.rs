@@ -69,6 +69,26 @@
 //! the first store to `state_out`, so the read-then-write aliasing is
 //! safe). The runtime decides the residency / barrier story.
 //!
+//! ## Per-token conv-state planes (spec-decode rollback)
+//!
+//! Sibling of `iron_gated_delta_prep_chunk`'s `state_planes` — same
+//! motivation (MTP partial-accept rollback via plane-select instead of
+//! restore + re-sweep) and same argument for correctness: this kernel's
+//! T-sweep is a strictly sequential per-token register recurrence
+//! (`s0/s1/s2` scalars, shifted one token at a time), so the state after
+//! processing token `t` is bit-for-bit what a fresh `t_len = t+1`
+//! invocation would produce. `planes_enabled` (runtime `Tensor<u32>[1]`,
+//! default 0) gates writing `(s0, s1, s2)` into `state_planes[t]` after
+//! the shift; `state_planes` is `[T, conv_kernel-1, conv_dim]`. The conv
+//! window is tiny (`conv_dim * (conv_kernel-1)` elements, ~98 KB per
+//! plane at Qwen3.6-35B-A3B's conv_dim=8192) — negligible next to the
+//! ~2 MiB-per-plane GDN recurrent state this pairs with, but still
+//! REQUIRED for correct plane-based rollback: unlike the GDN state (which
+//! only needs a restore for a full re-scan when NOT using planes), the
+//! conv window genuinely advances every token, so a k-token partial
+//! accept needs conv state as of token k specifically, not the
+//! pre-verify snapshot.
+//!
 //! Codegen-only. Correctness validated against the
 //! `conv1d_causal_step` + `iron_silu_cast_to_f32` looped pair by the in-source
 //! `#[test_kernel]`s.
@@ -83,6 +103,8 @@ pub fn iron_conv1d_causal_step_silu_cast_many<T>(
     state_in: Tensor<T>,
     mut out_f32: Tensor<f32>,
     mut state_out: Tensor<T>,
+    mut state_planes: Tensor<T>, // [T, conv_kernel-1, conv_dim]; written iff planes_enabled != 0
+    planes_enabled: Tensor<u32>, // [1] scalar runtime flag
     #[constexpr] t_len: u32,
     #[constexpr] conv_dim: u32,
     #[constexpr] conv_kernel: u32,
@@ -105,6 +127,8 @@ pub fn iron_conv1d_causal_step_silu_cast_many<T>(
     let mut s0 = load(state_in[0u32 * conv_dim + d]).cast::<f32>();
     let mut s1 = load(state_in[1u32 * conv_dim + d]).cast::<f32>();
     let mut s2 = load(state_in[2u32 * conv_dim + d]).cast::<f32>();
+    let planes_on = load(planes_enabled[0]);
+    let plane_t_stride = 3u32 * conv_dim;
     for r in range(0u32, t_len, 1u32) {
         let x_r = load(src[r * conv_dim + d]).cast::<f32>();
         // y = b + w0*s0 + w1*s1 + w2*s2 + w3*x_r — same op order as
@@ -124,6 +148,12 @@ pub fn iron_conv1d_causal_step_silu_cast_many<T>(
         s0 = s1;
         s1 = s2;
         s2 = x_r;
+        if planes_on != 0u32 {
+            let plane_base = r * plane_t_stride + d;
+            store(state_planes[plane_base], s0.cast::<T>());
+            store(state_planes[plane_base + conv_dim], s1.cast::<T>());
+            store(state_planes[plane_base + 2u32 * conv_dim], s2.cast::<T>());
+        }
     }
     // Final state — write the K-1 most recent inputs (last K-1 rows of
     // `src` for this channel) back to device memory. Matches what the
@@ -171,18 +201,20 @@ pub mod kernel_tests {
         (0..n).map(|i| ((i % period) as f32 / period as f32 - 0.5) * amp).collect()
     }
 
-    /// Per-channel CPU reference. Returns `(out, state_out)`, both
-    /// dtype-rounded to match the GPU load/store quantisation.
-    fn cpu_reference(
+    /// Per-channel CPU reference, also capturing `(s0,s1,s2)`
+    /// after every token `t` — ground truth for `state_planes`. Mirrors
+    /// `gated_delta_prep_chunk.rs`'s `oracle_with_planes`.
+    fn cpu_reference_with_planes(
         src: &[f32],
         w: &[f32],
         b: &[f32],
         state_in: &[f32],
         t_len: usize,
         conv_dim: usize,
-    ) -> (Vec<f32>, Vec<f32>) {
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let mut out = vec![0.0f32; t_len * conv_dim];
         let mut state_out = vec![0.0f32; 3 * conv_dim];
+        let mut planes = vec![0.0f32; t_len * 3 * conv_dim];
         for d in 0..conv_dim {
             let b_d = b[d];
             let w0 = w[d];
@@ -200,15 +232,19 @@ pub mod kernel_tests {
                 s0 = s1;
                 s1 = s2;
                 s2 = x_r;
+                let plane_base = r * 3 * conv_dim + d;
+                planes[plane_base] = s0;
+                planes[plane_base + conv_dim] = s1;
+                planes[plane_base + 2 * conv_dim] = s2;
             }
             state_out[d] = s0;
             state_out[conv_dim + d] = s1;
             state_out[2 * conv_dim + d] = s2;
         }
-        (out, state_out)
+        (out, state_out, planes)
     }
 
-    fn setup(t_len: usize, conv_dim: usize, dt: DType) -> TestSetup {
+    fn setup(t_len: usize, conv_dim: usize, capture_planes: bool, dt: DType) -> TestSetup {
         let state_rows = (CONV_KERNEL - 1) as usize;
         // Bounded inputs so SiLU's exp(-acc) stays well-conditioned.
         let src_f = ramp(t_len * conv_dim, 13, 2.0);
@@ -221,11 +257,14 @@ pub mod kernel_tests {
         let w = unpack_f32(&pack_f32(&w_f, dt), dt);
         let b = unpack_f32(&pack_f32(&b_f, dt), dt);
         let state_in = unpack_f32(&pack_f32(&state_f, dt), dt);
-        let (out_exp, state_exp) = cpu_reference(&src, &w, &b, &state_in, t_len, conv_dim);
+        let (out_exp, state_exp, planes_exp) =
+            cpu_reference_with_planes(&src, &w, &b, &state_in, t_len, conv_dim);
         // `out_f32` is f32 regardless of `dt`; `state_out` is dtype-T and
         // gets rounded on store, so round the expected state through `dt`.
         let state_exp_t = unpack_f32(&pack_f32(&state_exp, dt), dt);
-        TestSetup::new(iron_conv1d_causal_step_silu_cast_many::kernel_ir_for(dt))
+        let planes_exp_t = unpack_f32(&pack_f32(&planes_exp, dt), dt);
+        let planes_buf = if capture_planes { planes_exp_t.clone() } else { vec![0.0_f32; 1] };
+        let mut ts = TestSetup::new(iron_conv1d_causal_step_silu_cast_many::kernel_ir_for(dt))
             .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("src", pack_f32(&src_f, dt), dt))
             .input(TestBuffer::from_vec("w", pack_f32(&w_f, dt), dt))
@@ -233,21 +272,36 @@ pub mod kernel_tests {
             .input(TestBuffer::from_vec("state_in", pack_f32(&state_f, dt), dt))
             .input(TestBuffer::zeros("out_f32", t_len * conv_dim, DType::F32))
             .input(TestBuffer::zeros("state_out", state_rows * conv_dim, dt))
+            .input(TestBuffer::from_vec("state_planes", pack_f32(&planes_buf, dt), dt))
+            .input(TestBuffer::from_vec(
+                "planes_enabled",
+                (capture_planes as u32).to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("t_len", t_len as u32)
             .constexpr("conv_dim", conv_dim as u32)
             .constexpr("conv_kernel", CONV_KERNEL)
             .expect(TestBuffer::from_vec("out_f32", pack_f32(&out_exp, DType::F32), DType::F32))
             .expect(TestBuffer::from_vec("state_out", pack_f32(&state_exp_t, dt), dt))
-            .grid_3d(conv_dim as u32, 1, 1, [1, 1, 1])
+            .grid_3d(conv_dim as u32, 1, 1, [1, 1, 1]);
+        if capture_planes {
+            ts = ts.expect(TestBuffer::from_vec("state_planes", pack_f32(&planes_exp_t, dt), dt));
+        }
+        ts
     }
 
     // Short T-sweep, single-group conv_dim.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
-    fn test_conv1d_causal_many_small(dt: DType) -> TestSetup { setup(2, 64, dt) }
+    fn test_conv1d_causal_many_small(dt: DType) -> TestSetup { setup(2, 64, false, dt) }
 
     // Medium T-sweep, multi-group conv_dim.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
-    fn test_conv1d_causal_many_medium(dt: DType) -> TestSetup { setup(8, 256, dt) }
+    fn test_conv1d_causal_many_medium(dt: DType) -> TestSetup { setup(8, 256, false, dt) }
+
+    // Same medium shape, `planes_enabled = 1`: validates `state_planes[t]`
+    // against `cpu_reference_with_planes`'s per-token capture.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
+    fn test_conv1d_causal_many_planes(dt: DType) -> TestSetup { setup(8, 256, true, dt) }
 }
 
 /// New-syntax bench for `iron_conv1d_causal_step_silu_cast_many`
@@ -272,6 +326,10 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::random("state_in", state_rows * conv_dim, dt))
             .buffer(BenchBuffer::zeros("out_f32", t_len * conv_dim, DType::F32).output())
             .buffer(BenchBuffer::zeros("state_out", state_rows * conv_dim, dt).output())
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled", 0u32.to_le_bytes().to_vec(), DType::U32,
+            ))
             .constexpr("t_len", t_len as u32)
             .constexpr("conv_dim", conv_dim as u32)
             .constexpr("conv_kernel", CONV_KERNEL)

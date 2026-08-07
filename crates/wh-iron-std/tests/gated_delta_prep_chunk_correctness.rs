@@ -191,12 +191,22 @@ fn run_gpu(
     buffers.insert("dv".into(), (dv as u32).to_le_bytes().to_vec());
     buffers.insert("hv".into(), (hv as u32).to_le_bytes().to_vec());
     buffers.insert("hk".into(), (hk as u32).to_le_bytes().to_vec());
+    // Plane side-channel: disabled here, but the buffers must still be
+    // bound — an unbound slot reads garbage, and a garbage nonzero
+    // `planes_enabled` makes the kernel store through the unbound
+    // `state_planes` pointer (this exact hole passed locally by
+    // allocator luck and corrupted CI's runs).
+    buffers.insert("state_planes".into(), pack_bytes(&vec![0.0_f32; t * state_in.len()], dt));
+    buffers.insert("planes_enabled".into(), 0_u32.to_le_bytes().to_vec());
 
     let mut kernel = iron_gated_delta_prep_chunk::kernel_ir_for(dt.to_dtype());
     kernel.mode = KernelMode::Reduction;
 
+    let mut constants: BTreeMap<String, u32> = BTreeMap::new();
+    constants.insert("n_total".into(), n_total as u32);
+
     let result = ctx
-        .dispatch_with_grid(&kernel, &buffers, &BTreeMap::new(), [dv.div_ceil(4), n_total, 1], [
+        .dispatch_with_grid(&kernel, &buffers, &constants, [dv.div_ceil(4), n_total, 1], [
             128, 1, 1,
         ])
         .expect("iron_gated_delta_prep_chunk dispatch");

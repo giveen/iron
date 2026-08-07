@@ -31,10 +31,42 @@
 //!   - `k_normed`  : Tensor<T> [B, T, Hk, Dk]   from `iron_gated_delta_qknorm_prepass`
 //!   - `state_in`  : Tensor<T> [B, Hv, Dv, Dk]           (one state per (b, hv))
 //!   - `t_len`     : Tensor<u32> [1]                     runtime chunk length
+//!   - `planes_enabled` : Tensor<u32> [1]                runtime flag; 0 = no plane
+//!     writes (byte-identical to the pre-plane kernel), nonzero = write
+//!     `state_out` into `state_planes` at every token boundary too. See
+//!     "Per-token state planes" below.
 //!
 //! Outputs:
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
 //!   - `y`            : Tensor<T> [B, T, Hv, Dv]
+//!   - `state_planes` : Tensor<T> [T, B, Hv, Dv, Dk]      only written when
+//!     `planes_enabled != 0` (spec-decode rollback side channel, see below)
+//!
+//! ## Per-token state planes (spec-decode rollback)
+//!
+//! MTP speculative-decode partial accept needs the recurrent state as of
+//! token `k` of a `T`-token batched verify pass, for whichever `k <=
+//! T` ends up accepted. The old fix (`Qwen35GDNLayer.rewindState`)
+//! restores the pre-verify snapshot and re-runs conv+scan over the
+//! accepted prefix — correct, but a second dispatch pair per rollback.
+//!
+//! This kernel's inner T-loop is a **strictly sequential per-token
+//! recurrence** (no cross-token chunked/WY blocking — see the module
+//! doc above): the register-resident state after processing token `t`
+//! is bit-for-bit the SAME value a fresh `t_len = t+1` invocation of
+//! this kernel would produce from the same `state_in`. So instead of
+//! recomputing state[k], the T-loop below can just also WRITE it out,
+//! once, at every token boundary — `state_planes[t]` becomes exactly
+//! what a rewind-to-`t+1` would recompute. Rollback then degrades to
+//! selecting `state_planes[k-1]` (a blit or pointer-swap into
+//! `GDNStateCache.current`) instead of a restore + re-scan dispatch
+//! pair.
+//!
+//! `planes_enabled` gates the extra stores at runtime so the default
+//! (disabled) path pays no memory-traffic cost beyond the branch test
+//! itself — `n_total`/`state_planes` are validated/sized by the caller;
+//! this kernel does not bounds-check `T` against the plane buffer's
+//! actual capacity.
 //!
 //! ## DISPATCH INVARIANTS
 //!
@@ -90,10 +122,13 @@ pub fn iron_gated_delta_prep_chunk<T>(
     mut state_out: Tensor<T>, // [B, Hv, Dv, Dk]
     mut y: Tensor<T>,    // [B, T, Hv, Dv]
     t_len: Tensor<u32>,  // [1] scalar
+    mut state_planes: Tensor<T>, // [T, B, Hv, Dv, Dk]; written iff planes_enabled != 0
+    planes_enabled: Tensor<u32>, // [1] scalar runtime flag
     #[constexpr] dk: u32,
     #[constexpr] dv: u32,
     #[constexpr] hv: u32,
     #[constexpr] hk: u32,
+    #[constexpr] n_total: u32, // B·Hv — plane stride multiplier (state_out's own element count)
 ) {
     // 4 SGs per TG pack 4 Dv slots (reference Metal GDN geometry).
     let sg = simd_group_id();
@@ -115,6 +150,11 @@ pub fn iron_gated_delta_prep_chunk<T>(
         let dt_bias_val = load(dt_bias[hv_idx]).cast::<f32>();
         let exp_a_log = exp(a_log_val);
         let state_base = n * dv * dk + dv_idx * dk;
+        // Plane gate + per-t stride, resolved once (register-resident,
+        // same convention as the state load below) rather than re-read
+        // from the flag buffer every T-loop iteration.
+        let planes_on = load(planes_enabled[0]);
+        let plane_t_stride = n_total * dv * dk;
         // ─── Load state into per-lane registers ONCE — persists across T.
         stack_alloc("state_reg", 8u32, "f32");
         for i in range(0u32, n_per_t, 1u32) {
@@ -164,6 +204,18 @@ pub fn iron_gated_delta_prep_chunk<T>(
                 stack_store("state_reg", i, s_new);
                 let q_normed_val = load(q_normed[qk_off + s_idx]).cast::<f32>();
                 out_acc = out_acc + s_new * q_normed_val;
+            }
+            // ─── Optional: mirror this token's post-update state into
+            // state_planes[t] — default-off, gated on planes_on so the
+            // disabled path is just one extra register compare per
+            // token (no stores, no extra memory traffic).
+            if planes_on != 0u32 {
+                let plane_base = t * plane_t_stride + state_base;
+                for i in range(0u32, n_per_t, 1u32) {
+                    let s_idx = n_per_t * dk_idx + i;
+                    let s_val = stack_load("state_reg", i);
+                    store(state_planes[plane_base + s_idx], s_val.cast::<T>());
+                }
             }
             let out_sum = simd_sum(out_acc);
             // ─── Phase 3: lane 0 writes y[t, n, dv_idx] ───────────────
@@ -237,6 +289,9 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
     mut state_out: Tensor<T>, // [B, Hv, Dv, Dk]
     mut y: Tensor<T>,    // [B, T, Hv, Dv]
     t_len: Tensor<u32>,  // [1] scalar
+    mut state_planes: Tensor<T>, // [T, B, Hv, Dv, Dk]; written iff planes_enabled != 0
+    planes_enabled: Tensor<u32>, // [1] scalar runtime flag
+    #[constexpr] n_total: u32, // B·HV — plane stride multiplier; see generic kernel doc
 ) {
     // 4 SGs per TG pack 4 Dv slots (reference Metal GDN geometry),
     // identical dispatch geometry to `iron_gated_delta_prep_chunk`.
@@ -260,6 +315,10 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
         let dt_bias_val = load(dt_bias[hv_idx]).cast::<f32>();
         let exp_a_log = exp(a_log_val);
         let state_base = n * DV * DK + dv_idx * DK;
+        // Plane gate + per-t stride, resolved once — see the generic
+        // kernel's identical comment above.
+        let planes_on = load(planes_enabled[0]);
+        let plane_t_stride = n_total * DV * DK;
         // ─── Load state into per-lane registers ONCE, persists across T.
         // `NPT` is a compile-time literal here (unlike the generic kernel's
         // runtime `n_per_t`), so this array is fully unrollable and
@@ -312,6 +371,17 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
                 stack_store("state_reg", i, s_new);
                 let q_normed_val = load(q_normed[qk_off + s_idx]).cast::<f32>();
                 out_acc = out_acc + s_new * q_normed_val;
+            }
+            // ─── Optional: mirror this token's post-update state into
+            // state_planes[t] — see the generic kernel's identical block
+            // for the design rationale.
+            if planes_on != 0u32 {
+                let plane_base = t * plane_t_stride + state_base;
+                for i in range(0u32, NPT, 1u32) {
+                    let s_idx = NPT * dk_idx + i;
+                    let s_val = stack_load("state_reg", i);
+                    store(state_planes[plane_base + s_idx], s_val.cast::<T>());
+                }
             }
             let out_sum = simd_sum(out_acc);
             // ─── Phase 3: lane 0 writes y[t, n, dv_idx] ───────────────
@@ -499,6 +569,76 @@ pub mod kernel_tests {
         (y, state)
     }
 
+    /// Same recurrence as `oracle`, but additionally captures a full copy
+    /// of `state` after every token `t` — the CPU-side ground truth for
+    /// `state_planes`. `planes[t]` is bit-for-bit what a fresh
+    /// `oracle(..., t_total = t+1, ...)` call would return as its
+    /// `state_out`, since the recurrence is strictly sequential per
+    /// token (no cross-token blocking) — same claim the kernel doc
+    /// makes about `state_planes[t]` vs a `t_len = t+1` rewind.
+    /// Returns `(y, state_final, planes [T, B·Hv, Dv, Dk] flattened)`.
+    #[allow(clippy::too_many_arguments)]
+    fn oracle_with_planes(
+        conv_out: &[f32],
+        a_log: &[f32],
+        dt_bias: &[f32],
+        a_raw: &[f32],
+        b_raw: &[f32],
+        q_normed: &[f32],
+        k_normed: &[f32],
+        state_in: &[f32],
+        b: usize,
+        t_total: usize,
+        hv: usize,
+        hk: usize,
+        dv: usize,
+        dk: usize,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let stride_b = 2 * hk * dk + hv * dv;
+        let hk_per_hv = hv / hk;
+        let mut y = vec![0.0_f32; b * t_total * hv * dv];
+        let mut state = state_in.to_vec();
+        let mut planes = vec![0.0_f32; t_total * state.len()];
+        for t in 0..t_total {
+            for batch in 0..b {
+                let bt = batch * t_total + t;
+                let conv_base = bt * stride_b;
+                let v_base = conv_base + 2 * hk * dk;
+                for hv_idx in 0..hv {
+                    let n = batch * hv + hv_idx;
+                    let hk_idx = hv_idx / hk_per_hv;
+                    let qk_base = (bt * hk + hk_idx) * dk;
+                    let gbeta_idx = bt * hv + hv_idx;
+                    let dt = softplus_unclamped(a_raw[gbeta_idx] + dt_bias[hv_idx]);
+                    let g_val = (-a_log[hv_idx].exp() * dt).exp();
+                    let beta_val = sigmoid(b_raw[gbeta_idx]);
+                    for dv_idx in 0..dv {
+                        let v_val = conv_out[v_base + hv_idx * dv + dv_idx];
+                        let s_base = n * dv * dk + dv_idx * dk;
+                        let mut kv_mem = 0.0_f32;
+                        let mut decayed = vec![0.0_f32; dk];
+                        for d in 0..dk {
+                            let s = state[s_base + d] * g_val;
+                            decayed[d] = s;
+                            kv_mem += s * k_normed[qk_base + d];
+                        }
+                        let delta = (v_val - kv_mem) * beta_val;
+                        let mut out = 0.0_f32;
+                        for d in 0..dk {
+                            let s_new = decayed[d] + k_normed[qk_base + d] * delta;
+                            state[s_base + d] = s_new;
+                            out += s_new * q_normed[qk_base + d];
+                        }
+                        y[(bt * hv + hv_idx) * dv + dv_idx] = out;
+                    }
+                }
+            }
+            let plane_off = t * state.len();
+            planes[plane_off..plane_off + state.len()].copy_from_slice(&state);
+        }
+        (y, state, planes)
+    }
+
     /// Small fused chunked GDN-prep shape: dk a multiple of 32, Hv divisible by
     /// Hk; `t_total` tokens with state carryover.
     ///
@@ -522,6 +662,7 @@ pub mod kernel_tests {
         conv_scale: f32,
         state_scale: f32,
         a_log0: f32,
+        capture_planes: bool,
         dt: DType,
     ) -> TestSetup {
         let n_total = b * hv;
@@ -557,24 +698,48 @@ pub mod kernel_tests {
             dk,
         );
         let (q_normed, k_normed) = (r(&q_normed), r(&k_normed));
-        let (y_exp, state_exp) = oracle(
-            &r(&conv_out),
-            &r(&a_log),
-            &r(&dt_bias),
-            &r(&a_raw),
-            &r(&b_raw),
-            &q_normed,
-            &k_normed,
-            &r(&state_in),
-            b,
-            t_total,
-            hv,
-            hk,
-            dv,
-            dk,
-        );
+        let (y_exp, state_exp, planes_exp) = if capture_planes {
+            oracle_with_planes(
+                &r(&conv_out),
+                &r(&a_log),
+                &r(&dt_bias),
+                &r(&a_raw),
+                &r(&b_raw),
+                &q_normed,
+                &k_normed,
+                &r(&state_in),
+                b,
+                t_total,
+                hv,
+                hk,
+                dv,
+                dk,
+            )
+        } else {
+            let (y, s) = oracle(
+                &r(&conv_out),
+                &r(&a_log),
+                &r(&dt_bias),
+                &r(&a_raw),
+                &r(&b_raw),
+                &q_normed,
+                &k_normed,
+                &r(&state_in),
+                b,
+                t_total,
+                hv,
+                hk,
+                dv,
+                dk,
+            );
+            (y, s, Vec::new())
+        };
+        // Default-off tests still need a bound buffer for state_planes even
+        // though the kernel never writes it (planes_enabled == 0) — size 1
+        // is enough since it's never indexed on that path.
+        let planes_buf = if capture_planes { planes_exp.clone() } else { vec![0.0_f32; 1] };
 
-        TestSetup::new(iron_gated_delta_prep_chunk::kernel_ir_for(dt))
+        let mut ts = TestSetup::new(iron_gated_delta_prep_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -591,13 +756,24 @@ pub mod kernel_tests {
                 (t_total as u32).to_le_bytes().to_vec(),
                 DType::U32,
             ))
+            .input(TestBuffer::from_vec("state_planes", pack_f32(&planes_buf, dt), dt))
+            .input(TestBuffer::from_vec(
+                "planes_enabled",
+                (capture_planes as u32).to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("dk", dk as u32)
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
+            .constexpr("n_total", n_total as u32)
             .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
             .expect(TestBuffer::from_vec("state_out", pack_f32(&state_exp, dt), dt))
-            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1]);
+        if capture_planes {
+            ts = ts.expect(TestBuffer::from_vec("state_planes", pack_f32(&planes_exp, dt), dt));
+        }
+        ts
     }
 
     // GQA (Hv = 2·Hk), T=4 tokens with state carryover, weighted RMSNorm.
@@ -607,7 +783,17 @@ pub mod kernel_tests {
     // inside tol across f32/f16/bf16 while still exercising GQA head-sharing.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_iron_gated_delta_prep_chunk_gqa(dt: DType) -> TestSetup {
-        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, dt)
+        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, false, dt)
+    }
+
+    // Same fixture as the GQA cell above, but `planes_enabled = 1`:
+    // verifies `state_planes[t]` matches `oracle_with_planes`'s per-token
+    // state capture bit-for-bit (well within the GQA cell's own tol) —
+    // the correctness half of the "sequential recurrence ⇒ plane[t] ==
+    // rewind-to-(t+1)" equivalence claim in the module doc.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_iron_gated_delta_prep_chunk_planes_gqa(dt: DType) -> TestSetup {
+        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, true, dt)
     }
 
     // Hv == Hk (no key-sharing) at minimum dk=32, T=3 tokens.
@@ -634,7 +820,7 @@ pub mod kernel_tests {
     // is a synthetic-fixture-only concern, not a production one.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 3.0])]
     fn test_iron_gated_delta_prep_chunk_no_gqa(dt: DType) -> TestSetup {
-        setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, dt)
+        setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, false, dt)
     }
 
     /// Same oracle/fixture math as `setup` above, but targets the
@@ -654,6 +840,7 @@ pub mod kernel_tests {
         conv_scale: f32,
         state_scale: f32,
         a_log0: f32,
+        capture_planes: bool,
         dt: DType,
     ) -> TestSetup {
         let n_total = b * hv;
@@ -684,24 +871,45 @@ pub mod kernel_tests {
             dk,
         );
         let (q_normed, k_normed) = (r(&q_normed), r(&k_normed));
-        let (y_exp, state_exp) = oracle(
-            &r(&conv_out),
-            &r(&a_log),
-            &r(&dt_bias),
-            &r(&a_raw),
-            &r(&b_raw),
-            &q_normed,
-            &k_normed,
-            &r(&state_in),
-            b,
-            t_total,
-            hv,
-            hk,
-            dv,
-            dk,
-        );
+        let (y_exp, state_exp, planes_exp) = if capture_planes {
+            oracle_with_planes(
+                &r(&conv_out),
+                &r(&a_log),
+                &r(&dt_bias),
+                &r(&a_raw),
+                &r(&b_raw),
+                &q_normed,
+                &k_normed,
+                &r(&state_in),
+                b,
+                t_total,
+                hv,
+                hk,
+                dv,
+                dk,
+            )
+        } else {
+            let (y, s) = oracle(
+                &r(&conv_out),
+                &r(&a_log),
+                &r(&dt_bias),
+                &r(&a_raw),
+                &r(&b_raw),
+                &q_normed,
+                &k_normed,
+                &r(&state_in),
+                b,
+                t_total,
+                hv,
+                hk,
+                dv,
+                dk,
+            );
+            (y, s, Vec::new())
+        };
+        let planes_buf = if capture_planes { planes_exp.clone() } else { vec![0.0_f32; 1] };
 
-        TestSetup::new(ir)
+        let mut ts = TestSetup::new(ir)
             .mode(KernelMode::Reduction)
             .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
             .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
@@ -718,9 +926,20 @@ pub mod kernel_tests {
                 (t_total as u32).to_le_bytes().to_vec(),
                 DType::U32,
             ))
+            .input(TestBuffer::from_vec("state_planes", pack_f32(&planes_buf, dt), dt))
+            .input(TestBuffer::from_vec(
+                "planes_enabled",
+                (capture_planes as u32).to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
             .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
             .expect(TestBuffer::from_vec("state_out", pack_f32(&state_exp, dt), dt))
-            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1]);
+        if capture_planes {
+            ts = ts.expect(TestBuffer::from_vec("state_planes", pack_f32(&planes_exp, dt), dt));
+        }
+        ts
     }
 
     // Small GQA test cell for the fast/specialized kernel: identical shape
@@ -741,6 +960,7 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
+            false,
             dt,
         )
     }
@@ -769,6 +989,31 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
+            false,
+            dt,
+        )
+    }
+
+    // Same production shape/fixture as the cell above, but
+    // `planes_enabled = 1`: validates `state_planes[t]` against
+    // `oracle_with_planes` at the actual shipping shape (Dk=Dv=128,
+    // Hv=32, Hk=16) — the shape the Stage-0 verify-pass probe and the
+    // Stage-1/2 rollback wiring both target.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_fast_planes_d128_128_32_16(dt: DType) -> TestSetup {
+        setup_fast(
+            iron_gated_delta_prep_chunk_fast_d128_128_32_16::kernel_ir_for(dt),
+            1,
+            3,
+            32,
+            16,
+            128,
+            128,
+            0.3,
+            0.02,
+            0.01,
+            -3.0,
+            true,
             dt,
         )
     }
@@ -803,10 +1048,17 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("dk", dk as u32)
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
@@ -833,10 +1085,17 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("dk", dk as u32)
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
@@ -864,10 +1123,17 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("dk", dk as u32)
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
@@ -893,10 +1159,17 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
             .constexpr("dk", dk as u32)
             .constexpr("dv", dv as u32)
             .constexpr("hv", hv as u32)
             .constexpr("hk", hk as u32)
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
@@ -926,6 +1199,13 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
@@ -948,6 +1228,81 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
             .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
             .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
+    }
+
+    // ─── Stage-0 kill-early probe: production shape at MTP verify-pass T ──
+    //
+    // T=3 (γ=2 verify: `[prev] + drafts`) at the real Qwen3.6-35B-A3B
+    // shape, planes OFF vs ON — the kernel-level half of the plane-store
+    // cost probe (`SpecDecodeVerifyCostBench` in butter measures the same
+    // question end-to-end through the Swift model). `_planes_on` writes
+    // `state_planes[T, n_total, Dv, Dk]` every token boundary; `_planes_off`
+    // is the same dispatch with `planes_enabled = 0` (must remain
+    // byte-identical in cost to the pre-plane kernel — only extra buffer
+    // binds + one register compare per token, no stores).
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gated_delta_prep_chunk_fast_verify_t3_planes_off(dt: DType) -> BenchSetup {
+        let (b, t, hv, hk, dv, dk) = (1usize, 3usize, 32usize, 16usize, 128usize, 128usize);
+        let n_total = b * hv;
+        let conv_w = 2 * hk * dk + hv * dv;
+        BenchSetup::new(iron_gated_delta_prep_chunk_fast_d128_128_32_16::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
+            .buffer(BenchBuffer::random("a_log", hv, dt))
+            .buffer(BenchBuffer::random("dt_bias", hv, dt))
+            .buffer(BenchBuffer::random("a_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("b_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("q_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("k_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("state_in", n_total * dv * dk, dt))
+            .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
+            .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
+            .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
+    }
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gated_delta_prep_chunk_fast_verify_t3_planes_on(dt: DType) -> BenchSetup {
+        let (b, t, hv, hk, dv, dk) = (1usize, 3usize, 32usize, 16usize, 128usize, 128usize);
+        let n_total = b * hv;
+        let conv_w = 2 * hk * dk + hv * dv;
+        BenchSetup::new(iron_gated_delta_prep_chunk_fast_d128_128_32_16::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
+            .buffer(BenchBuffer::random("a_log", hv, dt))
+            .buffer(BenchBuffer::random("dt_bias", hv, dt))
+            .buffer(BenchBuffer::random("a_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("b_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("q_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("k_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("state_in", n_total * dv * dk, dt))
+            .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
+            .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
+            .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", t * n_total * dv * dk, dt).output())
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                1u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
             .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
             .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
     }
