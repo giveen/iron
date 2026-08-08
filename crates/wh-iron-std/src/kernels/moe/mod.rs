@@ -33,6 +33,7 @@ pub mod moe_sort_plan_counting;
 
 // MPP grouped BGEMM (one ABI, tile-geometry / bit-width variants; shared
 // test/bench helpers in `moe_mpp_shared`).
+pub mod moe_gather_qmm_expert_mpp;
 pub mod moe_mpp;
 pub mod moe_mpp_active;
 pub mod moe_mpp_block_scaled;
