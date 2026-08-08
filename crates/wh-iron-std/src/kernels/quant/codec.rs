@@ -423,4 +423,154 @@ mod tests {
         assert!(e4m3_decode(e4m3_encode(-2.0)) < 0.0);
         assert!(e5m2_decode(e5m2_encode(-2.0)) < 0.0);
     }
+
+    // ── Independent bit-pattern anchors (2026-08-07, RST Loop D `format.rs`
+    // sweep, Finding 2) ──────────────────────────────────────────────────
+    //
+    // Every test above this point checks `decode(encode(v)) ≈ v` — a
+    // round trip. That catches magnitude bugs but is blind to a
+    // sign/bias/field-width mistake shared by `e4m3_encode` and
+    // `e4m3_decode` (or `e5m2_*`): if both functions agree on the SAME
+    // wrong bit layout, every round-trip test above still passes.
+    //
+    // These tests break that circularity: bit patterns and their decimal
+    // values are derived by hand, directly from the OCP 8-bit Floating
+    // Point Specification (OFP8), "OCP Microscaling Formats (MX)
+    // Specification" v1.0 §5.1-5.2 (E4M3: 1 sign · 4 exponent (bias 7) ·
+    // 3 mantissa; E5M2: 1 sign · 5 exponent (bias 15) · 2 mantissa) — the
+    // same spec `codec.rs`'s own module doc comment (`:16-20`) cites. The
+    // derivation formula (not the encode/decode source in this file) is:
+    //
+    //   normal:    value = (-1)^sign · 2^(e - bias) · (1 + m / 2^mantissa_bits)
+    //   subnormal (e = 0): value = (-1)^sign · 2^(1 - bias) · (m / 2^mantissa_bits)
+    //
+    // `e4m3_decode`'s bit trick (shift the 7-bit magnitude into an IEEE
+    // half and rescale by 2^8, the E4M3-vs-half bias gap) and
+    // `e5m2_decode`'s (place the byte directly in a half's high byte,
+    // since both share a 5-bit/bias-15 exponent) were algebraically
+    // re-derived by hand against the formula above before picking these
+    // fixtures — not copied from the implementation — to confirm the
+    // fixtures exercise the same bit positions the real decode path
+    // reads, not a coincidentally-matching alternate layout.
+    //
+    // `0x7F` (E4M3's OCP-reserved NaN code, exp=1111 mantissa=111) is
+    // deliberately NOT anchored here: by the formula above this codec's
+    // `e4m3_decode` computes a *finite* 480.0 for it (2^8·1.875) rather
+    // than special-casing NaN — `e4m3_encode` never produces `0x7F`
+    // (its saturation path emits `0x7E`, the max-finite code, for any
+    // NaN/out-of-range input — see `:130` — so `0x7F` is unreachable via
+    // the round trip `pack()`/`dequant()` actually exercise). Anchoring
+    // it would test a code path production never reaches; the max-finite
+    // code `0x7E` (the value `0x7F` is one ULP past) IS anchored below,
+    // since `e4m3_encode`'s saturation depends on it directly.
+
+    /// (bits, value) pairs for E4M3, hand-derived from the OFP8 spec
+    /// formula above — zero, ±1 (exact power-of-two bias point), a
+    /// non-trivial fraction (1.125 = 1 + 1/8, exercises all 3 mantissa
+    /// bits), the smallest and largest subnormals, and the max finite
+    /// value (448.0, the saturation target `e4m3_encode:130` uses).
+    const E4M3_SPEC_ANCHORS: &[(u8, f32)] = &[
+        (0x00, 0.0),           // +0: e=0000 m=000
+        (0x80, -0.0),          // -0: sign | e=0000 m=000
+        (0x38, 1.0),           // e=0111(7) m=000 → 2^(7-7)·1
+        (0xB8, -1.0),          // sign | e=0111 m=000
+        (0x30, 0.5),           // e=0110(6) m=000 → 2^(6-7)·1
+        (0x40, 2.0),           // e=1000(8) m=000 → 2^(8-7)·1
+        (0x50, 8.0),           // e=1010(10) m=000 → 2^(10-7)·1
+        (0x39, 1.125),         // e=0111(7) m=001 → 2^0·(1+1/8)
+        (0x01, 0.001_953_125), // subnormal min: e=0 m=001 → 2^-6·(1/8) = 2^-9
+        (0x07, 0.013_671_875), // subnormal max: e=0 m=111 → 2^-6·(7/8)
+        (0x7E, 448.0),         // max finite: e=1111(15) m=110 → 2^8·1.75
+        (0xFE, -448.0),        // sign | max finite
+    ];
+
+    #[test]
+    fn e4m3_decode_matches_ocp_spec_bit_patterns() {
+        for &(bits, want) in E4M3_SPEC_ANCHORS {
+            let got = e4m3_decode(bits);
+            assert!(
+                (got - want).abs() <= want.abs() * 1e-6 + 1e-9,
+                "e4m3_decode({bits:#04x}) = {got}, want {want} (OFP8 spec value)"
+            );
+        }
+    }
+
+    #[test]
+    fn e4m3_encode_matches_ocp_spec_bit_patterns() {
+        // Only exactly-representable magnitudes from the table above (every
+        // E4M3_SPEC_ANCHORS entry IS exactly representable by construction,
+        // since they were derived from the codebook, not sampled) — so
+        // encode should hit the exact spec bit pattern, not just round
+        // close to it.
+        for &(bits, value) in E4M3_SPEC_ANCHORS {
+            if value == 0.0 && bits == 0x80 {
+                continue; // -0.0 == 0.0 in f32 comparison; 0x00 already covers +0
+            }
+            assert_eq!(e4m3_encode(value), bits, "e4m3_encode({value}) want {bits:#04x}");
+        }
+    }
+
+    /// (bits, value) pairs for E5M2, hand-derived the same way. Includes
+    /// the max-finite code `0x7B`, which independently corroborates this
+    /// file's own `E5M2_MAX_FINITE` constant (`:152`, used by
+    /// `e5m2_encode`'s finite-saturation path) — the constant predates this
+    /// anchor and was not adjusted to match it.
+    const E5M2_SPEC_ANCHORS: &[(u8, f32)] = &[
+        (0x00, 0.0),           // +0
+        (0x80, -0.0),          // -0
+        (0x3C, 1.0),           // e=01111(15) m=00 → 2^0·1
+        (0xBC, -1.0),          // sign | 1.0
+        (0x38, 0.5),           // e=01110(14) m=00 → 2^-1·1
+        (0x40, 2.0),           // e=10000(16) m=00 → 2^1·1
+        (0x3D, 1.25),          // e=01111(15) m=01 → 2^0·(1+1/4)
+        (0x01, 1.0 / 65536.0), // subnormal min: e=0 m=01 → 2^-14·(1/4)=2^-16
+        (0x03, 3.0 / 65536.0), // subnormal max: e=0 m=11 → 2^-14·(3/4)=3·2^-16
+        (0x7B, 57344.0),       // max finite: e=11110(30) m=11 → 2^15·1.75
+        (0xFB, -57344.0),      // sign | max finite
+    ];
+
+    #[test]
+    fn e5m2_decode_matches_ocp_spec_bit_patterns() {
+        for &(bits, want) in E5M2_SPEC_ANCHORS {
+            let got = e5m2_decode(bits);
+            assert!(
+                (got - want).abs() <= want.abs() * 1e-6 + 1e-12,
+                "e5m2_decode({bits:#04x}) = {got}, want {want} (OFP8 spec value)"
+            );
+        }
+    }
+
+    #[test]
+    fn e5m2_encode_matches_ocp_spec_bit_patterns() {
+        for &(bits, value) in E5M2_SPEC_ANCHORS {
+            if value == 0.0 && bits == 0x80 {
+                continue; // -0.0 == 0.0 in f32 comparison; 0x00 already covers +0
+            }
+            // `e5m2_encode` routes through `f32_to_f16_bits` (`:29-50`),
+            // whose own doc comment says it flushes ANY half-subnormal
+            // input to ±0 ("subnormal flush; unused by our callers") —
+            // confirmed empirically here: `bits == 0x01` (2^-16) and
+            // `0x03` (3·2^-16) both land in the half-subnormal exponent
+            // range (`exp <= 0` in `f32_to_f16_bits`), so encoding these
+            // exact E5M2-subnormal values produces `0x00`, not the
+            // spec bit pattern. This is a pre-existing, documented
+            // limitation of `f32_to_f16_bits` (contrast
+            // `f16_scale_encode`, `:217`, which explicitly adds "full
+            // subnormal support" for the scale path) — not something
+            // this anchor introduces or is meant to fix. `decode` still
+            // correctly recovers these values (see the decode-direction
+            // test above); only the encode round trip through the
+            // flushing half converter can't reach them.
+            if bits == 0x01 || bits == 0x03 {
+                assert_eq!(
+                    e5m2_encode(value),
+                    0x00,
+                    "e5m2_encode({value}) expected to flush to 0x00 per \
+                     f32_to_f16_bits's documented subnormal-flush behavior"
+                );
+                continue;
+            }
+            assert_eq!(e5m2_encode(value), bits, "e5m2_encode({value}) want {bits:#04x}");
+        }
+    }
 }

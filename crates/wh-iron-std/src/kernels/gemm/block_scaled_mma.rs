@@ -2,7 +2,9 @@
 //! SPDX-License-Identifier: Apache-2.0
 //! Block-scaled simdgroup-matrix (MMA) dequantizing GEMM — the M ≥ 32
 //! ALU-throughput path for the spec-conformant formats. This is a direct
-//! adaptation of `mlx/quantized.rs::iron_qmm_mma` (the int4 affine MMA): the
+//! adaptation of
+//! [`kernels::gemm::quantized::iron_qmm_mma`](crate::kernels::gemm::quantized::iron_qmm_mma)
+//! (the int4 affine MMA): the
 //! **dispatch geometry, threadgroup-memory layout, 8×8 frag mapping, and MMA
 //! inner loop are copied verbatim** — only the per-pack weight *dequant*
 //! staging changes (E2M1 codebook × E8M0 pow-2 scale instead of int4 affine).

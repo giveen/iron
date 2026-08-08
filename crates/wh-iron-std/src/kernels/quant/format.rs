@@ -165,11 +165,30 @@ impl QFormat {
     }
 
     /// Whether the element is a signed integer (vs a micro-float codebook).
+    ///
+    /// Currently uncalled (repo-wide `\.is_integer(` on `QFormat` has no
+    /// hits outside this definition — the one non-`format.rs` hit,
+    /// `wh-iron-codegen/src/passes/type_check.rs:301`, is `DataType::
+    /// is_integer`, an unrelated same-named method on a different type).
+    /// Kept, not deleted, as the element-axis counterpart to
+    /// [`symmetric`](Self::symmetric) — see that method's doc comment.
+    /// Flagged 2026-08-07 (RST Loop D `format.rs` sweep, Finding 1).
     pub fn is_integer(self) -> bool { matches!(self.element(), Element::Int(_)) }
 
     /// The zero-point axis. Every Track-1 (block-scaled / float-scale) format is
     /// **symmetric** — no zero-point. The asymmetric integer track (zero-point
-    /// for MLX-checkpoint interop) lives separately in `mlx/quantized.rs`.
+    /// for MLX-checkpoint interop) lives separately in
+    /// [`kernels::gemm::quantized`](crate::kernels::gemm::quantized) (moved
+    /// there 2026-06-22 from the old `mlx/quantized.rs` path; see
+    /// `git show 57899ff`).
+    ///
+    /// Currently uncalled (`grep -rn "\.symmetric(" .` has no hits outside
+    /// this definition) — kept as part of the element·scale·zero-point axis
+    /// this module documents, not dead API to delete. Flagged 2026-08-07
+    /// (RST Loop D `format.rs` sweep, Finding 1) as a candidate call site for
+    /// any future code that needs to branch on "is this format symmetric"
+    /// before assuming it (e.g. a shared pack/dequant path spanning both the
+    /// `QFormat` and MLX-affine tracks).
     pub fn symmetric(self) -> bool { true }
 
     /// Elements per block (mx*) / group (nv*, legacy fp, FP32-scaled int) along K.
@@ -495,6 +514,51 @@ mod tests {
         (dot / (na.sqrt() * nb.sqrt())) as f32
     }
 
+    /// Minimum acceptable `cosine(w, dequant(pack(w)))` for `fmt`, reused by
+    /// every round-trip-fidelity test in this module (block-aligned and
+    /// ragged alike) so the two don't drift into two different opinions of
+    /// "close enough" for the same format.
+    ///
+    /// Floors reflect the format's precision: 4-bit E2M1 is coarse; the
+    /// mxfp8 E8M0 pow-2 scale leaves up to ~2× of the element range unused
+    /// (so it's looser than nvfp8's exact FP32 scale).
+    fn cosine_floor(fmt: QFormat) -> f32 {
+        match fmt {
+            Nvfp4 | Mxfp4 => 0.97,              // 4-bit element
+            Fp4 => 0.98,                        // 4-bit element + exact FP32 group scale
+            Mxfp8E4 | Mxfp8E5 => 0.99,          // 8-bit element + pow-2 scale
+            Nvfp8 | Fp8E4m3 | Fp8E5m2 => 0.999, // 8-bit element + exact FP32 scale
+            Int8 => 0.9999,                     // int8 + FP32 scale is very tight
+            // Symmetric ints, exact FP32 group scale — fidelity tracks the
+            // bit width (more levels → tighter direction).
+            Int2 => 0.80,
+            Int3 => 0.94,
+            Int4 => 0.97,
+            Int5 => 0.995,
+            Int6 => 0.998,
+            // MXINT: same elements but an E8M0 pow-2 block scale leaves up to
+            // ~2× of the range unused, so each is a touch looser than its
+            // FP32-scaled int twin.
+            Mxint2 => 0.70,
+            Mxint3 => 0.90,
+            Mxint4 => 0.95,
+            Mxint5 => 0.98,
+            Mxint6 => 0.99,
+            Mxint8 => 0.997,
+            // FP16-scale twins: same element fidelity as the FP32 twin; the
+            // half scale's ~3-digit precision costs almost nothing, so floors
+            // sit a notch below each twin to stay non-flaky.
+            Fp4F16 => 0.97,
+            Nvfp8F16 | Fp8E4m3F16 | Fp8E5m2F16 => 0.998,
+            Int2F16 => 0.79,
+            Int3F16 => 0.93,
+            Int4F16 => 0.96,
+            Int5F16 => 0.99,
+            Int6F16 => 0.996,
+            Int8F16 => 0.999,
+        }
+    }
+
     #[test]
     fn pack_dequant_preserves_direction() {
         // Block quantization is judged by *aggregate* fidelity (cosine
@@ -509,50 +573,26 @@ mod tests {
             let d = dequant(fmt, &p, rows, cols);
             assert_eq!(d.len(), w.len());
             let cos = cosine(&w, &d);
-            // Floors reflect the format's precision: 4-bit E2M1 is coarse; the
-            // mxfp8 E8M0 pow-2 scale leaves up to ~2× of the element range
-            // unused (so it's looser than nvfp8's exact FP32 scale).
-            let floor = match fmt {
-                Nvfp4 | Mxfp4 => 0.97,              // 4-bit element
-                Fp4 => 0.98,                        // 4-bit element + exact FP32 group scale
-                Mxfp8E4 | Mxfp8E5 => 0.99,          // 8-bit element + pow-2 scale
-                Nvfp8 | Fp8E4m3 | Fp8E5m2 => 0.999, // 8-bit element + exact FP32 scale
-                Int8 => 0.9999,                     // int8 + FP32 scale is very tight
-                // Symmetric ints, exact FP32 group scale — fidelity tracks the
-                // bit width (more levels → tighter direction).
-                Int2 => 0.80,
-                Int3 => 0.94,
-                Int4 => 0.97,
-                Int5 => 0.995,
-                Int6 => 0.998,
-                // MXINT: same elements but an E8M0 pow-2 block scale leaves up to
-                // ~2× of the range unused, so each is a touch looser than its
-                // FP32-scaled int twin.
-                Mxint2 => 0.70,
-                Mxint3 => 0.90,
-                Mxint4 => 0.95,
-                Mxint5 => 0.98,
-                Mxint6 => 0.99,
-                Mxint8 => 0.997,
-                // FP16-scale twins: same element fidelity as the FP32 twin; the
-                // half scale's ~3-digit precision costs almost nothing, so floors
-                // sit a notch below each twin to stay non-flaky.
-                Fp4F16 => 0.97,
-                Nvfp8F16 | Fp8E4m3F16 | Fp8E5m2F16 => 0.998,
-                Int2F16 => 0.79,
-                Int3F16 => 0.93,
-                Int4F16 => 0.96,
-                Int5F16 => 0.99,
-                Int6F16 => 0.996,
-                Int8F16 => 0.999,
-            };
+            let floor = cosine_floor(fmt);
             assert!(cos >= floor, "{}: cosine {cos} < {floor}", fmt.name());
         }
     }
 
     #[test]
     fn packed_byte_sizes_match_layout() {
-        let (rows, cols) = (2usize, 64usize); // 64 divisible by every block/group (16/32/64)
+        // Finding 4 (RST Loop D `format.rs` sweep, 2026-08-07): this test
+        // used to fix `cols=64` — divisible by every block/group size
+        // (16/32/64) — and computed `nblocks` with plain floor division
+        // (`cols / fmt.block_size()`), while `pack()` itself (`:352`) uses
+        // `cols.div_ceil(bs)`. The two formulas only agreed here because
+        // `cols=64` makes them numerically identical for every format; the
+        // test was not actually re-deriving `pack()`'s layout logic. Using
+        // `cols=100` (non-divisible by 16, 32, *and* 64: `100/16=6.25`,
+        // `100/32=3.125`, `100/64=1.5625`) makes the two formulas diverge
+        // for every format if they ever disagree again, and the `nblocks`
+        // computation below now calls the exact same `div_ceil` production
+        // uses instead of reimplementing it.
+        let (rows, cols) = (2usize, 100usize);
         let w = weights(rows, cols);
         for fmt in ALL {
             let p = pack(fmt, &w, rows, cols);
@@ -564,7 +604,7 @@ mod tests {
                 bitstream_words(elems, fmt.element_bits()) * 4
             };
             assert_eq!(p.codes.len(), expected_codes, "{} codes", fmt.name());
-            let nblocks = rows * (cols / fmt.block_size());
+            let nblocks = rows * cols.div_ceil(fmt.block_size());
             assert_eq!(p.scales.len(), nblocks * fmt.scale_kind().bytes(), "{} scales", fmt.name());
             if !fmt.has_global() {
                 assert_eq!(p.global, 1.0, "{} global", fmt.name());
@@ -577,7 +617,9 @@ mod tests {
         // A dim that isn't a multiple of the block size (int8 group 64 over a
         // d96 head: a 64-block + a 32-block) must pack to a rounded-up block
         // count and still round-trip with full fidelity — this is what unblocks
-        // int8 flash-SDPA KV at d96 (GPT-NeoX).
+        // int8 flash-SDPA KV at d96 (GPT-NeoX). Kept as its own test (rather
+        // than folded into the all-formats sweep below) because it pins this
+        // specific, named production shape verbatim.
         let (rows, cols) = (4usize, 96usize);
         let w = weights(rows, cols);
         let p = pack(Int8, &w, rows, cols);
@@ -589,6 +631,66 @@ mod tests {
         let d = dequant(Int8, &p, rows, cols);
         assert_eq!(d.len(), w.len());
         assert!(cosine(&w, &d) >= 0.9999, "ragged int8 cosine {}", cosine(&w, &d));
+    }
+
+    #[test]
+    fn ragged_trailing_block_round_trips_all_formats() {
+        // Finding 3 (RST Loop D `format.rs` sweep, 2026-08-07): the ragged-
+        // trailing-block path above was verified for exactly 1 of 30
+        // formats (`Int8`, block size 64) at `cols=96` — which is exactly
+        // divisible by 16 and 32, so it never exercised a ragged block for
+        // any block-16 (nvfp4/nvfp8/…) or block-32 (mxfp4/mxfp8/mxint*/…)
+        // format, only block-64 (the symmetric-int / FP32-scale-int
+        // family). `pack`/`dequant`'s ragged-clamp logic
+        // (`bs.min(cols - b*bs)`, `format.rs:360,412,429,451`) is written
+        // once, generically, for every format — so this loops `ALL` (every
+        // `QFormat`, every block size 16/32/64) the same way
+        // `pack_dequant_preserves_direction` already does, at a `cols` that
+        // is NOT a multiple of any of the three block sizes:
+        // `100 % 16 == 4`, `100 % 32 == 4`, `100 % 64 == 36` — so every
+        // format in `ALL` gets a genuine non-empty trailing partial block,
+        // not just a block-count-rounds-up check.
+        //
+        // This directly settles the `Nvfp4` question Finding 3 flagged:
+        // `Nvfp4`'s `global` FP32 (`pack()` `:367-372`) is the max over
+        // ALL per-block scales, including whatever amax the ragged
+        // trailing block produced — this test is the first one to run
+        // that reduction over a fixture where one of the blocks actually
+        // is ragged.
+        let (rows, cols) = (4usize, 100usize);
+        let w = weights(rows, cols);
+        for fmt in ALL {
+            let bs = fmt.block_size();
+            let blocks_per_row = cols.div_ceil(bs);
+            assert_ne!(
+                cols % bs,
+                0,
+                "{}: fixture cols={cols} must be non-divisible by block_size={bs} \
+                 for this to actually exercise the ragged path",
+                fmt.name()
+            );
+            let p = pack(fmt, &w, rows, cols);
+
+            let expected_codes = if fmt.element_bits() == 8 {
+                rows * cols
+            } else {
+                bitstream_words(rows * cols, fmt.element_bits()) * 4
+            };
+            assert_eq!(p.codes.len(), expected_codes, "{} codes (ragged cols)", fmt.name());
+            let nblocks = rows * blocks_per_row;
+            assert_eq!(
+                p.scales.len(),
+                nblocks * fmt.scale_kind().bytes(),
+                "{} scales (ragged cols, blocks_per_row={blocks_per_row})",
+                fmt.name()
+            );
+
+            let d = dequant(fmt, &p, rows, cols);
+            assert_eq!(d.len(), w.len());
+            let cos = cosine(&w, &d);
+            let floor = cosine_floor(fmt);
+            assert!(cos >= floor, "{}: ragged cosine {cos} < {floor}", fmt.name());
+        }
     }
 
     #[test]

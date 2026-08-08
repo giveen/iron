@@ -185,12 +185,16 @@ pub fn iron_fft<T>(
 //
 // ## Usage pattern (caller side)
 //
+//   bluestein_chirp_filter(filter_re, filter_im, N, M, inv=0|1)
+//     → time-domain convolution kernel a[m] for THIS direction (forward
+//       and inverse need different filters — see that kernel's doc
+//       comment for the sign derivation. Build/cache one per direction.)
 //   bluestein_preprocess<T>(x_re, x_im, chirp_re, chirp_im, N, M, inv=0|1)
 //     → padded `[rows, M]` pre-multiplied sequences
-//   iron_fft_n1024<T>(filter_re, filter_im, F_re, F_im, inv=0)   // once per N
-//   iron_fft_n1024<T>(padded_re, padded_im, Y_re, Y_im, inv=0)   // per batch
+//   iron_fft_n1024<T>(filter_re, filter_im, F_re, F_im, inv=0)   // once per N (always forward, regardless of direction)
+//   iron_fft_n1024<T>(padded_re, padded_im, Y_re, Y_im, inv=0)   // per batch (always forward)
 //   elementwise_cmul(Y_re, Y_im, F_re, F_im)                   // in-place
-//   iron_fft_n1024<T>(Y_re, Y_im, conv_re, conv_im, inv=1)        // IFFT
+//   iron_fft_n1024<T>(Y_re, Y_im, conv_re, conv_im, inv=1)        // IFFT (always the radix inverse)
 //   bluestein_postprocess<T>(conv_re, conv_im, out_re, out_im, N, M, inv)
 //     → final DFT output `[rows, N]`
 
@@ -266,25 +270,43 @@ pub fn iron_fft_bluestein_preprocess<T>(
 /// Computes `a[m]` for the circular convolution `filter_re / filter_im`
 /// `[1, M]` (single row, M = padded power-of-two length):
 ///
-///   a[0]     = 1 + 0i              (n=0 chirp is always 1)
-///   a[n]     = exp(+i π n² / N)    for n ∈ [1, N)   (positive-sign chirp)
-///   a[M-n]   = a[n]                for n ∈ [1, N)   (time-reversal — `a` is symmetric since |n|²=|-n|²)
-///   a[m]     = 0                   for m ∈ [N, M-N+1)
+///   a[0]     = 1 + 0i                    (n=0 chirp is always 1)
+///   a[n]     = exp(±i π n² / N)          for n ∈ [1, N)
+///   a[M-n]   = a[n]                      for n ∈ [1, N)   (time-reversal — `a` is symmetric since |n|²=|-n|²)
+///   a[m]     = 0                         for m ∈ [N, M-N+1)
 ///
-/// The positive sign matches the Bluestein identity for the forward DFT
-/// when pre/postprocess use `exp(-iπn²/N)` (see module docs). Using the
-/// negative sign here would make the convolution sum collapse to noise.
+/// `inv` selects the sign: `inv=0` (forward) uses the positive-sign chirp
+/// `exp(+iπn²/N)`, matching the Bluestein identity for the forward DFT
+/// when pre/postprocess use `exp(-iπn²/N)` (see module docs). `inv=1`
+/// (inverse) uses the negative-sign chirp `exp(-iπn²/N)` — the *opposite*
+/// sign from forward, and the opposite convention from `preprocess` /
+/// `postprocess`'s own `angle_sign` (which is `-1` for `inv=0` and `+1`
+/// for `inv=1`). This is not a typo: re-deriving the identity for the
+/// inverse transform,
+///
+///   x[n] = (1/N) Σ_k X[k] exp(+i2πkn/N)
+///        = (1/N) exp(+iπn²/N) · Σ_k [X[k]·exp(+iπk²/N)] · exp(-iπ(n-k)²/N)
+///
+/// shows the inverse convolution kernel is `exp(-iπm²/N)` — negative —
+/// while the inverse pre/post chirp multiplies (`exp(+iπk²/N)` /
+/// `exp(+iπn²/N)`) are positive. Using the SAME positive-sign filter for
+/// both directions (as this kernel did before `inv` existed) silently
+/// breaks `ifft(fft(x)) ≈ x` — see
+/// `tests/fft_bluestein_roundtrip_gpu.rs::bluestein_roundtrip_inverse_n400_f32`,
+/// which failed with max|Δ|≈8e-2 against an input signal of magnitude
+/// ≈4e-2 (order-1 relative error, not float noise) before this fix.
 ///
 /// This is a single-row kernel (grid = [M, 1, 1]).
 ///
-/// The caller FFTs this filter once and stores it for reuse across all
-/// rows/frames.
+/// The caller FFTs this filter once (per direction) and stores it for
+/// reuse across all rows/frames.
 #[kernel]
 pub fn iron_fft_bluestein_chirp_filter(
     mut filter_re: Tensor<f32>,
     mut filter_im: Tensor<f32>,
     #[constexpr] n_len: u32,
     #[constexpr] m_len: u32,
+    #[constexpr] inv: u32,
 ) {
     let m = program_id::<0>(); // column index in [0, M)
     let pi = 3.141592653589793f32;
@@ -295,9 +317,10 @@ pub fn iron_fft_bluestein_chirp_filter(
     if in_range {
         let n_f = n_tap.cast::<f32>();
         let n_len_f = n_len.cast::<f32>();
-        // Positive-sign chirp: exp(+iπn²/N). Matches the Bluestein
-        // identity's `exp(+iπ(k-n)²/N)` convolution kernel.
-        let angle = pi * n_f * n_f / n_len_f;
+        // angle_sign = +1 for forward (inv=0), -1 for inverse (inv=1) —
+        // see the doc comment above for the derivation.
+        let angle_sign = select(inv == 0u32, 1.0f32, -1.0f32);
+        let angle = angle_sign * pi * n_f * n_f / n_len_f;
         let wr = cos(angle);
         let wi = sin(angle);
         store(filter_re[m], wr);
@@ -496,10 +519,14 @@ pub mod kernel_tests {
     // ── Bluestein stages ───────────────────────────────────────────────────
     fn u8re(v: &[f32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
-    /// chirp_filter (f32 only): build the time-domain convolution kernel a[m].
-    #[test_kernel(dtypes = [f32], tol = 1e-4)]
-    fn test_fft_bluestein_chirp_filter(_dt: DType) -> TestSetup {
+    /// chirp_filter (f32 only): build the time-domain convolution kernel
+    /// a[m]. `inv` flips the chirp angle sign — opposite convention from
+    /// `preprocess`/`postprocess` (see the kernel's doc comment): `inv=0`
+    /// (forward) is the positive-sign chirp, `inv=1` (inverse) is
+    /// negative.
+    fn bluestein_chirp_filter_setup(inv: bool) -> TestSetup {
         let (n_len, m_len) = (5usize, 16usize);
+        let sign = if inv { -1.0f32 } else { 1.0f32 };
         let mut fr = vec![0.0f32; m_len];
         let mut fi = vec![0.0f32; m_len];
         for m in 0..m_len {
@@ -513,7 +540,7 @@ pub mod kernel_tests {
                 } else {
                     n_len
                 };
-                let angle = PI * (n_tap as f32) * (n_tap as f32) / n_len as f32;
+                let angle = sign * PI * (n_tap as f32) * (n_tap as f32) / n_len as f32;
                 fr[m] = angle.cos();
                 fi[m] = angle.sin();
             }
@@ -524,6 +551,7 @@ pub mod kernel_tests {
             .input(TestBuffer::zeros("filter_im", m_len, DType::F32))
             .constexpr("n_len", n_len as u32)
             .constexpr("m_len", m_len as u32)
+            .constexpr("inv", u32::from(inv))
             .expect(TestBuffer::from_vec("filter_re", u8re(&fr), DType::F32))
             .expect(TestBuffer::from_vec("filter_im", u8re(&fi), DType::F32))
             // Grid3D, unguarded `filter[m]` store: total threads must equal
@@ -531,6 +559,22 @@ pub mod kernel_tests {
             // is a *group count*, so the prior `(m_len, …, [m_len,…])` launched
             // m_len² threads and wrote out of bounds).
             .grid_1d(m_len, m_len as u32)
+    }
+    #[test_kernel(dtypes = [f32], tol = 1e-4)]
+    fn test_fft_bluestein_chirp_filter(_dt: DType) -> TestSetup {
+        bluestein_chirp_filter_setup(false)
+    }
+    /// `sin/cos` are odd/even respectively, so flipping `angle_sign` only
+    /// negates `filter_im` (imaginary part) relative to the forward case
+    /// — `filter_re` is identical. A test that only checked `filter_re`
+    /// would pass with the sign bug fully unfixed; this variant exists so
+    /// that the `filter_im` half of the assertion has teeth (mutation
+    /// evidence: reverting `angle_sign` to unconditionally `1.0f32` above
+    /// makes exactly this test fail, `test_fft_bluestein_chirp_filter`
+    /// stays green).
+    #[test_kernel(dtypes = [f32], tol = 1e-4)]
+    fn test_fft_bluestein_chirp_filter_inv(_dt: DType) -> TestSetup {
+        bluestein_chirp_filter_setup(true)
     }
 
     /// preprocess: chirp pre-multiply + zero-pad input `[rows,n]` → `[rows,m]`.
@@ -693,6 +737,7 @@ pub mod kernel_benches {
             .buffer(BenchBuffer::zeros("filter_im", M_LEN, DType::F32).output())
             .constexpr("n_len", N_LEN as u32)
             .constexpr("m_len", M_LEN as u32)
+            .constexpr("inv", 0u32)
             .with_shape_label(format!("M={M_LEN} f32"))
             // Grid3D, unguarded `filter[m]` store: total threads = M_LEN
             // exactly (M_LEN is a multiple of 256). grid_3d's first arg is a

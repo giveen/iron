@@ -20,8 +20,9 @@
 //!
 //! This mirrors the codebase's existing split: the asymmetric MLX affine track
 //! likewise lives outside `QFormat` (see [`format`](super::format) and
-//! `mlx/quantized.rs`). What every track **shares** is [`codec`] — the
-//! single source of truth for element/scale bit-decode.
+//! [`kernels::gemm::quantized`](crate::kernels::gemm::quantized)). What every
+//! track **shares** is [`codec`] — the single source of truth for
+//! element/scale bit-decode.
 //!
 //! ## Single source of truth
 //!
@@ -47,8 +48,10 @@ const Q2_K_SUBBLOCK: usize = 16;
 ///
 /// Provenance: these are the llama.cpp / GGUF super-block layouts, distinct from
 /// the OCP/NVIDIA microscaling formats in [`QFormat`](super::format::QFormat) and
-/// the MLX affine track in `mlx/quantized.rs`. They are listed in this one enum so
-/// callers have a single registry of the GGUF precisions wh-iron supports.
+/// the MLX affine track in
+/// [`kernels::gemm::quantized`](crate::kernels::gemm::quantized). They are
+/// listed in this one enum so callers have a single registry of the GGUF
+/// precisions wh-iron supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GgufFormat {
     /// `Q8_0`: int8 element, block 32, one fp16 super-scale per block.
