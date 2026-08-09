@@ -200,7 +200,10 @@ impl Kernel {
                 | Op::CoopTileLoadA { .. }
                 | Op::CoopTileLoadB { .. }
                 | Op::CoopTileRun { .. }
-                | Op::CoopTileStoreC { .. } => true,
+                | Op::CoopTileStoreC { .. }
+                | Op::CoopTileCapacity { .. }
+                | Op::CoopTileCoord { .. }
+                | Op::CoopTileGet { .. } => true,
                 Op::InlineMsl { source, .. } => source.contains("mpp::"),
                 Op::FusedElementwise { ops } => ops.iter().any(op_uses_coop),
                 _ => false,

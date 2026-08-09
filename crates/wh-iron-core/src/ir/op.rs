@@ -1093,6 +1093,57 @@ pub enum Op {
         ei: u32,
         eo: u32,
     },
+
+    /// Per-lane thread-local element count of a cooperative C tile
+    /// (`cooperative_tensor::get_capacity()`). The device-direct
+    /// masked-store lever (`moe_gather_qmm_expert_mpp.rs`)
+    /// uses this + `CoopTileCoord` + `CoopTileGet` to drain the
+    /// accumulator straight to device memory with a per-row validity mask
+    /// and an output-dtype cast, without a threadgroup relay buffer.
+    /// `CoopTileStoreC`'s device-direct path only works when the
+    /// destination dtype exactly matches the (F32) accumulator — verified
+    /// against the actual MPP header
+    /// (`metal_cooperative_tensor`'s `store()` overloads are gated
+    /// `enable_if_t<is_same_v<element_type, ...>>`, and compiling a
+    /// mismatched-dtype `store()` call fails with "no matching member
+    /// function for call to 'store' ... requirement
+    /// 'is_same_v<float, half>' was not satisfied") — so it can't reach an
+    /// `f16`/`bf16` output tensor directly. The loop that drains this
+    /// tile MUST be compiler-unrolled (see the `#[pragma unroll(full)]`
+    /// emission keyed off this op in `emit_block.rs`'s `Op::Loop` codegen)
+    /// — Apple's own MPP doc example for this exact accessor pattern
+    /// states "It is imperative for performance to include 'unroll
+    /// pragma' so compiler fully unrolls the loop"; the emitted MSL for
+    /// this call is `auto v = {name}_ct_c.get_capacity();` (a runtime-
+    /// looking `auto`, not a literal), so without the pragma the
+    /// downstream Metal/LLVM compiler is not guaranteed to unroll it.
+    CoopTileCapacity { name: String },
+
+    /// Local 2D coordinate of a cooperative C tile's `idx`-th thread-local
+    /// element (`cooperative_tensor::get_multidimensional_index(idx)`),
+    /// one axis at a time since IR results are scalar. `axis`: `0` = row
+    /// (the tile's `ei`/M dimension), `1` = col (`eo`/N). The layout of a
+    /// cooperative tensor's per-lane elements is implementation-defined,
+    /// so this MPP accessor is the only correct way to recover which
+    /// output row/col element `idx` is — see `CoopTileCapacity`'s doc for
+    /// why manual device-direct access is needed at all.
+    CoopTileCoord {
+        name: String,
+        #[vid]
+        idx: ValueId,
+        axis: u32,
+    },
+
+    /// Direct per-lane read of a cooperative C tile's `idx`-th
+    /// thread-local element (`cooperative_tensor::operator[](idx)`).
+    /// Result dtype is always F32: every `coop_tile_setup` call in this
+    /// codebase configures an F32 accumulator (see `CoopTileCapacity`'s
+    /// doc).
+    CoopTileGet {
+        name: String,
+        #[vid]
+        idx: ValueId,
+    },
 }
 
 impl Op {
@@ -1333,6 +1384,11 @@ impl Op {
             Op::CoopTileStoreC { name, ptr_name, ei, eo, .. } => {
                 write!(f, "CoopTileStoreC({name}, {ptr_name}, extents<{ei},{eo}>)")
             },
+            Op::CoopTileCapacity { name } => write!(f, "CoopTileCapacity({name})"),
+            Op::CoopTileCoord { name, idx, axis } => {
+                write!(f, "CoopTileCoord({name}, v{}, axis={axis})", idx.as_u32())
+            },
+            Op::CoopTileGet { name, idx } => write!(f, "CoopTileGet({name}, v{})", idx.as_u32()),
             Op::UnaryOp { op, value } => write!(f, "UnaryOp({op:?}, v{})", value.as_u32()),
             Op::Activation { kind, value } => {
                 write!(f, "Activation({kind:?}, v{})", value.as_u32())

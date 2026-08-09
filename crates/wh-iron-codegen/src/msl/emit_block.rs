@@ -466,6 +466,32 @@ impl MslGenerator {
                     let e = self.vname(Some(*end), block, extra_names);
                     let st = self.vname(Some(*step), block, extra_names);
                     let vn = format!("i_{}", var.as_u32());
+                    // A loop bounded by `coop_tile_capacity()` drains a
+                    // cooperative tile's thread-local elements. Apple's
+                    // own MPP doc for this exact accessor pattern states
+                    // "It is imperative for performance to include
+                    // 'unroll pragma' so compiler fully unrolls the loop"
+                    // (`MPPTensorOpsMatMul2d.h`'s bias-add example). The
+                    // emitted bound expression (`_ct_c.get_capacity()`)
+                    // is not textually a literal, so hint the downstream
+                    // Metal/LLVM compiler explicitly rather than relying
+                    // on it to infer the trip count is constant — without
+                    // this, the loop can compile as a genuine runtime
+                    // loop with dynamic per-thread-array indexing (heavy
+                    // ALU + potential register spill), which is the
+                    // leading hypothesis for why an earlier, unpragma'd
+                    // version of this same manual-readout kernel measured
+                    // a wired regression despite +22.8% isolated
+                    // occupancy.
+                    let bound_is_coop_capacity = matches!(
+                        block.ops.iter().enumerate().find_map(|(i, op)| (block.results.get(i)
+                            == Some(&Some(*end)))
+                        .then_some(op)),
+                        Some(Op::CoopTileCapacity { .. })
+                    );
+                    if bound_is_coop_capacity {
+                        wl!(out, "{pad}#pragma clang loop unroll(full)");
+                    }
                     wl!(out, "{pad}for (uint {vn} = {s}; {vn} < {e}; {vn} += {st}) {{");
                     if let Some(bb) = all_blocks.get(bid) {
                         let loop_var_vid = ValueId::new(0xC000_0000 | var.as_u32());
@@ -678,6 +704,41 @@ impl MslGenerator {
                         out,
                         "{pad}metal::tensor<{as_} {t}, metal::extents<int, {ei}, {eo}>, metal::tensor_inline> {name}_tC({ptr}, metal::extents<int, {ei}, {eo}>{{}}); {name}_ct_c.store({name}_tC);"
                     );
+                },
+
+                // ---- CoopTile manual readout ----
+                // `get_capacity()` / `get_multidimensional_index()` /
+                // `operator[]` — MPP's documented in-register
+                // post-processing accessors, repurposed as a full manual
+                // read-out path for a device-direct masked store that
+                // `CoopTileStoreC` can't reach (destination dtype != the
+                // F32 accumulator — see `Op::CoopTileCapacity`'s doc).
+                // The enclosing `Op::Loop` this feeds gets a compiler
+                // unroll pragma below (keyed off `CoopTileCapacity`) so
+                // this stays a straight-line masked store, not a real
+                // runtime loop with dynamic per-thread-array indexing.
+                Op::CoopTileCapacity { name } => {
+                    let v = self.vname(vid, block, extra_names);
+                    wl!(out, "{pad}auto {v} = {name}_ct_c.get_capacity();");
+                },
+                Op::CoopTileCoord { name, idx, axis } => {
+                    let v = self.vname(vid, block, extra_names);
+                    let iv = self.vname(Some(*idx), block, extra_names);
+                    // `get_multidimensional_index` returns a coordinate
+                    // array typed by its deduced `index_t`, which Metal
+                    // otherwise reports as `int` here — an explicit `uint`
+                    // cast keeps downstream comparisons against unsigned
+                    // row/col bounds warning-free (row/col are always
+                    // non-negative local tile coordinates).
+                    wl!(
+                        out,
+                        "{pad}uint {v} = (uint){name}_ct_c.get_multidimensional_index({iv})[{axis}];"
+                    );
+                },
+                Op::CoopTileGet { name, idx } => {
+                    let v = self.vname(vid, block, extra_names);
+                    let iv = self.vname(Some(*idx), block, extra_names);
+                    wl!(out, "{pad}auto {v} = {name}_ct_c[{iv}];");
                 },
 
                 // ---- fused elementwise chain ---------------------------

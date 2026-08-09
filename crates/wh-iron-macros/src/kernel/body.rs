@@ -667,6 +667,14 @@ impl DslBodyParser {
             "coop_tile_load_b" => self.parse_coop_tile_load_b(call),
             "coop_tile_run" => self.parse_coop_tile_run(call),
             "coop_tile_store_c" => self.parse_coop_tile_store_c(call),
+            // Manual masked-readout accessors — the only way to drain an
+            // F32 cooperative C tile into a device-direct T-cast
+            // destination (`coop_tile_store_c`'s native `.store()`
+            // requires the destination dtype to exactly match the
+            // accumulator; see `Op::CoopTileCapacity`'s doc).
+            "coop_tile_capacity" => self.parse_coop_tile_capacity(call),
+            "coop_tile_coord" => self.parse_coop_tile_coord(call),
+            "coop_tile_get" => self.parse_coop_tile_get(call),
             "range" => 0,
             _ => {
                 if path.is_empty() {
@@ -2054,6 +2062,52 @@ impl DslBodyParser {
             }
         });
         0
+    }
+
+    /// `coop_tile_capacity(name)` → Op::CoopTileCapacity. Per-lane element
+    /// count of the named coop C tile.
+    fn parse_coop_tile_capacity(&mut self, call: &ExprCall) -> u32 {
+        let args: Vec<&Expr> = call.args.iter().collect();
+        let name = string_lit_from_expr(args.first().copied().unwrap_or(&*call.func));
+        let result = self.alloc_vid();
+        self.push_op(quote! { Op::CoopTileCapacity { name: #name.to_string() } }, result);
+        result
+    }
+
+    /// `coop_tile_coord(name, idx, axis)` → Op::CoopTileCoord. `axis` 0 =
+    /// row, 1 = col of the `idx`-th thread-local element.
+    fn parse_coop_tile_coord(&mut self, call: &ExprCall) -> u32 {
+        let args: Vec<&Expr> = call.args.iter().collect();
+        let name = string_lit_from_expr(args.first().copied().unwrap_or(&*call.func));
+        let idx_vid = args.get(1).map(|a| self.parse_expr(a)).unwrap_or(0);
+        let axis = args.get(2).map(|a| literal_u32(a)).unwrap_or(0);
+        let result = self.alloc_vid();
+        self.push_op(
+            quote! {
+                Op::CoopTileCoord {
+                    name: #name.to_string(),
+                    idx: ValueId::new(#idx_vid),
+                    axis: #axis,
+                }
+            },
+            result,
+        );
+        result
+    }
+
+    /// `coop_tile_get(name, idx)` → Op::CoopTileGet. Direct per-lane read
+    /// of the `idx`-th thread-local element (always F32 — the accumulator
+    /// dtype).
+    fn parse_coop_tile_get(&mut self, call: &ExprCall) -> u32 {
+        let args: Vec<&Expr> = call.args.iter().collect();
+        let name = string_lit_from_expr(args.first().copied().unwrap_or(&*call.func));
+        let idx_vid = args.get(1).map(|a| self.parse_expr(a)).unwrap_or(0);
+        let result = self.alloc_vid();
+        self.push_op(
+            quote! { Op::CoopTileGet { name: #name.to_string(), idx: ValueId::new(#idx_vid) } },
+            result,
+        );
+        result
     }
 }
 

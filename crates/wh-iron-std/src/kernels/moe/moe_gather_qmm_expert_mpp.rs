@@ -43,9 +43,53 @@
 //!    T=512 is 16), the upper band's two SGs skip their A-loads and
 //!    MMAs entirely (SG-uniform predicate, so `matmul2d`'s collective
 //!    execution is never lane-diverged).
+//! 7. **C device-direct, no OutScratch, compiler-unrolled readout.**
+//!    The prior implementation staged its accumulator through an
+//!    `OutScratch` threadgroup buffer (`Ws` 4 KiB + `OutScratch` 16 KiB
+//!    = 20 KiB/TG), which caps this kernel at `floor(32 KiB / 20 KiB) =
+//!    1` resident threadgroup per core. Removing that relay buffer and
+//!    draining the accumulator straight to device memory instead raises
+//!    residency to 3 TGs/core on the same hardware — the occupancy lever
+//!    this change measures.
 //!
-//! Threadgroup memory: `Ws` 64×32 half (4 KiB) + `OutScratch` 4×32×32
-//! f32 (16 KiB) = 20 KiB (was 24 KiB with the X slab).
+//!    Each SG now drains its own 32×32 accumulator fragment straight to
+//!    `out` via `coop_tile_capacity` / `coop_tile_coord` / `coop_tile_get`
+//!    (manual per-lane readout), masked to `row_count` valid rows and
+//!    inline-cast to `T`. Two things distinguish this from a naive manual
+//!    readout:
+//!
+//!    - **Verified against the actual MPP header
+//!      (`metal_cooperative_tensor`)** that `coop_tile_store_c`'s
+//!      device-direct path genuinely cannot reach here: `store()`'s
+//!      overloads are gated `enable_if_t<is_same_v<element_type, ...>>`,
+//!      and compiling a mismatched-dtype `store()` call fails with "no
+//!      matching member function for call to 'store' ... requirement
+//!      'is_same_v<float, half>' was not satisfied" — confirmed with a
+//!      standalone probe kernel compiled against this repo's MPP
+//!      toolchain. `is_valid_element`/`get`/`set` exist for the tile's
+//!      own STATIC edge mask, but our mask (`row_count`, a per-chunk
+//!      RUNTIME value) is orthogonal to that — there is no MPP primitive
+//!      that combines a runtime row mask with a dtype-casting
+//!      device-direct store, so a manual per-element readout is
+//!      unavoidable for a `T ∈ {f16, bf16}` output.
+//!    - **The readout loop is compiler-unrolled.** Apple's own MPP doc
+//!      (`MPPTensorOpsMatMul2d.h`'s bias-add example, which uses this
+//!      exact `get_capacity()`/`get_multidimensional_index()`/`[]`
+//!      pattern) states: "It is imperative for performance to include
+//!      'unroll pragma' so compiler fully unrolls the loop." `emit_block
+//!      .rs`'s `Op::Loop` codegen now emits `#pragma clang loop
+//!      unroll(full)` whenever a loop's bound is produced by
+//!      `CoopTileCapacity` — this is load-bearing: an earlier attempt at
+//!      this same device-direct readout without the pragma measured
+//!      +22.8% isolated occupancy but a **wired regression**, consistent
+//!      with the loop compiling as a real runtime loop with dynamic
+//!      per-thread-array indexing instead of straight-line masked
+//!      stores. With the pragma, the readout logic itself is unchanged
+//!      from that earlier attempt — the only difference is the unroll
+//!      pragma, isolating occupancy from readout-loop overhead.
+//!
+//! Threadgroup memory: `Ws` 64×32 half (4 KiB) only — `OutScratch` is
+//! gone (was 20 KiB with it, 24 KiB before that with the X slab).
 //!
 //! ## Contract
 //!
@@ -105,8 +149,9 @@ pub fn iron_nvfp4_moe_gather_qmm_expert_mpp<T>(
     // E2M1 decode's 2·magnitude convention (module docs #4).
     let scale_fold = global * 0.00006103515625f32 * 0.5f32; // global · 2^-14 · 0.5
     let stage_comp = 16384.0f32; // 2^14
+    // module docs #7: `OutScratch` is gone — `Ws` is now the only
+    // threadgroup allocation (4 KiB, was 20 KiB).
     threadgroup_alloc("Ws", 2048, f16); // 64 (N) × 32 (K), 4 KiB
-    threadgroup_alloc("OutScratch", 4096, f32); // 4 SG × 32 × 32, 16 KiB
     coop_tile_setup("gemm", 32, 32, 32, f16, "accumulate", "simdgroup", f32, false, true, false);
 
     // run_start = lower_bound(indices, expert); run_end = lower_bound(
@@ -149,9 +194,11 @@ pub fn iron_nvfp4_moe_gather_qmm_expert_mpp<T>(
         let sg_active = sg_m_base < row_count;
         coop_tile_zero("gemm");
         for kb in range(0u32, K, 32u32) {
-            // WAR: prior iteration's B fragment reads (and, on the first
-            // iteration of a later chunk, the scatter's OutScratch reads)
-            // must complete before Ws is restaged.
+            // WAR: prior iteration's B fragment reads must complete
+            // before Ws is restaged. (The C store below is device-direct
+            // / register-only now, so this is the only threadgroup
+            // hazard left in the chunk loop — no barrier is needed
+            // around the store itself, see its comment.)
             threadgroup_barrier();
             // --- Stage W: dequant this expert / N-tile / K-slice ---
             // One scale decode per lane (module docs #5): both packs sit
@@ -191,25 +238,67 @@ pub fn iron_nvfp4_moe_gather_qmm_expert_mpp<T>(
             }
         }
         if sg_active {
-            coop_tile_store_c("gemm", "OutScratch", true, f32, 32, 32, sg * 1024u32);
-        }
-        threadgroup_barrier();
-        // Scatter 64×64 from the 2×2 SG tiles, masked to row_count valid
-        // rows; ×2^14 undoes the W-side fold once.
-        for _e in range(0u32, 32u32, 1u32) {
-            let flat = lane_in_tg * 32u32 + _e;
-            let mr = flat >> 6u32;
-            let nc = flat & 63u32;
-            if mr < row_count {
-                let src_sg = (mr >> 5u32) * 2u32 + (nc >> 5u32);
-                let v = threadgroup_load(
-                    "OutScratch",
-                    src_sg * 1024u32 + (mr & 31u32) * 32u32 + (nc & 31u32),
-                ) * stage_comp;
-                store(out[(chunk_start + mr) * n_out + n_tile_base + nc], v.cast::<T>());
+            // Device-direct masked store (module docs #7): each SG drains
+            // its own 32×32 accumulator fragment (`_ct_c`, thread-private
+            // registers) straight to `out`, casts to `T`, and undoes the
+            // W-side ×2^-14 fold (module docs #3) with `stage_comp` — no
+            // threadgroup relay, so no barrier is needed here: every lane
+            // only ever touches registers it already owns. The enclosing
+            // loop is compiler-unrolled (`emit_block.rs`'s `Op::Loop`
+            // codegen keyed off `CoopTileCapacity`) so this compiles to
+            // straight-line masked stores, not a real runtime loop —
+            // module docs #7 for why that distinction is load-bearing.
+            //
+            // `coop_tile_store_c`'s device-direct path can't be used
+            // directly — it requires the destination dtype to exactly
+            // match the F32 accumulator (verified against the MPP header
+            // itself, module docs #7), but `out` is `f16`/`bf16` in
+            // production (Laguna benches run bf16). `coop_tile_capacity`
+            // / `coop_tile_coord` / `coop_tile_get` read the fragment back
+            // manually instead, mirroring MPP's documented in-register
+            // post-processing pattern (`MPPTensorOpsMatMul2d.h`'s
+            // bias-add example) as a full read-out.
+            //
+            // *** CORRECTNESS: `sg_row_bound` MUST be exact. *** Local
+            // rows `>= sg_row_bound` correspond to global rows
+            // `>= run_end` — rows that belong to the NEXT expert's run
+            // and are concurrently written by a DIFFERENT threadgroup. An
+            // over-wide bound here is a cross-threadgroup DATA RACE that
+            // can silently corrupt a neighboring expert's output rows
+            // (not just wasted work); an under-wide bound silently drops
+            // real output rows. `sg_active` already guarantees
+            // `row_count > sg_m_base`, so `row_count - sg_m_base` can
+            // never underflow below. See `test_nvfp4_gather_expert_mpp_
+            // ragged` / `..._long_run` for the regression coverage.
+            let sg_row_bound = min(32u32, row_count - sg_m_base);
+            let cap = coop_tile_capacity("gemm");
+            for _e in range(0u32, cap, 1u32) {
+                // Local (row, col) of this lane's `_e`-th fragment element
+                // within the SG's 32×32 tile — MPP's per-lane layout is
+                // implementation-defined, so this accessor (not a hand
+                // formula) is the only correct way to recover it.
+                //
+                // Axis order is (N, M) — extent 0 is the fast/column (N)
+                // dimension, extent 1 is the row (M) dimension. Confirmed
+                // by cross-checking an asymmetric sibling kernel's
+                // `coop_tile_store_c` call against its `coop_tile_setup`:
+                // `moe_mpp_bm8.rs` sets up `(m=8, n=32)` and stores with
+                // `(ei=32, eo=8)` i.e. `(ei, eo) = (n, m)` — the same
+                // `(N, M)` convention `coop_tile_store_c`'s existing
+                // `metal::extents<int, ei, eo>` destination views already
+                // rely on. Getting this backwards silently transposes the
+                // 32×32 output block (caught by every oracle test here,
+                // including the un-ragged `..._single` case).
+                let c = coop_tile_coord("gemm", _e, 0u32);
+                let r = coop_tile_coord("gemm", _e, 1u32);
+                if r < sg_row_bound {
+                    let v = coop_tile_get("gemm", _e) * stage_comp;
+                    let mr = chunk_start + sg_m_base + r;
+                    let nc = n_tile_base + sg_n_base + c;
+                    store(out[mr * n_out + nc], v.cast::<T>());
+                }
             }
         }
-        threadgroup_barrier();
     }
 }
 
@@ -229,11 +318,12 @@ mod tests {
             assert_eq!(k.name, "iron_nvfp4_moe_gather_qmm_expert_mpp_k512");
             let all_ops =
                 || std::iter::once(&k.body).chain(k.blocks.values()).flat_map(|b| b.ops.iter());
-            // Exactly two threadgroup_allocs: Ws + OutScratch (no X slab —
-            // the lever this rebuild measures).
+            // Exactly one threadgroup_alloc: Ws (no X slab, no OutScratch
+            // — removing the C store's threadgroup relay is the
+            // occupancy lever this change measures).
             let tg_allocs =
                 all_ops().filter(|op| matches!(op, Op::ThreadgroupAlloc { .. })).count();
-            assert_eq!(tg_allocs, 2, "expected Ws + OutScratch only (no Xs)");
+            assert_eq!(tg_allocs, 1, "expected Ws only (no Xs, no OutScratch)");
             // A is device-direct; B stays threadgroup-staged.
             let a_is_tg = all_ops().find_map(|op| match op {
                 Op::CoopTileLoadA { is_tg, .. } => Some(*is_tg),
@@ -266,10 +356,32 @@ mod tests {
             "expected K=2048 baked into the device-direct A stride:\n{msl}"
         );
         assert!(msl.contains("threadgroup half Ws"), "Ws staging slab missing:\n{msl}");
-        assert!(msl.contains("threadgroup float OutScratch"));
+        assert!(
+            !msl.contains("OutScratch"),
+            "OutScratch must be gone — replaced by a device-direct masked store:\n{msl}"
+        );
         assert!(
             !msl.contains("Xs"),
             "no X staging slab may exist in the A-device-direct rebuild:\n{msl}"
+        );
+        // The manual per-lane readout primitives must be present
+        // (get_capacity / get_multidimensional_index / operator[] on the
+        // cooperative C tile), and the store must target `out` directly
+        // (device-direct), not a threadgroup buffer.
+        assert!(msl.contains("_ct_c.get_capacity()"), "capacity readout missing:\n{msl}");
+        assert!(
+            msl.contains("_ct_c.get_multidimensional_index("),
+            "coordinate readout missing:\n{msl}"
+        );
+        // The readout loop (bounded by `coop_tile_capacity()`) must carry
+        // a compiler unroll pragma, per Apple's own MPP doc guidance for
+        // this exact accessor pattern (module docs #7) — without it, the
+        // occupancy win measured a wired regression instead (see module
+        // docs #7 for the earlier measurement).
+        assert!(
+            msl.contains("#pragma clang loop unroll(full)"),
+            "coop-tile-capacity-bounded readout loop must be compiler-unrolled \
+             (module docs #7):\n{msl}"
         );
     }
 }

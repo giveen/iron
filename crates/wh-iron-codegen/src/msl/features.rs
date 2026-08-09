@@ -213,7 +213,10 @@ impl MslGenerator {
             | Op::CoopTileLoadA { .. }
             | Op::CoopTileLoadB { .. }
             | Op::CoopTileRun { .. }
-            | Op::CoopTileStoreC { .. } => {
+            | Op::CoopTileStoreC { .. }
+            | Op::CoopTileCapacity { .. }
+            | Op::CoopTileCoord { .. }
+            | Op::CoopTileGet { .. } => {
                 feat.needs_mpp = true;
                 // CoopTile / MPP cooperative-matmul intrinsics use
                 // their own simdgroup binding internally and never
