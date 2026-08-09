@@ -638,6 +638,7 @@ impl DslBodyParser {
             "threadgroup_alloc" => self.parse_threadgroup_alloc(call),
             "threadgroup_load" => self.parse_threadgroup_load(call),
             "threadgroup_store" => self.parse_threadgroup_store(call),
+            "nvfp4_decode8_store" => self.parse_nvfp4_decode8_store(call),
             // Per-thread stack arrays — unqualified `T name[size];`, placed in registers by Metal.
             "stack_alloc" => self.parse_stack_alloc(call),
             "stack_load" => self.parse_stack_load(call),
@@ -1559,6 +1560,76 @@ impl DslBodyParser {
                 name: #name.to_string(),
                 index: ValueId::new(#idx_vid),
                 value: ValueId::new(#val_vid),
+            }
+        });
+        0
+    }
+
+    /// `nvfp4_decode8_store("tg_name", base_idx, packed, scale)` →
+    /// `Op::InlineMsl` escape-hatch call (no DSL result).
+    ///
+    /// SIMD-parallel NVFP4 E2M1 8-nibble decode: a straight-line bit-trick
+    /// that builds the eight IEEE-half bit patterns for
+    /// `magnitude * 2^-14` directly via fixed shift+mask on the packed
+    /// 32-bit word (no per-nibble variable shift, no per-nibble loop),
+    /// widens to float, multiplies by `scale`, and writes the 8 results
+    /// to `tg_name[base_idx .. base_idx+8)` as `half`.
+    ///
+    /// `packed` must be the 32-bit word holding the 8 E2M1 nibbles
+    /// LSB-first (nibble `k` at bits `[4k+3:4k]`) — exactly iron's `w`
+    /// buffer layout. `scale` must be the UNFOLDED per-group multiplier
+    /// (`iron_decode_e4m3(sraw) * global`, no extra `* 2^-14 * 0.5`) —
+    /// the half bit pattern already carries the 2^-14 renormalization and
+    /// the true (not doubled) magnitude, unlike the old integer-decode
+    /// convention. See `moe_gather_qmm_expert_mpp.rs` module docs #4 for
+    /// the bit-exactness argument (single correctly-rounded multiply,
+    /// same real product as the prior int-decode chain).
+    ///
+    /// `tg_name` must already be `threadgroup_alloc`'d as `f16`/`half` by
+    /// the caller — this escape hatch indexes it by its raw MSL name, so
+    /// there is no DSL-level aliasing check; keep this call's blast
+    /// radius to kernels that own that invariant locally.
+    fn parse_nvfp4_decode8_store(&mut self, call: &ExprCall) -> u32 {
+        let args: Vec<_> = call.args.iter().collect();
+        let name = string_lit_from_expr(args.first().unwrap_or(&&*call.func));
+        let base_vid = args.get(1).map(|a| self.parse_expr(a)).unwrap_or(0);
+        let packed_vid = args.get(2).map(|a| self.parse_expr(a)).unwrap_or(0);
+        let scale_vid = args.get(3).map(|a| self.parse_expr(a)).unwrap_or(0);
+        // _in0 = base_idx (uint), _in1 = packed (uint32_t), _in2 = scale (float).
+        // out[k] is nibble k, k=0..7, matching `dequantize<U,4>`'s walk order.
+        let source = format!(
+            "{{\n\
+             \x20   uint32_t _c = _in1;\n\
+             \x20   float _s = _in2;\n\
+             \x20   uint32_t _xe = _c & 0x0F0F0F0Fu;\n\
+             \x20   uint32_t _ge = _xe | (_xe << 3);\n\
+             \x20   uint32_t _yo = _c & 0xF0F0F0F0u;\n\
+             \x20   uint32_t _go = _yo | (_yo >> 3);\n\
+             \x20   float2 _v0 = float2(as_type<half2>((_ge << 9) & 0x8E008E00u)) * _s;\n\
+             \x20   float2 _v1 = float2(as_type<half2>((_go << 8) & 0x8E008E00u)) * _s;\n\
+             \x20   float2 _v2 = float2(as_type<half2>((_ge << 1) & 0x8E008E00u)) * _s;\n\
+             \x20   float2 _v3 = float2(as_type<half2>(_go & 0x8E008E00u)) * _s;\n\
+             \x20   uint32_t _b = _in0;\n\
+             \x20   {name}[_b + 0u] = half(_v0.x);\n\
+             \x20   {name}[_b + 1u] = half(_v1.x);\n\
+             \x20   {name}[_b + 2u] = half(_v2.x);\n\
+             \x20   {name}[_b + 3u] = half(_v3.x);\n\
+             \x20   {name}[_b + 4u] = half(_v0.y);\n\
+             \x20   {name}[_b + 5u] = half(_v1.y);\n\
+             \x20   {name}[_b + 6u] = half(_v2.y);\n\
+             \x20   {name}[_b + 7u] = half(_v3.y);\n\
+             }}",
+            name = name,
+        );
+        self.push_op_no_result(quote! {
+            Op::InlineMsl {
+                source: #source.to_string(),
+                inputs: vec![
+                    ValueId::new(#base_vid),
+                    ValueId::new(#packed_vid),
+                    ValueId::new(#scale_vid),
+                ],
+                outputs: vec![],
             }
         });
         0

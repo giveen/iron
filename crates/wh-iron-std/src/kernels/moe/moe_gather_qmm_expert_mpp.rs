@@ -29,10 +29,28 @@
 //!    under half's 65504 ceiling (the range-safe test below pins this).
 //!    `x` itself is raw f16 (|x| ≤ 65504 — 80× above the observed ~800
 //!    late-layer maximum; the caller's bf16→f16 cast should saturate).
-//! 4. **Integer E2M1 decode** — the nibble select-chain is replaced by a
-//!    shift decode: `v2 = ((2+(nib&1)) << ((nib&7)>>1)) >> 1` gives
-//!    `2·magnitude` for every nonzero code, with the ×0.5 folded into
-//!    the per-group scale. ~30% fewer ALU ops per staged weight.
+//! 4. **SIMD-parallel E2M1 decode** — the per-nibble variable-shift
+//!    integer decode (`v2 = ((2+(nib&1)) << ((nib&7)>>1)) >> 1`, a real
+//!    per-nibble loop with a data-dependent shift amount, so it can't be
+//!    done as one wide op) is replaced by `nvfp4_decode8_store`, a
+//!    straight-line bit-trick: all 8 nibbles of the packed 32-bit word
+//!    are decoded in ONE pass of fixed shift+mask+OR ops that build
+//!    IEEE-half bit patterns for `magnitude · 2^-14` directly (no
+//!    per-nibble branch, no per-nibble variable shift), widen to float,
+//!    and multiply by the per-group scale. `scale_fold`'s `×2^-14×0.5`
+//!    is DROPPED — that convention only existed to compensate the old
+//!    integer `2·magnitude` decode; the half bit pattern already encodes
+//!    the true magnitude and the 2^-14 renormalization, so the group
+//!    scale collapses to a plain
+//!    `iron_decode_e4m3(sraw) * global`. Bit-exactness argument: both the
+//!    old chain (`(2·magnitude_int) * (e4m3·global·2^-15)`) and the new
+//!    chain (`(magnitude·2^-14, exact via half) * (e4m3·global)`) round
+//!    the SAME real product exactly once (2^-14/2^-15 are exact
+//!    power-of-two scalings, so they commute with rounding) — IEEE 754
+//!    multiply is correctly-rounded, so identical real products round to
+//!    identical bits. Pinned by the byte-identical oracle gate (module's
+//!    `nvfp4_gather_expert_mpp` tests, incl. `scale_injection`/
+//!    `range_safe`), not just the paper argument above.
 //! 5. **One scale decode per lane per K-tile** — a lane's two packs are
 //!    always the same row AND the same `block_size=16` scale group
 //!    (`pack_id = lane·2` is even, so `pack_in_row ∈ {0,1}` or `{2,3}`,
@@ -145,9 +163,11 @@ pub fn iron_nvfp4_moe_gather_qmm_expert_mpp<T>(
     let pack_in_row0 = pack_id0 & 3u32; // 0 or 2
     let g_row = n_tile_base + w_row;
     // W-only T23 fold (module docs #3): staged w' = w · 2^-14, single
-    // ×2^14 compensation at store. The extra ×0.5 folds the integer
-    // E2M1 decode's 2·magnitude convention (module docs #4).
-    let scale_fold = global * 0.00006103515625f32 * 0.5f32; // global · 2^-14 · 0.5
+    // ×2^14 compensation at store. The SIMD-parallel decode's half
+    // bit-trick already bakes the 2^-14 renormalization AND the true
+    // (undoubled) magnitude into its output, so the group scale is now
+    // the plain e4m3 · global product — no extra constant fold here
+    // (module docs #4).
     let stage_comp = 16384.0f32; // 2^14
     // module docs #7: `OutScratch` is gone — `Ws` is now the only
     // threadgroup allocation (4 KiB, was 20 KiB).
@@ -207,23 +227,18 @@ pub fn iron_nvfp4_moe_gather_qmm_expert_mpp<T>(
             let k_off = kb + pack_in_row0 * 8u32;
             let sb_off = sb_expert_base + g_row * groups_per_row + k_off / block_size;
             let sraw = load(scales[sb_off]);
-            let scale = iron_decode_e4m3(sraw.cast::<u32>()) * scale_fold;
+            // Unfolded scale — see module docs #4 for why the old
+            // `* 2^-14 * 0.5` fold is gone.
+            let scale = iron_decode_e4m3(sraw.cast::<u32>()) * global;
             for _pi in range(0u32, 2u32, 1u32) {
                 let pack_in_row = pack_in_row0 + _pi;
                 let packed =
                     load(w[w_expert_pack + g_row * packs_per_row + kb / 8u32 + pack_in_row]);
                 let ws_base = w_row * 32u32 + pack_in_row * 8u32;
-                for _j in range(0u32, 8u32, 1u32) {
-                    let nib = (packed >> (_j * 4u32)) & 15u32;
-                    // Integer E2M1 decode (module docs #4): v2 = 2·|value|,
-                    // the ×0.5 lives in scale_fold.
-                    let m = nib & 7u32;
-                    let v2 = ((2u32 + (nib & 1u32)) << (m >> 1u32)) >> 1u32;
-                    let v2z = select(m == 0u32, 0u32, v2);
-                    let mag = v2z.cast::<f32>();
-                    let signed = select((nib & 8u32) != 0u32, -mag, mag);
-                    threadgroup_store("Ws", ws_base + _j, signed * scale);
-                }
+                // SIMD-parallel 8-nibble decode (module docs #4) —
+                // replaces the per-nibble variable-shift loop with one
+                // straight-line bit-trick call over the whole packed word.
+                nvfp4_decode8_store("Ws", ws_base, packed, scale);
             }
             threadgroup_barrier();
             if sg_active {
