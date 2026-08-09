@@ -60,6 +60,28 @@ pub fn iron_attn_head_gate<T>(
     store(out[idx], (a * s).cast::<T>());
 }
 
+/// Broadcast head-gate multiply — `out[i] = attn[i] * gate[i / head_dim]`.
+///
+/// Companion to `iron_attn_head_gate` above, but WITHOUT the sigmoid: the
+/// caller pre-activates `gate` (e.g. `softplus`) before calling this, so
+/// the kernel is a plain per-head-broadcast native-`T` multiply — the
+/// fused replacement for a host-built expand-id buffer -> `iron_gather`
+/// -> `iron_mul` pair (see `Ops.headGateMul` in the Butter host). Same
+/// `[n_heads, head_dim]` flat layout and `idx / head_dim` broadcast index
+/// as `iron_attn_head_gate`; grid is 1D elementwise, caller drives
+/// `grid_1d(n, 256)`.
+#[kernel]
+pub fn iron_head_gate_mul<T>(
+    attn: Tensor<T>,
+    gate: Tensor<T>,
+    out: Tensor<T>,
+    #[constexpr] head_dim: u32,
+) {
+    let idx = tid;
+    let g = idx / head_dim;
+    store(out[idx], load(attn[idx]) * load(gate[g]));
+}
+
 pub mod kernel_tests {
     use wh_iron::{test::*, test_kernel};
 
@@ -109,6 +131,66 @@ pub mod kernel_benches {
         let (n_heads, head_dim) = (64usize, 128usize);
         let n = n_heads * head_dim;
         BenchSetup::new(iron_attn_head_gate::kernel_ir_for(dt))
+            .buffer(BenchBuffer::random("attn", n, dt))
+            .buffer(BenchBuffer::random("gate", n_heads, dt))
+            .buffer(BenchBuffer::zeros("out", n, dt).output())
+            .constexpr("head_dim", head_dim as u32)
+            .grid_1d(n, 256)
+            .bytes_moved(((2 * n + n_heads) * dt.size_bytes()) as u64)
+    }
+}
+
+pub mod head_gate_mul_kernel_tests {
+    use wh_iron::{test::*, test_kernel};
+
+    use super::iron_head_gate_mul;
+    use crate::utils::{pack_f32, unpack_f32};
+
+    fn setup(n_heads: usize, head_dim: usize, dt: DType) -> TestSetup {
+        let n = n_heads * head_dim;
+        let attn: Vec<f32> = (0..n).map(|i| (i % 23) as f32 * 0.1 - 1.0).collect();
+        // Pre-activated gate (e.g. post-softplus) — plain positive scalars,
+        // no sigmoid applied by this kernel.
+        let gate: Vec<f32> = (0..n_heads).map(|h| (h % 7) as f32 * 0.3 + 0.05).collect();
+        let a_dt = unpack_f32(&pack_f32(&attn, dt), dt);
+        let g_dt = unpack_f32(&pack_f32(&gate, dt), dt);
+        let mut expected: Vec<f32> = Vec::with_capacity(n);
+        for h in 0..n_heads {
+            for d in 0..head_dim {
+                expected.push(a_dt[h * head_dim + d] * g_dt[h]);
+            }
+        }
+        TestSetup::new(iron_head_gate_mul::kernel_ir_for(dt))
+            .input(TestBuffer::from_vec("attn", pack_f32(&attn, dt), dt))
+            .input(TestBuffer::from_vec("gate", pack_f32(&gate, dt), dt))
+            .input(TestBuffer::zeros("out", n, dt))
+            .constexpr("head_dim", head_dim as u32)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_1d(n, 256)
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_head_gate_mul_step3_full(dt: DType) -> TestSetup { setup(64, 128, dt) }
+
+    /// SWA-layer shape variant — same rationale as the sigmoid kernel's
+    /// SWA test: validates the kernel doesn't bake the full-attn head
+    /// count in.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_head_gate_mul_step3_swa(dt: DType) -> TestSetup { setup(96, 128, dt) }
+}
+
+pub mod head_gate_mul_kernel_benches {
+    use wh_iron::{bench, test::*};
+
+    use super::iron_head_gate_mul;
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_head_gate_mul(dt: DType) -> BenchSetup {
+        // Step-3 full-attn shape (same as bench_attn_head_gate, for a
+        // direct GB/s comparison against the sigmoid-fused kernel).
+        let (n_heads, head_dim) = (64usize, 128usize);
+        let n = n_heads * head_dim;
+        BenchSetup::new(iron_head_gate_mul::kernel_ir_for(dt))
             .buffer(BenchBuffer::random("attn", n, dt))
             .buffer(BenchBuffer::random("gate", n_heads, dt))
             .buffer(BenchBuffer::zeros("out", n, dt).output())
