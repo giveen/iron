@@ -23,13 +23,16 @@ pub mod moe_gather_qmm;
 pub mod moe_gather_qmm_coop;
 pub mod moe_gather_qmm_coop_paired;
 pub mod moe_permute;
+pub mod moe_route_sort_plan_fused;
 pub mod moe_router_sigmoid_bias;
 pub mod moe_router_sqrtsoftplus;
 pub mod moe_router_topk;
 pub mod moe_router_topk_biased;
+pub mod moe_router_topk_biased_rows_fused;
 pub mod moe_sigmoid_bias;
 pub mod moe_sigmoid_bias_rows;
 pub mod moe_sort_plan_counting;
+pub mod moe_unpermute_tail;
 
 // MPP grouped BGEMM (one ABI, tile-geometry / bit-width variants; shared
 // test/bench helpers in `moe_mpp_shared`).

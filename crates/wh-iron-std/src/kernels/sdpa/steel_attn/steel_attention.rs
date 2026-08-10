@@ -345,7 +345,7 @@ pub mod kernel_benches {
     use super::iron_sdpa_prefill;
     use crate::{
         kernels::sdpa::steel_attn::{
-            steel_attention_mma::iron_sdpa_prefill_mma,
+            steel_attention_mma::{iron_sdpa_prefill_mma, iron_sdpa_prefill_mma_transbf16},
             steel_attention_mma_bf16::iron_sdpa_prefill_mma_bf16,
         },
         utils::{InputDomain, dtype_tol, input_buffer, mlx_tname},
@@ -499,9 +499,14 @@ pub mod kernel_benches {
         sdpa_b(iron_sdpa_prefill::kernel_ir_for(dt), dt)
     }
 
+    // W48: `iron_sdpa_prefill_mma` grew `position`/`k_real` constexprs;
+    // `position = k_len - q_len`, `k_real = k_len` reproduces `sdpa_b`'s
+    // own causal-only shape exactly (see `test_sdpa_prefill_mma` above).
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_sdpa_prefill_mma(dt: DType) -> BenchSetup {
         sdpa_b(iron_sdpa_prefill_mma::kernel_ir_for(dt), dt)
+            .constexpr("position", (K_LEN - Q_LEN) as u32)
+            .constexpr("k_real", K_LEN as u32)
     }
 
     // bf16-emulated MMA variant — the M2-family bf16 routing target. Only
@@ -512,6 +517,38 @@ pub mod kernel_benches {
     fn bench_sdpa_prefill_mma_bf16(dt: DType) -> BenchSetup {
         sdpa_b(iron_sdpa_prefill_mma_bf16::kernel_ir_for(dt), dt)
     }
+
+    // W58 fused-epilogue variant: f16 in, TRANSPOSED bf16 out. Folds the
+    // separate transpose + f16->bf16 cast dispatches into the MMA store
+    // epilogue. Concrete dtypes (f16 in / bf16 out), so the bench exists
+    // purely to drive emission (setup geometry + constexpr); it carries no
+    // MLX reference because the output layout ([q_len, n_q_heads*head_dim]
+    // bf16) differs from the steel_attention [B,H,qL,D] reference. Kernel
+    // correctness is gated at the butter level (fused-vs-separate byte
+    // identical, plus --dump-prefill-logits digest).
+    fn sdpa_b_transbf16() -> BenchSetup {
+        let q_elems = BATCH * N_Q_HEADS * Q_LEN * HEAD_DIM;
+        let kv_elems = BATCH * N_KV_HEADS * K_LEN * HEAD_DIM;
+        let scale = 1.0f32 / (HEAD_DIM as f32).sqrt();
+        BenchSetup::new(iron_sdpa_prefill_mma_transbf16::kernel_ir())
+            .mode(KernelMode::SimdGroup2D)
+            .buffer(input_buffer("q", q_elems, DType::F16, InputDomain::Signed))
+            .buffer(input_buffer("k", kv_elems, DType::F16, InputDomain::Signed))
+            .buffer(input_buffer("v", kv_elems, DType::F16, InputDomain::Signed))
+            .buffer(BenchBuffer::zeros("out", q_elems, DType::BF16).output())
+            .constexpr("q_len", Q_LEN as u32)
+            .constexpr("k_len", K_LEN as u32)
+            .constexpr("gqa_factor", GQA_FACTOR as u32)
+            .constexpr("n_q_heads", N_Q_HEADS as u32)
+            .constexpr("n_kv_heads", N_KV_HEADS as u32)
+            .constexpr("scale", scale)
+            .grid_3d(Q_LEN as u32 / BQ, N_Q_HEADS as u32, BATCH as u32, [TPG, 1, 1])
+            .bytes_moved(((2 * q_elems + 2 * kv_elems) * 2) as u64)
+            .flops(4 * (N_Q_HEADS as u64) * (Q_LEN as u64) * (K_LEN as u64) * (HEAD_DIM as u64))
+    }
+
+    #[bench(dtypes = [f16])]
+    fn bench_sdpa_prefill_mma_transbf16(_dt: DType) -> BenchSetup { sdpa_b_transbf16() }
 }
 
 /// New-syntax correctness tests for the SDPA-prefill family — ports the
@@ -637,9 +674,19 @@ pub mod kernel_tests {
     fn test_sdpa_prefill(dt: DType) -> TestSetup {
         sdpa_setup(iron_sdpa_prefill::kernel_ir_for(dt), dt)
     }
+    // W48: `iron_sdpa_prefill_mma` grew `position`/`k_real` constexprs
+    // (direct-KV extension, see steel_attention_mma.rs). `sdpa_setup`
+    // above is shared with `iron_sdpa_prefill`/`iron_sdpa_prefill_mma_bf16`
+    // (unchanged signatures), so this variant sets the two extra
+    // constexprs itself: `position = k_len - q_len`, `k_real = k_len`
+    // reproduces `sdpa_setup`'s own causal-only oracle exactly (no pad
+    // region here — that's covered by steel_attention_mma.rs's dedicated
+    // `test_iron_sdpa_prefill_mma_direct_kv_padded*` tests).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_mma(dt: DType) -> TestSetup {
         sdpa_setup(iron_sdpa_prefill_mma::kernel_ir_for(dt), dt)
+            .constexpr("position", (K_LEN - Q_LEN) as u32)
+            .constexpr("k_real", K_LEN as u32)
     }
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [2e-2, 5e-2, 2e-1])]
     fn test_sdpa_prefill_mma_bf16(dt: DType) -> TestSetup {

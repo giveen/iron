@@ -109,6 +109,13 @@ fn run_sdpa_prefill(
     buffers.insert("n_q_heads".into(), (n_heads as u32).to_le_bytes().to_vec());
     buffers.insert("n_kv_heads".into(), (n_kv_heads as u32).to_le_bytes().to_vec());
     buffers.insert("scale".into(), scale.to_le_bytes().to_vec());
+    // W48 direct-KV extension: every call site here dispatches a single,
+    // unpadded chunk with q_len == k_len == t, so `position = k_len -
+    // q_len = 0` and `k_real = k_len = t` reproduce the pre-W48 pure-
+    // causal behavior exactly (see steel_attention_mma.rs's doc comment
+    // on the new params).
+    buffers.insert("position".into(), 0u32.to_le_bytes().to_vec());
+    buffers.insert("k_real".into(), (t as u32).to_le_bytes().to_vec());
 
     let mut kernel = iron_sdpa_prefill_mma::kernel_ir_for(dt.to_dtype());
     // SimdGroup2D is the bench's dispatch mode for this kernel (see
