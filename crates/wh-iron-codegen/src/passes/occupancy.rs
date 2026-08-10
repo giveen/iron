@@ -142,13 +142,43 @@ pub fn estimate_occupancy(
     let thr_occ = limits.max_threads_per_tg as f64 / threadgroup_size as f64;
     let thr_occ = thr_occ.min(1.0);
 
-    // --- Threadgroup memory ---
+    // --- Threadgroup memory: multi-TG residency, not a per-TG ratio ---
     //
-    // Hard ceiling: max 32 KB per threadgroup on Apple GPUs.
-    let mem_occ = if let Some(mem_used) = tg_mem_usage_bytes {
-        if mem_used == 0 { 1.0 } else { (limits.tg_memory_bytes as f64 / mem_used as f64).min(1.0) }
-    } else {
-        1.0
+    // Threadgroup memory on Apple GPUs is a single ~32KB SRAM pool SHARED by
+    // all threadgroups co-resident on a shader core — it is not a private
+    // budget with headroom above one TG's own usage. A single TG's static
+    // allocation can never legally exceed the pool (it wouldn't compile), so
+    // a plain `pool / mem_used` ratio is always >= 1.0 and can never signal
+    // a memory-bound kernel. Instead we compute how many TGs of this
+    // footprint can be co-resident in the pool at once — a residency count,
+    // exactly like the thread-count dimension below — and only THEN turn
+    // that into an occupancy fraction relative to what the thread dimension
+    // alone would allow.
+    //
+    // `None` (no TG-memory estimate supplied) or `Some(0)` (kernel uses no
+    // threadgroup memory) both mean "memory does not constrain residency".
+    let mem_limited_tgs: Option<u32> = match tg_mem_usage_bytes {
+        None | Some(0) => None,
+        Some(mem_used) => Some(limits.tg_memory_bytes / mem_used),
+    };
+
+    // --- Thread-count residency, as a TG count (not just a ratio) ---
+    //
+    // Reuses the same max-threads-per-TG hard limit as `thr_occ` above to
+    // express "how many TGs of this size could be co-resident" purely from
+    // a thread-count standpoint, so it's directly comparable to
+    // `mem_limited_tgs`. For any legal threadgroup size (<= the hard per-TG
+    // limit) this divides out to >= 1 automatically; a threadgroup size
+    // that already exceeds the hard limit (invalid on its own terms) floors
+    // to 0, correctly signaling "can't even fit one".
+    let thread_limited_tgs = limits.max_threads_per_tg / threadgroup_size.max(1);
+
+    // Fold memory residency back into an occupancy fraction: relative to the
+    // number of TGs the thread dimension alone would allow, how many can
+    // actually be resident once threadgroup memory is accounted for.
+    let mem_occ = match mem_limited_tgs {
+        None => 1.0,
+        Some(m) => (m as f64 / thread_limited_tgs.max(1) as f64).min(1.0),
     };
 
     // Occupancy is the minimum across all dimensions.
@@ -170,9 +200,19 @@ pub fn estimate_occupancy(
         Bottleneck::ThreadLimited
     };
 
-    let max_tgs = if occ > 0.0 { Some((1.0 / occ).round() as u32) } else { None };
+    // Residency count: the real number of TGs that can be co-resident on a
+    // core, taking BOTH dimensions into account — not derived from the
+    // blended fraction above (which mixes in the soft register-pressure
+    // signal and would give a misleadingly high count for memory-bound
+    // kernels; e.g. a 20KiB/TG kernel at TG=256 has thr_occ==1.0 and
+    // reg_occ==1.0, so 1/occ would report 4 residency slots when the true
+    // memory-bound answer is 1).
+    let max_tgs_per_cu = Some(match mem_limited_tgs {
+        None => thread_limited_tgs,
+        Some(m) => thread_limited_tgs.min(m),
+    });
 
-    OccupancyEstimate { occupancy_pct: occ * 100.0, bottleneck, max_tgs_per_cu: max_tgs }
+    OccupancyEstimate { occupancy_pct: occ * 100.0, bottleneck, max_tgs_per_cu }
 }
 
 /// Convenience: estimate occupancy for common threadgroup sizes and return the best.
@@ -214,6 +254,28 @@ mod tests {
     }
 
     #[test]
+    fn no_tg_memory_is_not_memory_limited() {
+        // A kernel that reports zero threadgroup-memory usage must not be
+        // treated as memory-constrained (Some(0) behaves like None).
+        let k = Kernel::new("no_shmem");
+        let est = estimate_occupancy(&k, 256, Some(0));
+        assert!((est.occupancy_pct - 100.0).abs() < 0.1);
+        assert_eq!(est.bottleneck, Bottleneck::ThreadLimited);
+        assert_eq!(est.max_tgs_per_cu, Some(4)); // 1024 / 256, thread-bound only
+    }
+
+    #[test]
+    fn low_tg_memory_stays_thread_limited() {
+        // 1KiB/TG at TG=1024 easily fits 32 TGs in the memory pool, but the
+        // thread dimension only allows 1 TG of this size to begin with —
+        // memory must not spuriously become the reported bottleneck.
+        let k = Kernel::new("low_shmem");
+        let est = estimate_occupancy(&k, 1024, Some(1024));
+        assert_eq!(est.bottleneck, Bottleneck::ThreadLimited);
+        assert_eq!(est.max_tgs_per_cu, Some(1));
+    }
+
+    #[test]
     fn register_heavy_kernel_reduced_occupancy() {
         let mut k = Kernel::new("regheavy");
         // Push 100 const ops → ~150 regs/thread → occupancy ~85%
@@ -243,5 +305,50 @@ mod tests {
         let best = best_threadgroup_size(&k, candidates).unwrap();
         // Empty kernel: all threadgroup sizes give 100%, tie breaks to first (64).
         assert_eq!(best.0, 64);
+    }
+
+    // --- Regression coverage for the memory-residency fix ---
+    //
+    // Before this fix, `mem_occ` was computed as `min(32768/mem_used, 1.0)`,
+    // which is structurally always >= 1.0 for any legally-compiled kernel
+    // (a single TG's allocation can never exceed the 32KB hard cap) — so
+    // `Bottleneck::MemoryLimited` could never be reported and
+    // `max_tgs_per_cu` was meaningless. These pin the corrected residency-
+    // count model: `mem_tgs = floor(32KB / bytes_per_tg)`, combined with the
+    // thread dimension via `min(thread_limited_tgs, mem_limited_tgs)`.
+
+    #[test]
+    fn high_tg_memory_reports_single_resident_tg() {
+        // moe_gather_qmm_expert_mpp-shaped case: ~20KiB/TG (Ws 4KiB +
+        // OutScratch 16KiB). 32768 / 20480 = 1 (floor) -> exactly one
+        // resident threadgroup per core, and memory is the binding
+        // constraint (thread dimension alone would allow 4 @ TG=256).
+        let k = Kernel::new("moe_gather_qmm_expert_mpp_like");
+        let est = estimate_occupancy(&k, 256, Some(20 * 1024));
+        assert_eq!(est.max_tgs_per_cu, Some(1));
+        assert_eq!(est.bottleneck, Bottleneck::MemoryLimited);
+        assert!(est.occupancy_pct < 30.0, "expected low occupancy, got {}", est.occupancy_pct);
+    }
+
+    #[test]
+    fn moderate_tg_memory_reports_three_resident_tgs() {
+        // mlx.fast-equivalent case: ~9KiB/TG (register-direct accumulator,
+        // no OutScratch). 32768 / 9216 = 3 (floor) -> three resident TGs,
+        // still memory-bound relative to the thread dimension (8 @ TG=128).
+        let k = Kernel::new("register_direct_accumulator_like");
+        let est = estimate_occupancy(&k, 128, Some(9 * 1024));
+        assert_eq!(est.max_tgs_per_cu, Some(3));
+        assert_eq!(est.bottleneck, Bottleneck::MemoryLimited);
+    }
+
+    #[test]
+    fn low_tg_memory_is_not_memory_limited() {
+        // A small, comfortable TG-memory footprint should never become the
+        // reported bottleneck or drag max_tgs_per_cu below what the thread
+        // dimension alone allows.
+        let k = Kernel::new("small_shmem");
+        let est = estimate_occupancy(&k, 256, Some(512)); // 32768/512 = 64 TGs worth
+        assert_ne!(est.bottleneck, Bottleneck::MemoryLimited);
+        assert_eq!(est.max_tgs_per_cu, Some(4)); // thread-bound: 1024/256
     }
 }
