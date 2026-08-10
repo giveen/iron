@@ -15,7 +15,15 @@ use wh_iron_codegen::{
 use wh_iron_core::{
     DType,
     ir::{Kernel, ParamKind},
-    protocol::{ArtifactKind, BenchResult, BuildError, BuildResult, ProtocolMessage, TestResult},
+    protocol::{
+        ArtifactKind,
+        BenchResult,
+        BuildError,
+        BuildResult,
+        ProfileInfo,
+        ProtocolMessage,
+        TestResult,
+    },
 };
 
 use crate::{
@@ -28,6 +36,7 @@ use crate::{
         args::{RunnerArgs, RunnerCommand},
         emit::emit_stdout,
         gpu::{BENCH_ITERS, BENCH_WARMUP, GpuBuffer, GpuRunner, bench_gbps_with, read_typed},
+        profile::estimate_profile,
     },
 };
 
@@ -152,7 +161,9 @@ impl RunnerHarness {
         let mut failed = 0u32;
 
         for (bench, dt, family) in work {
-            if let Some(result) = run_one_bench(&runner, bench, dt, family, warmup, iters) {
+            if let Some(result) =
+                run_one_bench(&runner, bench, dt, family, warmup, iters, args.profile)
+            {
                 if result.correct {
                     passed += 1;
                 } else {
@@ -860,6 +871,7 @@ fn run_one_bench(
     family: &str,
     warmup: usize,
     iters: usize,
+    profile: bool,
 ) -> Option<BenchResult> {
     let setup: BenchSetup = bench.setup(dt);
     let bytes_moved = bench.bytes_moved(&setup);
@@ -963,6 +975,24 @@ fn run_one_bench(
         format!("N={suffix}")
     });
 
+    // CPU-side occupancy/register/bottleneck estimate, only when `--profile`
+    // was requested (the CLI passes it for `-v`/`-vv`). `estimate_profile` runs
+    // a whole extra pass-pipeline clone per kernel, so skip it on the default
+    // (non-verbose) path to keep plain `iron bench` fast.
+    let profile_info = if profile {
+        estimate_profile(kernel).map(|p| ProfileInfo {
+            gflops: None,
+            pct_peak_bw: None,
+            pct_peak_flops: None,
+            arith_intensity: None,
+            occ_pct: Some(p.occ_pct),
+            regs_per_thread: Some(p.regs_per_thread as u32),
+            bottleneck: Some(p.raw_bottleneck.to_string()),
+        })
+    } else {
+        None
+    };
+
     Some(BenchResult {
         name,
         group: family.to_string(),
@@ -974,7 +1004,7 @@ fn run_one_bench(
         correct,
         min_us: stats.min_us,
         mean_us: stats.mean_us,
-        profile: None,
+        profile: profile_info,
     })
 }
 

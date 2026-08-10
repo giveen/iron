@@ -131,31 +131,33 @@ impl SuitePrinter {
             },
             None => paint_stdout("—", Style::new().fg(Color::BrightBlack).dim()),
         };
-        // Compact profile suffix (Phase-2 wire path): GFLOP/s + bottleneck when
-        // the runner attached a profile. The full `-v` roofline table is the
-        // in-process `print_batch` path; this keeps the streamed line readable
-        // while still surfacing the headline derived metrics off the wire.
-        let profile_part = match &r.profile {
-            Some(p) => {
-                let mut bits = Vec::new();
-                if let Some(g) = p.gflops {
-                    bits.push(format!("{g:.1} GFLOP/s"));
-                }
-                if let Some(b) = &p.bottleneck {
-                    bits.push(b.clone());
-                }
-                if bits.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "  {}",
-                        paint_stdout(bits.join(" · "), Style::new().fg(Color::BrightBlack))
-                    )
-                }
-            },
-            None => String::new(),
+        // `-v`/`-vv` profile columns: occupancy% / registers-per-thread /
+        // bottleneck, estimated CPU-side by `estimate_profile` and attached to
+        // the wire `BenchResult` only when the runner was invoked with
+        // `--profile` (i.e. `verbose >= 1`, see `cmd::bench::run`). Reuses the
+        // same fixed-width cell renderers as the `-v` roofline table
+        // (`fmt_occ`/`fmt_regs`/`fmt_bottleneck`) so the columns line up the
+        // same way whether the row came through this streamed path or
+        // `print_data_row`. Degrades to dashes — never fabricated — when no
+        // profile was attached (non-verbose runs, or an estimate that failed).
+        let profile_cols = if self.verbose >= 1 {
+            let occ = r.profile.as_ref().and_then(|p| p.occ_pct);
+            let regs = r.profile.as_ref().and_then(|p| p.regs_per_thread).map(|n| n as usize);
+            let bottleneck = r.profile.as_ref().and_then(|p| p.bottleneck.as_deref());
+            let sep = col_sep();
+            format!(
+                "  {} {} {} {} {} {}",
+                sep,
+                fmt_occ(occ, OCC_COL_W),
+                sep,
+                fmt_regs(regs, REGS_COL_W),
+                sep,
+                fmt_bottleneck(bottleneck, BN_COL_W),
+            )
+        } else {
+            String::new()
         };
-        println!("  {ok_sym}  {label}{shape_part}  {mt}  {ref_part}  {pct_part}{profile_part}");
+        println!("  {ok_sym}  {label}{shape_part}  {mt}  {ref_part}  {pct_part}{profile_cols}");
         self.flush();
     }
 
