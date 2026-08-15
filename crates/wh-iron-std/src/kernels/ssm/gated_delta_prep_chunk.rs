@@ -402,6 +402,121 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
     }
 }
 
+/// F-85 prefill wave (Qwen3.6-27B port, `wh-butter-models::qwen35`):
+/// CYCLIC-GQA sibling of `iron_gated_delta_prep_chunk_fast_d128_128_48_16`.
+///
+/// Byte-for-byte identical to `iron_gated_delta_prep_chunk_fast` above
+/// except ONE line: `hk_idx = hv_idx % HK` (cyclic) instead of `hv_idx /
+/// hk_per_hv` (block, this family's default). This port's checkpoint
+/// needs the CYCLIC mapping — verified by oracle checksum diff during the
+/// decode port (`attn_output` matched to 0.01% only after switching from
+/// block to cyclic, see `wh-butter-models::qwen35`'s `gdn_gqa_cyclic_idx` doc and
+/// `gated_delta_qwen35_decode_fused.rs`'s `iron_gdn_decode_fused`, which
+/// bakes the SAME cyclic mapping into its own decode-step kernel for the
+/// identical reason). At Hv=48/Hk=16 the two mappings agree for NO
+/// `hv_idx` in general (block groups `{0,1,2}->hk0, {3,4,5}->hk1, ...`;
+/// cyclic assigns `{0,16,32}->hk0, {1,17,33}->hk1, ...` — disjoint
+/// groupings), so this is not a rare-edge-case fix, every GDN layer's
+/// prefill output depends on it.
+///
+/// A SEPARATE kernel (not a modified variant of the shared
+/// `iron_gated_delta_prep_chunk_fast<T>` template) since the block mapping
+/// remains the correct family default other callers may still rely on —
+/// this port's Hv=48/Hk=16 checkpoint is the only one confirmed (via the
+/// decode-path oracle diff) to need cyclic; whether Qwen3.6-35B-A3B's
+/// checkpoint (Hv=32/Hk=16, `_d128_128_32_16`) also needs it is unverified
+/// and out of scope here — do not assume it does without the same oracle
+/// check that caught this for 27B.
+#[kernel(variants(
+    DK = [128u32],
+    DV = [128u32],
+    HV = [48u32],
+    HK = [16u32],
+    NPT = [4],
+    suffix = "d{DK}_{DV}_{HV}_{HK}"
+))]
+pub fn iron_gated_delta_prep_chunk_fast_cyclic<T>(
+    conv_out: Tensor<T>, // [B, T, 2·Hk·Dk + Hv·Dv]  (v slab; q/k slabs unused here)
+    a_log: Tensor<T>,    // [Hv]
+    dt_bias: Tensor<T>,  // [Hv]
+    a_raw: Tensor<T>,    // [B, T, Hv]
+    b_raw: Tensor<T>,    // [B, T, Hv]
+    q_normed: Tensor<T>, // [B, T, Hk, Dk]  from iron_gated_delta_qknorm_prepass
+    k_normed: Tensor<T>, // [B, T, Hk, Dk]  from iron_gated_delta_qknorm_prepass
+    state_in: Tensor<T>, // [B, Hv, Dv, Dk]
+    mut state_out: Tensor<T>, // [B, Hv, Dv, Dk]
+    mut y: Tensor<T>,    // [B, T, Hv, Dv]
+    t_len: Tensor<u32>,  // [1] scalar
+) {
+    let sg = simd_group_id();
+    let dk_idx = simd_lane;
+    let dv_idx = tgid_x * 4u32 + sg;
+    let n = tgid_y;
+    let hv_idx = n - (n / HV) * HV;
+    let b = n / HV;
+    // CYCLIC GQA -- the one line different from `iron_gated_delta_prep_chunk_fast`.
+    let hk_idx = hv_idx - (hv_idx / HK) * HK;
+    let t_total = load(t_len[0]);
+    let stride_b = 2u32 * HK * DK + HV * DV;
+    if dv_idx < DV {
+        let a_log_val = load(a_log[hv_idx]).cast::<f32>();
+        let dt_bias_val = load(dt_bias[hv_idx]).cast::<f32>();
+        let exp_a_log = exp(a_log_val);
+        let state_base = n * DV * DK + dv_idx * DK;
+        stack_alloc("state_reg", NPT, "f32");
+        for i in range(0u32, NPT, 1u32) {
+            let s_idx = NPT * dk_idx + i;
+            let val = load(state_in[state_base + s_idx]).cast::<f32>();
+            stack_store("state_reg", i, val);
+        }
+        stack_alloc("k_cache", NPT, "f32");
+        for t in range(0u32, t_total, 1u32) {
+            let bt = b * t_total + t;
+            let conv_base = bt * stride_b;
+            let v_off = conv_base + 2u32 * HK * DK + hv_idx * DV;
+            let qk_off = (bt * HK + hk_idx) * DK;
+            let gbeta_idx = bt * HV + hv_idx;
+            let a_raw_val = load(a_raw[gbeta_idx]).cast::<f32>();
+            let b_raw_val = load(b_raw[gbeta_idx]).cast::<f32>();
+            let pre_softplus = a_raw_val + dt_bias_val;
+            let dt_val = log(exp(pre_softplus) + 1.0f32);
+            let g_val = exp(0.0f32 - exp_a_log * dt_val);
+            let beta_val = 1.0f32 / (1.0f32 + exp(0.0f32 - b_raw_val));
+            let v_val = load(conv_out[v_off + dv_idx]).cast::<f32>();
+            let mut kv_mem = 0.0f32;
+            for i in range(0u32, NPT, 1u32) {
+                let s_idx = NPT * dk_idx + i;
+                let s_old = stack_load("state_reg", i);
+                let s_decayed = s_old * g_val;
+                stack_store("state_reg", i, s_decayed);
+                let k_normed_val = load(k_normed[qk_off + s_idx]).cast::<f32>();
+                stack_store("k_cache", i, k_normed_val);
+                kv_mem = kv_mem + s_decayed * k_normed_val;
+            }
+            let kv_mem_sum = simd_sum(kv_mem);
+            let delta = (v_val - kv_mem_sum) * beta_val;
+            let mut out_acc = 0.0f32;
+            for i in range(0u32, NPT, 1u32) {
+                let s_idx = NPT * dk_idx + i;
+                let s_decayed = stack_load("state_reg", i);
+                let k_normed_val = stack_load("k_cache", i);
+                let s_new = s_decayed + k_normed_val * delta;
+                stack_store("state_reg", i, s_new);
+                let q_normed_val = load(q_normed[qk_off + s_idx]).cast::<f32>();
+                out_acc = out_acc + s_new * q_normed_val;
+            }
+            let out_sum = simd_sum(out_acc);
+            if dk_idx == 0u32 {
+                store(y[(bt * HV + hv_idx) * DV + dv_idx], out_sum.cast::<T>());
+            }
+        }
+        for i in range(0u32, NPT, 1u32) {
+            let s_idx = NPT * dk_idx + i;
+            store(state_out[state_base + s_idx], stack_load("state_reg", i).cast::<T>());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use wh_iron::core::{DType, ir::KernelMode};
@@ -450,6 +565,7 @@ pub mod kernel_tests {
 
     use super::{
         iron_gated_delta_prep_chunk,
+        iron_gated_delta_prep_chunk_fast_cyclic_d128_128_48_16,
         iron_gated_delta_prep_chunk_fast_d64_8_4_2,
         iron_gated_delta_prep_chunk_fast_d128_128_32_16,
         iron_gated_delta_prep_chunk_fast_d128_128_48_16,
@@ -643,6 +759,69 @@ pub mod kernel_tests {
             planes[plane_off..plane_off + state.len()].copy_from_slice(&state);
         }
         (y, state, planes)
+    }
+
+    /// CYCLIC-GQA sibling of `oracle` above, for
+    /// `iron_gated_delta_prep_chunk_fast_cyclic_d128_128_48_16`'s
+    /// correctness fixture -- identical except `hk_idx = hv_idx % hk`
+    /// instead of `hv_idx / hk_per_hv`. See that kernel's doc for why this
+    /// port needs the cyclic mapping.
+    #[allow(clippy::too_many_arguments)]
+    fn oracle_cyclic(
+        conv_out: &[f32],
+        a_log: &[f32],
+        dt_bias: &[f32],
+        a_raw: &[f32],
+        b_raw: &[f32],
+        q_normed: &[f32],
+        k_normed: &[f32],
+        state_in: &[f32],
+        b: usize,
+        t_total: usize,
+        hv: usize,
+        hk: usize,
+        dv: usize,
+        dk: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
+        let stride_b = 2 * hk * dk + hv * dv;
+        let mut y = vec![0.0_f32; b * t_total * hv * dv];
+        let mut state = state_in.to_vec();
+        for batch in 0..b {
+            for t in 0..t_total {
+                let bt = batch * t_total + t;
+                let conv_base = bt * stride_b;
+                let v_base = conv_base + 2 * hk * dk;
+                for hv_idx in 0..hv {
+                    let n = batch * hv + hv_idx;
+                    let hk_idx = hv_idx % hk; // CYCLIC (the one difference vs `oracle`)
+                    let qk_base = (bt * hk + hk_idx) * dk;
+                    let gbeta_idx = bt * hv + hv_idx;
+                    let dt = softplus_unclamped(a_raw[gbeta_idx] + dt_bias[hv_idx]);
+                    let g_val = (-a_log[hv_idx].exp() * dt).exp();
+                    let beta_val = sigmoid(b_raw[gbeta_idx]);
+                    for dv_idx in 0..dv {
+                        let v_val = conv_out[v_base + hv_idx * dv + dv_idx];
+                        let s_base = n * dv * dk + dv_idx * dk;
+                        let mut kv_mem = 0.0_f32;
+                        let mut decayed = vec![0.0_f32; dk];
+                        for d in 0..dk {
+                            let s = state[s_base + d] * g_val;
+                            decayed[d] = s;
+                            kv_mem += s * k_normed[qk_base + d];
+                        }
+                        let delta = (v_val - kv_mem) * beta_val;
+                        let mut out = 0.0_f32;
+                        for d in 0..dk {
+                            let s_new = decayed[d] + k_normed[qk_base + d] * delta;
+                            state[s_base + d] = s_new;
+                            out += s_new * q_normed[qk_base + d];
+                        }
+                        y[(bt * hv + hv_idx) * dv + dv_idx] = out;
+                    }
+                }
+            }
+        }
+        (y, state)
     }
 
     /// Small fused chunked GDN-prep shape: dk a multiple of 32, Hv divisible by
@@ -1061,6 +1240,114 @@ pub mod kernel_tests {
             0.01,
             -3.0,
             false,
+            dt,
+        )
+    }
+
+    /// CYCLIC-GQA sibling of `setup_fast` above -- identical fixture math,
+    /// but drives `oracle_cyclic` instead of `oracle` so the expected `y`/
+    /// `state_out` match `iron_gated_delta_prep_chunk_fast_cyclic_*`'s
+    /// baked-in `hk_idx = hv_idx % HK` mapping.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_fast_cyclic(
+        ir: wh_iron::core::ir::Kernel,
+        b: usize,
+        t_total: usize,
+        hv: usize,
+        hk: usize,
+        dv: usize,
+        dk: usize,
+        weight_scale: f32,
+        conv_scale: f32,
+        state_scale: f32,
+        a_log0: f32,
+        dt: DType,
+    ) -> TestSetup {
+        let n_total = b * hv;
+        let stride_b = 2 * hk * dk + hv * dv;
+        let conv_out: Vec<f32> =
+            (0..b * t_total * stride_b).map(|i| ((i as f32) * 0.0131).sin() * conv_scale).collect();
+        let a_log: Vec<f32> = (0..hv).map(|i| a_log0 - (i as f32) * 0.05).collect();
+        let dt_bias: Vec<f32> = (0..hv).map(|i| -0.5 + (i as f32) * 0.05).collect();
+        let a_raw: Vec<f32> = (0..b * t_total * hv).map(|i| -0.3 + (i as f32) * 0.01).collect();
+        let b_raw: Vec<f32> = (0..b * t_total * hv).map(|i| -0.2 + (i as f32) * 0.008).collect();
+        let q_norm_weight: Vec<f32> =
+            (0..hk * dk).map(|i| weight_scale * (1.0 + ((i % 11) as f32) * 0.05)).collect();
+        let k_norm_weight: Vec<f32> =
+            (0..hk * dk).map(|i| weight_scale * (1.0 + ((i % 13) as f32) * 0.04)).collect();
+        let state_in: Vec<f32> =
+            (0..n_total * dv * dk).map(|i| ((i as f32) * 0.0073).cos() * state_scale).collect();
+
+        let r = |xs: &[f32]| unpack_f32(&pack_f32(xs, dt), dt);
+        let (q_normed, k_normed) = qk_norm(
+            &r(&conv_out),
+            &r(&q_norm_weight),
+            &r(&k_norm_weight),
+            b,
+            t_total,
+            hv,
+            hk,
+            dv,
+            dk,
+        );
+        let (q_normed, k_normed) = (r(&q_normed), r(&k_normed));
+        let (y_exp, state_exp) = oracle_cyclic(
+            &r(&conv_out),
+            &r(&a_log),
+            &r(&dt_bias),
+            &r(&a_raw),
+            &r(&b_raw),
+            &q_normed,
+            &k_normed,
+            &r(&state_in),
+            b,
+            t_total,
+            hv,
+            hk,
+            dv,
+            dk,
+        );
+
+        TestSetup::new(ir)
+            .mode(KernelMode::Reduction)
+            .input(TestBuffer::from_vec("conv_out", pack_f32(&conv_out, dt), dt))
+            .input(TestBuffer::from_vec("a_log", pack_f32(&a_log, dt), dt))
+            .input(TestBuffer::from_vec("dt_bias", pack_f32(&dt_bias, dt), dt))
+            .input(TestBuffer::from_vec("a_raw", pack_f32(&a_raw, dt), dt))
+            .input(TestBuffer::from_vec("b_raw", pack_f32(&b_raw, dt), dt))
+            .input(TestBuffer::from_vec("q_normed", pack_f32(&q_normed, dt), dt))
+            .input(TestBuffer::from_vec("k_normed", pack_f32(&k_normed, dt), dt))
+            .input(TestBuffer::from_vec("state_in", pack_f32(&state_in, dt), dt))
+            .input(TestBuffer::zeros("state_out", state_in.len(), dt))
+            .input(TestBuffer::zeros("y", b * t_total * hv * dv, dt))
+            .input(TestBuffer::from_vec(
+                "t_len",
+                (t_total as u32).to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .expect(TestBuffer::from_vec("y", pack_f32(&y_exp, dt), dt))
+            .expect(TestBuffer::from_vec("state_out", pack_f32(&state_exp, dt), dt))
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+    }
+
+    // Qwen3.6-27B production shape, CYCLIC GQA mapping (see
+    // `iron_gated_delta_prep_chunk_fast_cyclic`'s doc) -- same fixture
+    // params/tol rationale as `test_iron_gated_delta_prep_chunk_fast_d128_128_48_16`,
+    // only the GQA mapping (and hence which `oracle*` fn) differs.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_fast_cyclic_d128_128_48_16(dt: DType) -> TestSetup {
+        setup_fast_cyclic(
+            iron_gated_delta_prep_chunk_fast_cyclic_d128_128_48_16::kernel_ir_for(dt),
+            1,
+            3,
+            48,
+            16,
+            128,
+            128,
+            0.3,
+            0.02,
+            0.01,
+            -3.0,
             dt,
         )
     }
