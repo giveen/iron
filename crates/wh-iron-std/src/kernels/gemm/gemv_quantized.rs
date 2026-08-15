@@ -426,6 +426,144 @@ pub fn iron_gemv_q4_coalesced_2row<T>(
     }
 }
 
+/// M-WAY BATCHED Q4 coalesced matvec — reads each weight row's DRAM ONCE
+/// and applies it to `m` independent activation vectors, producing `m`
+/// independent dot products per row. Sibling of `iron_gemv_q4_coalesced`
+/// (M=1); built for MTP speculative-decode BATCHED VERIFY, where γ+1
+/// candidate positions each carry their own hidden state but share every
+/// dense projection's weight matrix — this amortizes the weight-DRAM read
+/// γ+1-fold instead of paying it once per position (the whole point: decode
+/// is bandwidth-bound on these cold Q4 weights, see the module doc).
+///
+/// Nibble unpacking is done ONCE per word into a small `qv` register stack
+/// and reused across all `m` activations — dequant is ALU-bound (~56 ops/
+/// word vs 1 load, see `iron_gemv_q4_coalesced_relu2`'s doc), so sharing it
+/// m-fold (instead of re-unpacking per activation) is the actual lever here,
+/// not just the weight-DRAM saving.
+///
+/// `x` is `[m, n_groups*k_in]` (each candidate's own activation row,
+/// row-major — same per-row grouping convention as the M=1 kernel's
+/// `rows_per_group`); `out` is `[m, m_out]`.
+///
+/// BIT-EXACTNESS vs calling `iron_gemv_q4_coalesced` once per `t in 0..m`:
+/// for a fixed `t`, this kernel's `j`-loop order (`range(lane, nwords,
+/// 32)`), per-word 8-nibble unpack order, and `d*blk` word-accumulate order
+/// are IDENTICAL to the M=1 kernel's — only the accumulator storage
+/// (`stack_alloc` slot `t` vs a plain register) differs, which does not
+/// change the floating-point operation sequence. `simd_sum`'s reduction
+/// tree is deterministic for a fixed lane/warp geometry, so each `t`'s
+/// final `total` reproduces the M=1 kernel's result bit-for-bit — required
+/// for the spec-decode correctness bar (argmax must not drift from the
+/// sequential-verify path).
+///
+/// CONTRACT / IMPLEMENTATION NOTE — compile-time `M` variants, not a
+/// runtime loop bound:
+///
+/// A first version made `m` an ordinary `#[constexpr]` (a dispatch-time
+/// scalar binding, like `k_in`/`m_out`) and looped `range(0u32, m, 1u32)`
+/// over the `acc`/`qv` `stack_alloc` arrays. It was CORRECT (passes the
+/// oracle tests bit-for-bit within the standard per-dtype tolerance) but
+/// LOST THE GATE HARD: wall time scaled ~linearly with `m` instead of
+/// amortizing (measured ratio vs single-M 1.9x @ m=2 up to 4.6-5.3x @ m=5,
+/// i.e. barely faster than `m` sequential dispatches — see the
+/// `qwen35_spec_gemv_multi_microbench` git history for the raw numbers).
+/// Root cause: `range(0, m, 1)` with a NON-literal (dispatch-time-bound)
+/// trip count cannot be unrolled at codegen, so the compiler can't prove a
+/// static iteration count and can't promote `stack_alloc`'s per-t slots to
+/// real registers — every `stack_load`/`stack_store` on `acc`/`qv` inside
+/// that loop round-trips through actual (slow) local memory, `m`-fold. The
+/// exact failure mode `iron_gated_delta_prep_chunk_fast`'s `NPT`
+/// compile-time-variant doc warns about for its own `state_reg`/`k_cache`
+/// arrays ("this array is fully unrollable and register-promotable" only
+/// once the bound is a genuine compile-time constant).
+///
+/// Fix: `#[kernel(variants(...))]` (same mechanism as the `d128_*` GDN fast
+/// kernels) generates one FULLY SPECIALIZED module per `M` value, each with
+/// `M` baked in as a literal — `range(0, M, 1)` unrolls, `stack_alloc`'s
+/// `acc`/`qv` slots become real per-t registers, and the weight-DRAM read
+/// is genuinely amortized `M`-fold with the per-candidate FMA cost hidden
+/// behind it (see the microbench for the after numbers). `M∈{2,3,4,5}`
+/// covers the γ+1 range this was built for (γ∈{2,3,4}); the generated
+/// modules are `iron_gemv_q4_multi_cand2` .. `iron_gemv_q4_multi_cand5`.
+///
+/// BIT-EXACTNESS vs calling `iron_gemv_q4_coalesced` once per `t in 0..M`:
+/// for a fixed `t`, this kernel's `j`-loop order (`range(lane, nwords,
+/// 32)`), per-word 8-nibble unpack order, and `d*blk` word-accumulate order
+/// are IDENTICAL to the M=1 kernel's — only the accumulator storage
+/// (register slot `t` vs a plain register) differs, which does not change
+/// the floating-point operation sequence. `simd_sum`'s reduction tree is
+/// deterministic for a fixed lane/warp geometry, so each `t`'s final
+/// `total` reproduces the M=1 kernel's result bit-for-bit — required for
+/// the spec-decode correctness bar (argmax must not drift from the
+/// sequential-verify path).
+#[kernel(variants(
+    M = [2u32, 3u32, 4u32, 5u32],
+    suffix = "cand{M}"
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn iron_gemv_q4_multi<T>(
+    qs: Tensor<u32>,
+    // f16 scales — see `iron_gemv_q4_coalesced`'s doc; same contract.
+    d_f32: Tensor<f16>,
+    x: Tensor<T>,
+    mut out: Tensor<T>,
+    #[constexpr] k_in: u32,
+    #[constexpr] m_out: u32,
+    #[constexpr] rows_per_group: u32,
+    #[constexpr] rows_per_tg: u32,
+) {
+    let warp = tid / 32u32;
+    let lane = tid % 32u32;
+    let row = tgid_x * rows_per_tg + warp;
+    if row < m_out {
+        let bpr = k_in / 32u32;
+        let nwords = bpr * 4u32;
+        let qs_base = row * bpr * 4u32;
+        let d_base = row * bpr;
+        let n_groups = m_out / rows_per_group;
+        let x_stride = n_groups * k_in; // per-candidate activation row length
+        let x_base = (row / rows_per_group) * k_in;
+
+        // `M` is now a codegen-time literal (per variant) — this array is
+        // fully unrollable/register-promotable, same as `NPT`'s `state_reg`
+        // in the GDN fast kernel this pattern was copied from.
+        stack_alloc("acc", M, "f32");
+        for t in range(0u32, M, 1u32) {
+            stack_store("acc", t, 0.0f32);
+        }
+        stack_alloc("qv", 8, "f32");
+        for j in range(lane, nwords, 32u32) {
+            let block = j / 4u32;
+            let sub = j % 4u32;
+            let packed = load(qs[qs_base + j]);
+            let d = load(d_f32[d_base + block]).cast::<f32>();
+            let kk = block * 32u32 + sub * 8u32;
+            // Unpack this word's 8 nibbles ONCE, reused by every candidate.
+            for i in range(0u32, 8u32, 1u32) {
+                let nib = (packed >> (i * 4u32)) & 0xfu32;
+                let q = nib.cast::<f32>() - select(nib > 7u32, 16.0f32, 0.0f32);
+                stack_store("qv", i, q);
+            }
+            for t in range(0u32, M, 1u32) {
+                let xt_base = t * x_stride + x_base + kk;
+                let mut blk = 0.0f32;
+                for i in range(0u32, 8u32, 1u32) {
+                    let qi = stack_load("qv", i);
+                    blk = blk + qi * load(x[xt_base + i]).cast::<f32>();
+                }
+                let prev = stack_load("acc", t);
+                stack_store("acc", t, prev + d * blk);
+            }
+        }
+        for t in range(0u32, M, 1u32) {
+            let total = simd_sum(stack_load("acc", t));
+            if lane == 0u32 {
+                store(out[t * m_out + row], total.cast::<T>());
+            }
+        }
+    }
+}
+
 /// Q4 coalesced matvec with fused ReLU² (MoE expert up).
 /// Multi-warp: `rows_per_tg` warps per threadgroup, each warp owns one output
 /// row. The single-warp form (`rows_per_tg=1`) is memory-LATENCY-bound (small
@@ -647,10 +785,176 @@ pub fn iron_grouped_gemv_q8_rows_tiled<T>(
     }
 }
 
+pub mod kernel_tests {
+    use wh_iron::{test::*, test_kernel};
+
+    use super::{
+        iron_gemv_q4_multi_cand2,
+        iron_gemv_q4_multi_cand3,
+        iron_gemv_q4_multi_cand4,
+        iron_gemv_q4_multi_cand5,
+    };
+    use crate::utils::pack_f32;
+
+    /// Reference Q4 quantizer — mirrors `iron_ops::quantize_q4` /
+    /// `dequant_q4::kernel_tests::quantize_q4` exactly: signed 4-bit
+    /// (range [-7,7], symmetric), per-32-block scale = amax/7, 4 u32
+    /// words/block, 8 nibbles/word.
+    fn quantize_q4(w: &[f32], m_out: usize, k_in: usize) -> (Vec<u32>, Vec<f32>) {
+        let bpr = k_in / 32;
+        let mut qs = vec![0u32; m_out * bpr * 4];
+        let mut scales = vec![0f32; m_out * bpr];
+        for r in 0..m_out {
+            for b in 0..bpr {
+                let base = r * k_in + b * 32;
+                let amax = (0..32).fold(0f32, |a, i| a.max(w[base + i].abs()));
+                let d = amax / 7.0;
+                scales[r * bpr + b] = d;
+                let inv = if d > 0.0 { 1.0 / d } else { 0.0 };
+                for word in 0..4 {
+                    let mut packed = 0u32;
+                    for i in 0..8 {
+                        let q = (w[base + word * 8 + i] * inv).round().clamp(-7.0, 7.0) as i32;
+                        packed |= ((q as u32) & 0xf) << (i * 4);
+                    }
+                    qs[r * bpr * 4 + b * 4 + word] = packed;
+                }
+            }
+        }
+        (qs, scales)
+    }
+
+    /// CPU oracle: `out[t, r] = Σ_k dequant4(W[r,k]) · x[t, k]` for
+    /// `t in 0..cand`, `r in 0..m_out`. No row grouping (matches the
+    /// dense-projection call sites `iron_gemv_q4_multi` targets — the
+    /// GDN/full-attn/FFN qkv+ffn projections in `qwen35.rs` never use
+    /// `rows_per_group < m_out`).
+    fn cpu_gemv_multi(
+        qs: &[u32],
+        scales_f32: &[f32],
+        x: &[f32],
+        m_out: usize,
+        k_in: usize,
+        cand: usize,
+    ) -> Vec<f32> {
+        let bpr = k_in / 32;
+        let mut out = vec![0f32; cand * m_out];
+        for r in 0..m_out {
+            for b in 0..bpr {
+                let d = scales_f32[r * bpr + b];
+                for word in 0..4 {
+                    let packed = qs[r * bpr * 4 + b * 4 + word];
+                    for i in 0..8 {
+                        let nib = (packed >> (i * 4)) & 0xf;
+                        let q = if nib >= 8 { nib as i32 - 16 } else { nib as i32 };
+                        let qf = q as f32;
+                        let k = b * 32 + word * 8 + i;
+                        for t in 0..cand {
+                            out[t * m_out + r] += d * qf * x[t * k_in + k];
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Round a value through the storage dtype `dt` (f32 = no-op). The GPU
+    /// kernel loads `x` from a `dt`-typed buffer (`load(x[..]).cast::<f32>()`)
+    /// — for f16/bf16 that load itself is lossy, so the CPU oracle must see
+    /// the SAME rounded value or it's comparing against numbers the kernel
+    /// never actually had (this is what made the initial f16/bf16 cells
+    /// mismatch by a full ULP-scale margin: the oracle was using un-rounded
+    /// f32 `x`). Mirrors the existing `scales_f16` round-trip below.
+    fn round_trip(v: f32, dt: DType) -> f32 {
+        match dt {
+            DType::F16 => half::f16::from_f32(v).to_f32(),
+            DType::BF16 => half::bf16::from_f32(v).to_f32(),
+            _ => v,
+        }
+    }
+
+    fn setup(
+        ir: wh_iron::core::ir::Kernel,
+        m_out: usize,
+        k_in: usize,
+        cand: usize,
+        dt: DType,
+    ) -> TestSetup {
+        let wn = m_out * k_in;
+        let weights: Vec<f32> = (0..wn).map(|i| (i as f32 * 0.013 - 0.4).sin() * 1.7).collect();
+        let (qs, scales) = quantize_q4(&weights, m_out, k_in);
+        let scales_f16: Vec<f32> =
+            scales.iter().map(|&s| half::f16::from_f32(s).to_f32()).collect();
+
+        let xn = cand * k_in;
+        let x: Vec<f32> = (0..xn).map(|i| (i as f32 * 0.029 + 0.11).cos() * 0.9).collect();
+        let x_rounded: Vec<f32> = x.iter().map(|&v| round_trip(v, dt)).collect();
+
+        let expected = cpu_gemv_multi(&qs, &scales_f16, &x_rounded, m_out, k_in, cand);
+        let qs_bytes: Vec<u8> = qs.iter().flat_map(|v| v.to_le_bytes()).collect();
+
+        TestSetup::new(ir)
+            .mode(KernelMode::Reduction)
+            .input(TestBuffer::from_vec("qs", qs_bytes, DType::U32))
+            .input(TestBuffer::from_vec("d_f32", pack_f32(&scales_f16, DType::F16), DType::F16))
+            .input(TestBuffer::from_vec("x", pack_f32(&x, dt), dt))
+            .input(TestBuffer::zeros("out", cand * m_out, dt))
+            .constexpr("k_in", k_in as u32)
+            .constexpr("m_out", m_out as u32)
+            .constexpr("rows_per_group", m_out as u32)
+            .constexpr("rows_per_tg", 1u32)
+            .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
+            .grid_3d(m_out as u32, 1, 1, [32, 1, 1])
+    }
+
+    // γ+1 candidate counts the batched-verify path actually dispatches
+    // (γ ∈ {2,3,4} ⇒ cand ∈ {3,4,5}), plus cand=2. Each cell hits its own
+    // compile-time-specialized `#[kernel(variants(...))]` module (see the
+    // kernel's doc for why M must be a codegen-time literal, not a runtime
+    // constexpr, to actually win the gate).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_gemv_q4_multi_cand2(dt: DType) -> TestSetup {
+        setup(iron_gemv_q4_multi_cand2::kernel_ir_for(dt), 64, 128, 2, dt)
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_gemv_q4_multi_cand3(dt: DType) -> TestSetup {
+        setup(iron_gemv_q4_multi_cand3::kernel_ir_for(dt), 64, 128, 3, dt)
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_gemv_q4_multi_cand4(dt: DType) -> TestSetup {
+        setup(iron_gemv_q4_multi_cand4::kernel_ir_for(dt), 64, 128, 4, dt)
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-4, 5e-3, 5e-2])]
+    fn test_iron_gemv_q4_multi_cand5(dt: DType) -> TestSetup {
+        setup(iron_gemv_q4_multi_cand5::kernel_ir_for(dt), 64, 128, 5, dt)
+    }
+
+    // Realistic-K sanity cell (Qwen3.6-27B hidden=5120), smaller m_out to
+    // keep host-side oracle/test time reasonable — catches any block/word-
+    // stride bug that a k_in=128 (4-block) shape is too small to expose.
+    // f32 tol widened 1e-4->3e-4 vs the small-k cells above: 160 blocks/row
+    // (20x the k_in=128 cells' 8) means 20x more f32 add-order terms for
+    // ULP-level rounding to accumulate across — same "wider reduction needs
+    // looser tol" rationale documented on the gated-delta fast-kernel tests.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [3e-4, 5e-3, 5e-2])]
+    fn test_iron_gemv_q4_multi_wide_k(dt: DType) -> TestSetup {
+        setup(iron_gemv_q4_multi_cand3::kernel_ir_for(dt), 32, 5120, 3, dt)
+    }
+}
+
 pub mod kernel_benches {
     use wh_iron::{bench, test::*};
 
     use super::{
+        iron_gemv_q4_coalesced,
+        iron_gemv_q4_multi_cand2,
+        iron_gemv_q4_multi_cand3,
+        iron_gemv_q4_multi_cand4,
+        iron_gemv_q4_multi_cand5,
         iron_gemv_q8,
         iron_grouped_gemv_q8,
         iron_grouped_gemv_q8_rows,
@@ -734,5 +1038,147 @@ pub mod kernel_benches {
                 32, 1, 1,
             ])
             .bytes_moved((m_out * bpr * 36 + n_tokens * n_groups * k_in * dt.size_bytes()) as u64)
+    }
+
+    // ── iron_gemv_q4_multi microbench: F-85 "final lever" gate (batched
+    // MTP verify). Compares wall time for `cand` (γ+1) candidate columns
+    // in ONE dispatch against `iron_gemv_q4_coalesced` (cand=1, the M=1
+    // production decode kernel) run once — the gate is `T_multi(cand) ≤
+    // ~1.4 × T_single` (≥70% of single-M GB/s), because the weight-DRAM
+    // read is amortized `cand`-fold while the tiny per-candidate x reads
+    // are ~free by comparison. Four dominant qwen3.6-27B decode shapes:
+    // ffn_gate/up, ffn_down, full-attn wq, gdn wqkv (all Q4-resident,
+    // f16-scale, no row grouping — see `qwen35.rs::Q4Dense::gemv`). ──
+
+    fn setup_q4_coalesced(dt: DType, m_out: usize, k_in: usize) -> BenchSetup {
+        let bpr = k_in / 32;
+        BenchSetup::new(iron_gemv_q4_coalesced::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("qs", m_out * bpr * 4, DType::U32))
+            .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F16))
+            .buffer(BenchBuffer::random("x", k_in, dt))
+            .buffer(BenchBuffer::zeros("out", m_out, dt).output())
+            .constexpr("k_in", k_in as u32)
+            .constexpr("m_out", m_out as u32)
+            .constexpr("rows_per_group", m_out as u32)
+            .constexpr("rows_per_tg", 1u32)
+            .grid_3d(m_out as u32, 1, 1, [32, 1, 1])
+            .bytes_moved((m_out * bpr * 18 + k_in * dt.size_bytes()) as u64)
+    }
+
+    fn setup_q4_multi(dt: DType, m_out: usize, k_in: usize, cand: usize) -> BenchSetup {
+        let bpr = k_in / 32;
+        // `cand` picks the compile-time-specialized `#[kernel(variants(...))]`
+        // module (see `iron_gemv_q4_multi`'s doc) — there is no generic
+        // runtime-`m` entry point anymore.
+        let ir = match cand {
+            2 => iron_gemv_q4_multi_cand2::kernel_ir_for(dt),
+            3 => iron_gemv_q4_multi_cand3::kernel_ir_for(dt),
+            4 => iron_gemv_q4_multi_cand4::kernel_ir_for(dt),
+            5 => iron_gemv_q4_multi_cand5::kernel_ir_for(dt),
+            _ => panic!(
+                "setup_q4_multi: no iron_gemv_q4_multi_cand{cand} variant (cand must be 2..=5)"
+            ),
+        };
+        BenchSetup::new(ir)
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("qs", m_out * bpr * 4, DType::U32))
+            .buffer(BenchBuffer::random("d_f32", m_out * bpr, DType::F16))
+            .buffer(BenchBuffer::random("x", cand * k_in, dt))
+            .buffer(BenchBuffer::zeros("out", cand * m_out, dt).output())
+            .constexpr("k_in", k_in as u32)
+            .constexpr("m_out", m_out as u32)
+            .constexpr("rows_per_group", m_out as u32)
+            .constexpr("rows_per_tg", 1u32)
+            .grid_3d(m_out as u32, 1, 1, [32, 1, 1])
+            .bytes_moved((m_out * bpr * 18 + cand * k_in * dt.size_bytes()) as u64)
+    }
+
+    // -- ffn_gate/up [17408,5120] --
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_coalesced_ffn_gate_up(dt: DType) -> BenchSetup {
+        setup_q4_coalesced(dt, 17408, 5120)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_gate_up_c2(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 17408, 5120, 2)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_gate_up_c3(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 17408, 5120, 3)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_gate_up_c4(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 17408, 5120, 4)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_gate_up_c5(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 17408, 5120, 5)
+    }
+
+    // -- ffn_down [5120,17408] --
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_coalesced_ffn_down(dt: DType) -> BenchSetup {
+        setup_q4_coalesced(dt, 5120, 17408)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_down_c2(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 5120, 17408, 2)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_down_c3(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 5120, 17408, 3)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_down_c4(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 5120, 17408, 4)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_ffn_down_c5(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 5120, 17408, 5)
+    }
+
+    // -- full-attn wq [12288,5120] (2*n_head*head_dim = 2*24*256) --
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_coalesced_full_wq(dt: DType) -> BenchSetup {
+        setup_q4_coalesced(dt, 12288, 5120)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_full_wq_c2(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 12288, 5120, 2)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_full_wq_c3(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 12288, 5120, 3)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_full_wq_c4(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 12288, 5120, 4)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_full_wq_c5(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 12288, 5120, 5)
+    }
+
+    // -- gdn wqkv [10240,5120] (key_dim*2+value_dim = 16*128*2+48*128) --
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_coalesced_gdn_wqkv(dt: DType) -> BenchSetup {
+        setup_q4_coalesced(dt, 10240, 5120)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_gdn_wqkv_c2(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 10240, 5120, 2)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_gdn_wqkv_c3(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 10240, 5120, 3)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_gdn_wqkv_c4(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 10240, 5120, 4)
+    }
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gemv_q4_multi_gdn_wqkv_c5(dt: DType) -> BenchSetup {
+        setup_q4_multi(dt, 10240, 5120, 5)
     }
 }
