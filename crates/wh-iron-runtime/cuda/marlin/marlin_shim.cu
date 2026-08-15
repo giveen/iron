@@ -161,13 +161,24 @@ void ffai_marlin_permute_scales(const void* in, void* out, int num_groups,
 // f32 scratch (size >= min(N*padded_M, sms*4*8*max_thread_n), *2 since
 // moe_block==8) — see get_kernel_cache_size()/ops_full.cu sizing in the
 // archived csrc for the exact formulas; sized on the Rust side to match.
+//
+// F-85 round-10 (lever 1): `thread_k`/`thread_n`/`blocks_per_sm` are now
+// caller-supplied instead of hardwired -1/-1/-1 ("auto"). Passing -1 still
+// falls through to marlin_mm's auto-config search (kept for callers that
+// don't have a cached config yet / debugging), but the decode hot path
+// (qwen35.rs) resolves these ONCE per weight class at load time via
+// `ffai_marlin_pick_config` (see marlin_mm.cu) and passes the resolved
+// triple on every call, skipping the auto path's per-call
+// cudaFuncGetAttributes probe loop (round-9's census-vs-isolated-
+// microbench ~15ms/step integration gap).
 void ffai_marlin_gemm_u4b8_f16(
     const void* A, const void* B_repacked, void* C, void* C_tmp,
     const void* b_scales,
     const void* sorted_token_ids, const void* expert_ids, const void* num_tokens_past_padded,
     void* workspace,
     int prob_m, int prob_n, int prob_k, int num_groups, int group_size,
-    int sms, int use_fp32_reduce, cudaStream_t stream) {
+    int sms, int use_fp32_reduce,
+    int thread_k, int thread_n, int blocks_per_sm, cudaStream_t stream) {
   marlin_moe_wna16::marlin_mm(
     A, B_repacked, C, C_tmp, /*bias*/nullptr, /*a_scales*/nullptr, (void*)b_scales, /*global_scale*/nullptr,
     /*zp*/nullptr, /*g_idx*/nullptr, /*perm*/nullptr, /*a_tmp*/nullptr,
@@ -176,8 +187,8 @@ void ffai_marlin_gemm_u4b8_f16(
     prob_m, prob_n, prob_k, workspace,
     marlin_types::kFloat16, marlin_types::kU4B8, marlin_types::kFloat16, marlin_types::kFloat16,
     /*has_bias*/false, /*has_act_order*/false, /*is_k_full*/true, /*has_zp*/false,
-    num_groups, group_size, /*dev*/0, stream, /*thread_k*/-1, /*thread_n*/-1, sms,
-    /*blocks_per_sm*/-1, /*use_atomic_add*/false, use_fp32_reduce != 0, /*is_zp_float*/false);
+    num_groups, group_size, /*dev*/0, stream, thread_k, thread_n, sms,
+    blocks_per_sm, /*use_atomic_add*/false, use_fp32_reduce != 0, /*is_zp_float*/false);
 }
 
 }  // extern "C"

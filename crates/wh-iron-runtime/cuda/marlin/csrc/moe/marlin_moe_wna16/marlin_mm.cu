@@ -518,8 +518,35 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
                 ", num_bits = ", num_bits);
   }
 
-  cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                       max_shared_mem);
+  // F-85 round-10 (lever 1): cudaFuncSetAttribute is a real CUDA driver
+  // call (context/kernel-attribute-table write), not free -- and for the
+  // fixed decode-M=1 shapes this file serves, `kernel`/`max_shared_mem`
+  // are IDENTICAL on every call after the first for a given weight class.
+  // A tiny fixed-size "already configured" cache (<=5 distinct routed
+  // shapes in practice: ffn_gate/up, ffn_down, attn_q, gdn_qkv) skips the
+  // redundant re-set on the other 315+/step repeats. Linear scan over a
+  // handful of entries is cheaper than the call it's avoiding.
+  {
+    static const void* g_cfg_kernel[16];
+    static int g_cfg_smem[16];
+    static int g_cfg_count = 0;
+    bool already_set = false;
+    for (int i = 0; i < g_cfg_count; i++) {
+      if (g_cfg_kernel[i] == (const void*)kernel && g_cfg_smem[i] == max_shared_mem) {
+        already_set = true;
+        break;
+      }
+    }
+    if (!already_set) {
+      cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                           max_shared_mem);
+      if (g_cfg_count < 16) {
+        g_cfg_kernel[g_cfg_count] = (const void*)kernel;
+        g_cfg_smem[g_cfg_count] = max_shared_mem;
+        g_cfg_count++;
+      }
+    }
+  }
   // avoid ">>>" being formatted to "> > >"
   // clang-format off
   kernel<<<blocks, num_threads, max_shared_mem, stream>>>(
@@ -528,6 +555,40 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
       topk_weights_ptr, top_k, mul_topk_weights, num_groups, prob_m,
       prob_n, prob_k, locks, has_bias, use_atomic_add, use_fp32_reduce);
   // clang-format on
+}
+
+// F-85 round-10 (lever 1): host-side-only config resolution, split out of
+// `marlin_mm`'s "auto" branch so a caller with a FIXED decode-M=1 shape
+// (every routed weight class -- prob_n/prob_k are the same on every layer
+// of that class) can call this ONCE at weight-load time and pass the
+// result to every subsequent `marlin_mm` call via its explicit
+// thread_k/thread_n/blocks_per_sm params. Skips the auto-config path's
+// per-call `cudaFuncGetAttributes` probe loop (one call per candidate
+// thread_config -- 3 for the small-batch table used at M=1) entirely on
+// the hot path; `determine_exec_config`'s result only depends on the
+// shape/dtype/group_size/sms, none of which vary call-to-call here.
+extern "C" void ffai_marlin_pick_config(int prob_m, int prob_n, int prob_k,
+                                        int group_size, int sms,
+                                        int* thread_k_out, int* thread_n_out,
+                                        int* blocks_per_sm_out) {
+  const int moe_block_size = 8;
+  const bool m_block_size_8 = true;
+  const int thread_m_blocks = 1;  // div_ceil(moe_block_size=8, 16)
+  const int stages = 4;
+  int max_shared_mem = 0;
+  cudaDeviceGetAttribute(&max_shared_mem, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0);
+  exec_config_t exec_cfg = determine_exec_config(
+      marlin_types::kFloat16, marlin_types::kU4B8, marlin_types::kFloat16,
+      marlin_types::kFloat16,
+      prob_m, prob_n, prob_k, /*num_experts=*/1, /*top_k=*/1,
+      thread_m_blocks, m_block_size_8, /*num_bits=*/4, group_size,
+      /*has_act_order=*/false, /*is_k_full=*/true, /*has_zp=*/false,
+      /*is_zp_float=*/false, /*is_a_8bit=*/false, stages,
+      max_shared_mem, sms);
+  (void)moe_block_size;
+  *thread_k_out = exec_cfg.tb_cfg.thread_k;
+  *thread_n_out = exec_cfg.tb_cfg.thread_n;
+  *blocks_per_sm_out = exec_cfg.blocks_per_sm;
 }
 
 }  // namespace MARLIN_NAMESPACE_NAME

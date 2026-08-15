@@ -188,6 +188,9 @@ impl CudaDevice {
         group_size: usize,
         sms: i32,
         use_fp32_reduce: bool,
+        thread_k: i32,
+        thread_n: i32,
+        blocks_per_sm: i32,
     ) -> Result<(), IronError> {
         self.ensure_current();
         #[cfg(have_marlin)]
@@ -210,6 +213,9 @@ impl CudaDevice {
                     group_size: c_int,
                     sms: c_int,
                     use_fp32_reduce: c_int,
+                    thread_k: c_int,
+                    thread_n: c_int,
+                    blocks_per_sm: c_int,
                     stream: *mut c_void,
                 );
             }
@@ -231,6 +237,9 @@ impl CudaDevice {
                     group_size as c_int,
                     sms,
                     if use_fp32_reduce { 1 } else { 0 },
+                    thread_k as c_int,
+                    thread_n as c_int,
+                    blocks_per_sm as c_int,
                     self.stream as *mut c_void,
                 );
             }
@@ -255,10 +264,71 @@ impl CudaDevice {
                 group_size,
                 sms,
                 use_fp32_reduce,
+                thread_k,
+                thread_n,
+                blocks_per_sm,
             );
             Err(IronError::Dispatch(
                 "marlin_gemm_u4b8_f16: runtime built without marlin (set IRON_MARLIN_BUILD=1)"
                     .into(),
+            ))
+        }
+    }
+
+    /// F-85 round-10 (lever 1): host-side-only resolution of the
+    /// `thread_k`/`thread_n`/`blocks_per_sm` config `marlin_mm`'s "auto"
+    /// path (`-1,-1,-1`) would otherwise recompute on EVERY call via a
+    /// `cudaFuncGetAttributes` probe loop over the small-batch thread-config
+    /// table. For decode-M=1 the resolved config is a pure function of
+    /// `(prob_n, prob_k, group_size, sms)` -- callers with a fixed routed
+    /// weight shape (every layer of a given weight class shares one) should
+    /// call this ONCE at load time and pass the result to every subsequent
+    /// [`marlin_gemm_u4b8_f16`] call instead of `-1,-1,-1`.
+    pub fn marlin_pick_config(
+        &self,
+        prob_m: usize,
+        prob_n: usize,
+        prob_k: usize,
+        group_size: usize,
+        sms: i32,
+    ) -> Result<(i32, i32, i32), IronError> {
+        self.ensure_current();
+        #[cfg(have_marlin)]
+        {
+            unsafe extern "C" {
+                fn ffai_marlin_pick_config(
+                    prob_m: c_int,
+                    prob_n: c_int,
+                    prob_k: c_int,
+                    group_size: c_int,
+                    sms: c_int,
+                    thread_k_out: *mut c_int,
+                    thread_n_out: *mut c_int,
+                    blocks_per_sm_out: *mut c_int,
+                );
+            }
+            let mut thread_k: c_int = -1;
+            let mut thread_n: c_int = -1;
+            let mut blocks_per_sm: c_int = -1;
+            unsafe {
+                ffai_marlin_pick_config(
+                    prob_m as c_int,
+                    prob_n as c_int,
+                    prob_k as c_int,
+                    group_size as c_int,
+                    sms,
+                    &mut thread_k,
+                    &mut thread_n,
+                    &mut blocks_per_sm,
+                );
+            }
+            Ok((thread_k, thread_n, blocks_per_sm))
+        }
+        #[cfg(not(have_marlin))]
+        {
+            let _ = (prob_m, prob_n, prob_k, group_size, sms);
+            Err(IronError::Dispatch(
+                "marlin_pick_config: runtime built without marlin (set IRON_MARLIN_BUILD=1)".into(),
             ))
         }
     }
