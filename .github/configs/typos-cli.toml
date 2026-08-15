@@ -67,6 +67,8 @@ OPTIN = "OPTIN"
 ue = "ue"
 Ue = "Ue"
 UE = "UE"
+# PTX inline-asm mnemonic ("set predicate") in the marlin U4B8 GEMM csrc.
+setp = "setp"
 
 [type.go]
 extend-glob = []

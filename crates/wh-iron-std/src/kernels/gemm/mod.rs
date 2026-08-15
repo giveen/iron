@@ -54,6 +54,8 @@ pub mod batched_qkv_qgemv;
 pub mod batched_qkv_qmm;
 
 // Quantized GEMM (Q8_0 / Q4) — scalar + MMA/coop-tile forms.
+pub mod gemm_q4_bm8;
+pub mod gemm_q4_bm8_narrow;
 pub mod gemm_q4_mpp;
 pub mod gemm_q8;
 pub mod gemm_q8_mpp;

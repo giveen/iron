@@ -7,6 +7,7 @@
 
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(have_cutlass)");
+    println!("cargo:rustc-check-cfg=cfg(have_marlin)");
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
     println!("cargo:rerun-if-env-changed=CUDA_HOME");
     println!("cargo:rerun-if-env-changed=HIP_PATH");
@@ -157,5 +158,82 @@ fn cuda() {
         println!("cargo:rustc-link-lib=dylib=cudart");
         println!("cargo:rustc-link-lib=dylib=stdc++");
         println!("cargo:rustc-cfg=have_cutlass");
+    }
+
+    // Optional: AOT-compile the in-tree marlin U4B8 small-M GEMM (F-85 round-8)
+    // when IRON_MARLIN_BUILD is set. nvcc -rdc each .cu, device-link, ar into a
+    // static lib; emits cfg(have_marlin). Additive + opt-in like the CUTLASS
+    // block above: default builds (Mac/Metal, CUTLASS-less/marlin-less CUDA
+    // hosts) are unaffected. Unlike CUTLASS this needs no external SDK dir —
+    // the csrc is fully in-tree under cuda/marlin/ (repack_standalone.cu,
+    // marlin_mm.cu, the single u4b8/f16 kernel instantiation, marlin_shim.cu).
+    println!("cargo:rerun-if-env-changed=IRON_MARLIN_BUILD");
+    println!("cargo:rerun-if-env-changed=IRON_MARLIN_ARCH");
+    if std::env::var("IRON_MARLIN_BUILD").is_ok() {
+        let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR set by cargo");
+        let arch = std::env::var("IRON_MARLIN_ARCH").unwrap_or_else(|_| "sm_121a".to_string());
+        let nvcc = format!("{cuda_root}/bin/nvcc");
+        let md = format!("{}/cuda/marlin", env!("CARGO_MANIFEST_DIR"));
+        let base: Vec<String> = vec![
+            "-O3".into(),
+            "-std=c++17".into(),
+            format!("-arch={arch}"),
+            "--expt-relaxed-constexpr".into(),
+            "-Xcompiler".into(),
+            "-fPIC".into(),
+        ];
+        let inc: Vec<String> = vec![
+            "-I".into(),
+            format!("{md}/csrc"),
+            "-I".into(),
+            format!("{md}/csrc/core"),
+            "-I".into(),
+            format!("{md}/csrc/quantization/marlin"),
+            "-I".into(),
+            format!("{md}/csrc/moe/marlin_moe_wna16"),
+        ];
+        let srcs = [
+            format!("{md}/csrc/moe/marlin_moe_wna16/sm80_kernel_float16_u4b8_float16.cu"),
+            format!("{md}/csrc/moe/marlin_moe_wna16/marlin_mm.cu"),
+            format!("{md}/csrc/quantization/marlin/repack_standalone.cu"),
+            format!("{md}/marlin_shim.cu"),
+        ];
+        let mut objs: Vec<String> = Vec::new();
+        for (i, src) in srcs.iter().enumerate() {
+            println!("cargo:rerun-if-changed={src}");
+            let obj = format!("{out_dir}/marlin_{i}.o");
+            let st = std::process::Command::new(&nvcc)
+                .args(&base)
+                .args(&inc)
+                .args(["-dc", src.as_str(), "-o", obj.as_str()])
+                .status()
+                .expect("nvcc marlin compile failed to start");
+            assert!(st.success(), "nvcc failed on {src}");
+            objs.push(obj);
+        }
+        let dlink = format!("{out_dir}/marlin_dlink.o");
+        let mut dl = std::process::Command::new(&nvcc);
+        dl.arg(format!("-arch={arch}")).arg("-rdc=true").arg("-dlink");
+        for o in &objs {
+            dl.arg(o);
+        }
+        dl.arg("-o").arg(&dlink);
+        assert!(
+            dl.status().expect("nvcc -dlink failed to start").success(),
+            "marlin device-link failed"
+        );
+        let lib = format!("{out_dir}/libmarlin.a");
+        let mut arc = std::process::Command::new("ar");
+        arc.arg("crs").arg(&lib);
+        for o in &objs {
+            arc.arg(o);
+        }
+        arc.arg(&dlink);
+        assert!(arc.status().expect("ar failed to start").success(), "ar libmarlin failed");
+        println!("cargo:rustc-link-search=native={out_dir}");
+        println!("cargo:rustc-link-lib=static=marlin");
+        println!("cargo:rustc-link-lib=dylib=cudart");
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+        println!("cargo:rustc-cfg=have_marlin");
     }
 }

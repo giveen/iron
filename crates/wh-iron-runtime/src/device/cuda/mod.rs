@@ -15,6 +15,7 @@
 //! untouched and stays the zero-config default.
 
 mod ffi;
+mod marlin;
 mod nvfp4_moe;
 
 use std::{
