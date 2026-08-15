@@ -105,13 +105,21 @@
 //! ### GEMM1 (`y_pass`) — one M-tile per simdgroup, no N-split
 //!
 //! `M=C(≤64, 4 tiles of 16 — one per SG), N=32 (single tile, Dv-tile width,
-//! shared by all 4 SGs), K=Dk (`K/32` accumulate steps)`. Guarded for
-//! `C<64` test fixtures via `c_m_tiles = ceil(C/16)`: SGs whose 16-row tile
-//! falls entirely outside `[0,C)` skip the MMA (their `ct_c` stays the
-//! `coop_tile_zero` zero and is never read back, since the consumption loop
-//! below only ever visits `t < C`). Requires **`C` a multiple of 16**
-//! (both existing test fixtures — `C=16`, `C=64` — and the production
-//! `C=64` bench satisfy this; a future ragged-C tail is a follow-up).
+//! shared by all 4 SGs), K=Dk (`K/32` accumulate steps)`. For `C<64` test
+//! fixtures, SGs whose 16-row tile falls entirely outside `[0,C)` still run
+//! the MMA (`Xs` is zero-padded past `C` by the staging loop, so they just
+//! MMA zeros — wasted work, never wrong) — their `ct_c`/`OutScratch` output
+//! is simply never read back, since the consumption loop below only ever
+//! visits `t < C`. **Intentionally unconditional, not `if sg < c_m_tiles`**:
+//! `coop_tile_load_a`/`coop_tile_run`'s CUDA codegen embeds its own
+//! `__syncthreads()`, and gating them behind a per-SG runtime `if` made only
+//! some warps in the block execute those internal barriers — a
+//! divergent-barrier hazard (`compute-sanitizer --tool synccheck` catches
+//! it, `racecheck`/`initcheck` don't) that was this kernel's actual
+//! `state_out` corruption root cause, see GDN_PREFILL_CONTRACT.md §7.2.
+//! Requires **`C` a multiple of 16** (both existing test fixtures — `C=16`,
+//! `C=64` — and the production `C=64` bench satisfy this; a future
+//! ragged-C tail is a follow-up).
 //!
 //! ### GEMM2 (`S_tile · P_s + U_s`) — 2×2 SG grid, `nj` outer loop over N
 //!
@@ -120,9 +128,11 @@
 //! `Dk/32` N-tiles), K=Dk`. Requires **`Dk` a multiple of 32** (both test
 //! fixtures — `Dk=32`, `Dk=128` — and the production `Dk=128` bench
 //! satisfy this). `n_tile = nj*2 + sg_n_local`; SGs/`nj`-slots whose
-//! `n_tile ≥ Dk/32` skip the MMA and are masked out of the consumption
-//! step, so `Dk=32` (only 1 real N-tile) is handled by the same code path
-//! that handles `Dk=128` (4 N-tiles) — no separate small-Dk code.
+//! `n_tile ≥ Dk/32` still run the MMA (same zero-padded-input,
+//! unconditional-for-the-same-barrier-safety-reason-as-GEMM1 pattern —
+//! see above) and are simply masked out of the consumption step by
+//! `d_valid`, so `Dk=32` (only 1 real N-tile) is handled by the same code
+//! path that handles `Dk=128` (4 N-tiles) — no separate small-Dk code.
 //!
 //! **Critical ordering, unchanged from v1's doc:** `S_tile`'s update reads
 //! the *entire* old row (`sum_k S_old[v,k]*P_s[k,d]` — every output column
@@ -212,8 +222,6 @@ pub fn iron_gdn_wy_scan<T>(
     }
     threadgroup_barrier();
 
-    // GEMM1's SG→M-tile count: 16-row tiles that actually fall in [0,C).
-    let c_m_tiles = (c + 15u32) / 16u32;
     // GEMM2's N (=Dk) tiling: Dk/32 total 32-wide N-tiles, walked 2 at a
     // time (one per sg_n_local) across `nj_outer` outer iterations.
     let n_tiles_total = dk / 32u32;
@@ -235,7 +243,8 @@ pub fn iron_gdn_wy_scan<T>(
         coop_tile_zero("g1");
         for kb in range(0u32, dk, 32u32) {
             // Stage Xs[t,k] = q_eff[t, kb+k], t in [0,64) (clamped/zeroed
-            // past C — see doc's c_m_tiles guard). 2048 elem / 128 = 16/lane.
+            // past C — every SG's tile is well-defined even past C, see
+            // the unconditional-MMA comment below). 2048 elem / 128 = 16/lane.
             for i0 in range(0u32, 16u32, 1u32) {
                 let flat = lane * 16u32 + i0;
                 let mr = flat / 32u32;
@@ -255,17 +264,29 @@ pub fn iron_gdn_wy_scan<T>(
                 threadgroup_store("Ws", flat, sv.cast::<f16>());
             }
             threadgroup_barrier();
-            if sg < c_m_tiles {
-                coop_tile_load_a("g1", "Xs", true, f16, 32u32, 16u32, sg * 512u32);
-                coop_tile_load_b("g1", "Ws", true, f16, 32u32, 32u32);
-                coop_tile_run("g1");
-            }
+            // Run unconditionally for every SG, even ones whose 16-row tile
+            // falls entirely outside [0,C) (Xs is already zero-padded past
+            // C by the staging loop above, so those SGs just MMA zeros —
+            // wasted work, never wrong). MUST NOT be gated behind an `if`
+            // here: `coop_tile_load_a`/`coop_tile_run`'s CUDA codegen
+            // embeds its own `__syncthreads()` internally, and `sg` differs
+            // *per warp* (this device's warp size equals the simdgroup
+            // width), so an `if sg < c_m_tiles { ...load_a/run... }` guard
+            // makes only SOME warps in the block execute those internal
+            // barriers — a block-level divergent-barrier hazard invisible
+            // to `compute-sanitizer --tool racecheck`/`initcheck` but
+            // caught by `--tool synccheck` ("Barrier error: Divergent
+            // thread(s) in block"). See GDN_PREFILL_CONTRACT.md §7.2.
+            coop_tile_load_a("g1", "Xs", true, f16, 32u32, 16u32, sg * 512u32);
+            coop_tile_load_b("g1", "Ws", true, f16, 32u32, 32u32);
+            coop_tile_run("g1");
             threadgroup_barrier();
         }
         coop_tile_store_c("g1", "OutScratch", true, f32, 32u32, 16u32, sg * 512u32);
         threadgroup_barrier();
         // Consume: y = y_pass (from OutScratch) + y_local. Bounded by
-        // `c` — never touches an out-of-range (skipped) SG's zero output.
+        // `c` — never touches an out-of-range SG's (always-computed but
+        // zero-padded-input, hence zero) output.
         for tv in range(lane, c * 32u32, 128u32) {
             let t = tv / 32u32;
             let v = tv % 32u32;
@@ -286,8 +307,6 @@ pub fn iron_gdn_wy_scan<T>(
         // `new_state` stack — see doc: no tg_state write until every
         // `nj` has read the full old row.
         for nj in range(0u32, nj_outer, 1u32) {
-            let n_tile = nj * 2u32 + sg_n_local;
-            let n_tile_valid = n_tile < n_tiles_total;
             coop_tile_zero("g2");
             for kb in range(0u32, dk, 32u32) {
                 // Stage Xs[v,k] = tg_state[v, kb+k] downcast, v in [0,32).
@@ -318,11 +337,24 @@ pub fn iron_gdn_wy_scan<T>(
                     );
                 }
                 threadgroup_barrier();
-                if n_tile_valid {
-                    coop_tile_load_a("g2", "Xs", true, f16, 32u32, 16u32, sg_m2 * 512u32);
-                    coop_tile_load_b("g2", "Ws", true, f16, 32u32, 32u32, sg_n_local * 1024u32);
-                    coop_tile_run("g2");
-                }
+                // Run unconditionally for every SG/`nj` slot, even ones
+                // whose N-tile falls entirely outside [0,Dk) (Xs/Ws are
+                // already zero-padded past `dk` by the staging above, so
+                // those slots just MMA zeros — wasted work, never wrong).
+                // MUST NOT be gated behind an `if` here — same
+                // divergent-`__syncthreads()` hazard as GEMM1 above (see
+                // that comment + GDN_PREFILL_CONTRACT.md §7.2): `sg_n_local`
+                // is warp-uniform, so `if n_tile_valid { ...load_a/run... }`
+                // made only some warps in the block execute the internal
+                // barriers `coop_tile_load_a`/`coop_tile_run` emit on CUDA
+                // — confirmed via `compute-sanitizer --tool synccheck`
+                // ("Barrier error: Divergent thread(s) in block"), and the
+                // actual root cause of this kernel's `state_out`
+                // zero-row corruption (racecheck/initcheck don't catch this
+                // hazard class, which is why they came back clean).
+                coop_tile_load_a("g2", "Xs", true, f16, 32u32, 16u32, sg_m2 * 512u32);
+                coop_tile_load_b("g2", "Ws", true, f16, 32u32, 32u32, sg_n_local * 1024u32);
+                coop_tile_run("g2");
                 threadgroup_barrier();
             }
             coop_tile_store_c("g2", "OutScratch", true, f32, 32u32, 16u32, sg * 512u32);
@@ -392,6 +424,26 @@ mod tests {
         k.mode = KernelMode::Reduction;
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
+    }
+
+    /// Debug aid — print the CUDA dynamic-shared-memory byte count for the
+    /// single-tile fixture's TG size. See `GDN_PREFILL_CONTRACT.md` §7 —
+    /// unlike `iron_gdn_wy_plan`, this kernel's total (98304 B pre-fix)
+    /// already fit under GB10's ~99 KiB opt-in cap so it dispatches (just
+    /// with wrong values, the actual bug under investigation); this probe
+    /// exists to confirm the `SoftwareLocalC` fix (see `backend.rs`'s
+    /// `TargetProfile::cuda()` doc) doesn't regress that. CPU-only, no
+    /// device needed.
+    #[test]
+    fn cuda_smem_budget() {
+        use wh_iron::codegen::cuda::CudaGenerator;
+        let mut k = iron_gdn_wy_scan::kernel_ir_for(DType::F32);
+        k.mode = KernelMode::Reduction;
+        let bytes = CudaGenerator::new().shared_bytes(&k, 128);
+        println!(
+            "iron_gdn_wy_scan (single-tile TG=128) CUDA dynamic smem: {bytes} bytes ({:.1} KiB)",
+            bytes as f64 / 1024.0
+        );
     }
 }
 
@@ -463,6 +515,27 @@ pub mod kernel_tests {
     /// and wires the GPU dispatch.
     #[allow(clippy::too_many_arguments)]
     fn setup(nc: usize, c: usize, hv: usize, dk: usize, dv: usize, dt: DType) -> TestSetup {
+        setup_ex(nc, c, hv, dk, dv, dt, false)
+    }
+
+    /// `setup` with an extra `zero_state` knob — when true, `state_in` is
+    /// all-zero, which makes GEMM1's `y_pass = q_eff·S_tile^T` term exactly
+    /// zero (so `y == y_local` bit-for-bit is the CPU-exact expectation,
+    /// independent of GEMM1 correctness beyond "reads zero, contributes
+    /// zero") and makes GEMM2's `S_new = S_old·P_s + U_s` collapse to
+    /// exactly `U_s` (independent of `P_s`/the multiply). Debug aid for
+    /// isolating whether a mismatch is in GEMM1 (`y`) or GEMM2
+    /// (`state_out`) — see `GDN_PREFILL_CONTRACT.md` §7.2.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_ex(
+        nc: usize,
+        c: usize,
+        hv: usize,
+        dk: usize,
+        dv: usize,
+        dt: DType,
+        zero_state: bool,
+    ) -> TestSetup {
         assert!(dv.is_multiple_of(32), "dv must be a multiple of 32 for v1");
         let t_total = nc * c;
         let n_total = hv; // B=1
@@ -484,8 +557,11 @@ pub mod kernel_tests {
             .collect();
         let u_s: Vec<f32> =
             (0..n_total * nc * dv * dk).map(|i| ((i as f32) * 0.011).sin() * 0.05).collect();
-        let state_in: Vec<f32> =
-            (0..n_total * dv * dk).map(|i| ((i as f32) * 0.007).cos() * 0.2).collect();
+        let state_in: Vec<f32> = if zero_state {
+            vec![0.0f32; n_total * dv * dk]
+        } else {
+            (0..n_total * dv * dk).map(|i| ((i as f32) * 0.007).cos() * 0.2).collect()
+        };
 
         let r = |xs: &[f32]| unpack_f32(&pack_f32(xs, dt), dt);
         let (qe_r, yl_r, ps_r, us_r, st_r) =
@@ -553,6 +629,56 @@ pub mod kernel_tests {
     // geometry (Dk=Dv=128 handled at reduced NC for test speed).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_iron_gdn_wy_scan_multi_tile(dt: DType) -> TestSetup { setup(3, 64, 2, 128, 128, dt) }
+
+    // ── Regression fixtures for the CUDA single-tile mismatch (see
+    // GDN_PREFILL_CONTRACT.md §7.2 — ROOT-CAUSED AND FIXED: the GEMM1/
+    // GEMM2 MMA calls were gated behind a per-SG runtime `if` whose
+    // predicate (`sg < c_m_tiles` / `n_tile_valid`) differs *by warp*,
+    // and `coop_tile_load_a`/`coop_tile_run`'s CUDA codegen embeds its own
+    // `__syncthreads()` — so only some warps in the block executed those
+    // internal barriers, a divergent-barrier hazard confirmed via
+    // `compute-sanitizer --tool synccheck` ("Barrier error: Divergent
+    // thread(s) in block"; `racecheck`/`initcheck` don't catch this
+    // class). Fix: run the MMA unconditionally for every SG/`nj` slot —
+    // `Xs`/`Ws` are already zero-padded past `C`/`Dk` by the staging
+    // loops, so out-of-range SGs just MMA zeros (wasted work, never
+    // wrong), and their output is masked out of the consumption step as
+    // before. All 4 fixtures below now pass; kept permanently as
+    // regression coverage for this exact warp-divergence shape (all are
+    // still single-Dv-tile, `dv=32, grid.x=1` — only ONE axis moves per
+    // fixture relative to `single_tile` above).
+
+    // nc=1: removes the sequential cross-chunk state carry entirely
+    // (single chunk, no recurrence). hv=1 removes n-indexing.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_iron_gdn_wy_scan_debug_nc1(dt: DType) -> TestSetup { setup(1, 16, 1, 32, 32, dt) }
+
+    // c=32 (vs single_tile's c=16): GEMM1's `ceil(c/16)` active-tile count
+    // goes from 1 -> 2 (2 of 4 SGs previously idle in GEMM1's MMA instead
+    // of just SG0). Still nc=2, hv=2, dk=32 (GEMM2 still only 1 of 4 SGs
+    // previously active, `n_tiles_total=1`). Regression coverage for
+    // GEMM1's now-unconditional MMA path at a different idle/active SG
+    // split than `single_tile`.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_iron_gdn_wy_scan_debug_c32(dt: DType) -> TestSetup { setup(2, 32, 2, 32, 32, dt) }
+
+    // dk=64 (vs single_tile's dk=32): GEMM2's `n_tiles_total` goes from 1
+    // -> 2 (all 4 SGs previously active in GEMM2, `nj_outer=1`, both
+    // `sg_n_local` 0/1 valid, instead of only SG0/SG2). GEMM1 unchanged
+    // (c=16). Regression coverage for GEMM2's now-unconditional MMA path
+    // at a different idle/active SG split than `single_tile`.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_iron_gdn_wy_scan_debug_dk64(dt: DType) -> TestSetup { setup(2, 16, 2, 64, 32, dt) }
+
+    // Same shape as `debug_nc1` (nc=1, c=16, hv=1, dk=32, dv=32 — smallest
+    // failing fixture) but `state_in` zeroed: `y` must equal `y_local`
+    // exactly (GEMM1's contribution is provably zero) and `state_out` must
+    // equal `u_s` exactly (GEMM2's `S_old·P_s` term is provably zero).
+    // Isolates GEMM1 vs GEMM2 vs the state load/store plumbing.
+    #[test_kernel(dtypes = [f32], tol = [5e-3])]
+    fn test_iron_gdn_wy_scan_debug_zero_state(dt: DType) -> TestSetup {
+        setup_ex(1, 16, 1, 32, 32, dt, true)
+    }
 }
 
 pub mod kernel_benches {

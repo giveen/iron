@@ -128,6 +128,23 @@ pub mod kernel_tests {
             }
         }
         TestSetup::new(iron_moe_densify_int2_experts::kernel_ir())
+            // Grid3D, not the default Elementwise: this kernel launches a
+            // FIXED 256 threads per active expert (`grid_1d(n_active*256,
+            // 256)`) with internal per-thread loops copying multiple
+            // elements each — the launched thread count has no relation to
+            // any output buffer's element count. CUDA's Elementwise-mode
+            // dispatch adds an implicit `if (_gtid >= _n_elems) return`
+            // bounds guard sized from "the first output param's element
+            // count" (a correct assumption for ordinary 1-thread-per-
+            // element kernels, wrong here): with `weight_dst` = 8 elements
+            // but 512 threads launched (n_active=2), every thread with
+            // `_gtid >= 8` returned immediately — silently dropping every
+            // active expert past the first (see GDN_PREFILL_CONTRACT.md
+            // §7.3). Grid3D has no such guard (parity with Metal's exact
+            // dispatchThreads count); this kernel already carries its own
+            // correct explicit bounds (`if a < n_active`, `if p <
+            // total_packs/total_sb`), so Grid3D is the right mode.
+            .mode(KernelMode::Grid3D)
             .input(TestBuffer::from_vec("weight_src", u32_bytes(&w_src), DType::U32))
             .input(TestBuffer::from_vec("scales_src", pack_f32(&s_src, dt), dt))
             .input(TestBuffer::from_vec("biases_src", pack_f32(&b_src, dt), dt))
@@ -173,6 +190,13 @@ pub mod kernel_benches {
         let n_active = 64usize;
         let n_experts = 128usize;
         BenchSetup::new(iron_moe_densify_int2_experts::kernel_ir())
+            // Grid3D, not the default Elementwise — see the matching
+            // comment on `test_moe_densify_int2_experts`'s TestSetup for
+            // why (CUDA's Elementwise bounds guard is sized from the wrong
+            // quantity for this kernel's threading pattern). Not exposed
+            // at this bench's shape (`n_out*packs_per_row` >> 256 here),
+            // but correct regardless of shape.
+            .mode(KernelMode::Grid3D)
             .buffer(BenchBuffer::zeros("weight_src", n_experts * n_out * packs_per_row, DType::U32))
             .buffer(BenchBuffer::zeros("scales_src", n_experts * n_out * groups_per_row, dt))
             .buffer(BenchBuffer::zeros("biases_src", n_experts * n_out * groups_per_row, dt))

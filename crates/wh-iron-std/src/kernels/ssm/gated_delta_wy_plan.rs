@@ -701,6 +701,28 @@ mod tests {
         let msl = MslGenerator::default().generate(&k).expect("codegen");
         println!("===== BEGIN MSL =====\n{}\n===== END MSL =====", msl);
     }
+
+    /// Debug aid — print the CUDA dynamic-shared-memory byte count this
+    /// kernel's `coop_tile_setup`/`threadgroup_alloc` mix requests, for the
+    /// smallest registered fixture's TG size. See `GDN_PREFILL_CONTRACT.md`
+    /// §7.1 — this kernel was completely unusable on CUDA/GB10 pre-fix
+    /// (every fixture requested an identical 244224 B, ~8x the ~99 KiB
+    /// opt-in cap, because `TargetProfile::cuda()`'s `mma` strategy never
+    /// activated the already-shipped `SoftwareLocalC` per-warp-C-in-
+    /// registers optimization HIP/Vulkan use). Not a pass/fail correctness
+    /// test (CUDA dispatch isn't exercised here, no device needed) — a
+    /// CPU-only budget probe to keep this number visible without a GPU.
+    #[test]
+    fn cuda_smem_budget() {
+        use wh_iron::codegen::cuda::CudaGenerator;
+        let mut k = iron_gdn_wy_plan::kernel_ir_for(DType::F32);
+        k.mode = KernelMode::Reduction;
+        let bytes = CudaGenerator::new().shared_bytes(&k, 512);
+        println!(
+            "iron_gdn_wy_plan CUDA dynamic smem: {bytes} bytes ({:.1} KiB)",
+            bytes as f64 / 1024.0
+        );
+    }
 }
 
 /// New-syntax correctness for the chunk-parallel plan kernel

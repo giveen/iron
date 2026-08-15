@@ -266,15 +266,20 @@ pub fn iron_gated_delta_prep_chunk<T>(
 ///   - `d128_128_32_16`: Qwen3.6-35B-A3B production shape, read from
 ///     `config.json`: `linear_num_value_heads=32` (Hv), `linear_num_key_heads
 ///     =16` (Hk), `linear_key_head_dim=linear_value_head_dim=128` (Dk=Dv).
+///   - `d128_128_48_16`: Qwen3.6-27B production shape — same Dk/Dv/Hk as the
+///     35B-A3B row above but `linear_num_value_heads=48` (Hv); the 27B
+///     config widens Hv only, Hk/Dk/Dv are unchanged from the A3B config.
+///     `NPT = Dk/32 = 4` is identical to the 32-Hv row (NPT depends on Dk,
+///     not Hv) — only the `HV`/grid-`tgid_y` extent differs.
 ///   - `d64_8_4_2`: small GQA test cell (mirrors the generic kernel's own
 ///     `test_iron_gated_delta_prep_chunk_gqa` shape) so correctness has a
 ///     cheap, fast-running fixture instead of only the full production size.
 #[kernel(variants(
-    DK = [128u32, 64u32],
-    DV = [128u32, 8u32],
-    HV = [32u32, 4u32],
-    HK = [16u32, 2u32],
-    NPT = [4, 2],
+    DK = [128u32, 128u32, 64u32],
+    DV = [128u32, 128u32, 8u32],
+    HV = [32u32, 48u32, 4u32],
+    HK = [16u32, 16u32, 2u32],
+    NPT = [4, 4, 2],
     suffix = "d{DK}_{DV}_{HV}_{HK}"
 ))]
 pub fn iron_gated_delta_prep_chunk_fast<T>(
@@ -447,6 +452,7 @@ pub mod kernel_tests {
         iron_gated_delta_prep_chunk,
         iron_gated_delta_prep_chunk_fast_d64_8_4_2,
         iron_gated_delta_prep_chunk_fast_d128_128_32_16,
+        iron_gated_delta_prep_chunk_fast_d128_128_48_16,
     };
     use crate::utils::{pack_f32, unpack_f32};
 
@@ -823,6 +829,20 @@ pub mod kernel_tests {
         setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, false, dt)
     }
 
+    // Qwen3.6-27B production shape via the GENERIC (runtime-hv/hk) kernel
+    // — Dk=Dv=128, Hv=48, Hk=16, T=3 tokens with state carryover. `hv`/`hk`
+    // are ordinary runtime `#[constexpr]` buffer params on this kernel (see
+    // the `_fast` sibling's module doc: constexpr lowers to a runtime
+    // `constant T&` on the Metal/CUDA backends alike), so the generic
+    // kernel needs no code change to support Hv=48 — this pins that down
+    // with a real-shape fixture rather than relying on the smaller GQA
+    // cell above to stand in for it. Same tol rationale as the `_32_16`
+    // fast-variant cell (identical NPT=4, identical fixture magnitudes).
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_qwen36_27b_shape(dt: DType) -> TestSetup {
+        setup(1, 3, 48, 16, 128, 128, 0.3, 0.02, 0.01, -3.0, false, dt)
+    }
+
     /// Same oracle/fixture math as `setup` above, but targets the
     /// shape-specialized `iron_gated_delta_prep_chunk_fast_*` variants:
     /// no `.constexpr(...)` calls since `Dk`/`Dv`/`Hv`/`Hk` are baked into
@@ -1014,6 +1034,33 @@ pub mod kernel_tests {
             0.01,
             -3.0,
             true,
+            dt,
+        )
+    }
+
+    // Qwen3.6-27B production shape (Dk=Dv=128, Hv=48, Hk=16), T=3 tokens
+    // with state carryover — the actual shape this Spark GDN-prefill
+    // validation pass is for (previously untested: every other fixture in
+    // this file, including the "production" `_32_16` cell above, targets
+    // the 35B-A3B config's Hv=32, not 27B's Hv=48). Same fixture params
+    // and tol rationale as `test_iron_gated_delta_prep_chunk_fast_d128_128_32_16`
+    // — only Hv changes, so the per-lane reduction length (NPT=4, driven by
+    // Dk) and hence the ULP accumulation budget are identical.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_fast_d128_128_48_16(dt: DType) -> TestSetup {
+        setup_fast(
+            iron_gated_delta_prep_chunk_fast_d128_128_48_16::kernel_ir_for(dt),
+            1,
+            3,
+            48,
+            16,
+            128,
+            128,
+            0.3,
+            0.02,
+            0.01,
+            -3.0,
+            false,
             dt,
         )
     }

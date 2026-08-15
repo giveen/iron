@@ -90,6 +90,14 @@ const KNOWN_HARD: &[(&str, &str)] = &[
     // contraction: identical with IRON_FMAD=0). f32, bf16, and the gqa fixture
     // all pass on the same kernel.
     ("test_iron_gated_delta_prep_chunk_no_gqa [f16]", "cancellation-amplified rounding"),
+    // NOTE: `iron_gdn_wy_scan`'s single-Dv-tile GEMM2/`state_out` mismatch
+    // (formerly listed here) is FIXED — root cause was a per-SG runtime
+    // `if` gating `coop_tile_load_a`/`coop_tile_run` (whose CUDA codegen
+    // embeds its own `__syncthreads()`) with a warp-divergent predicate,
+    // a barrier-divergence hazard invisible to racecheck/initcheck but
+    // confirmed via `compute-sanitizer --tool synccheck`. See
+    // `GDN_PREFILL_CONTRACT.md` §7.2 and `gated_delta_wy_scan.rs`'s
+    // GEMM1/GEMM2 module-doc + inline comments for the full writeup.
 ];
 
 fn known_hard(name: &str) -> bool { KNOWN_HARD.iter().any(|(k, _)| name.contains(k)) }

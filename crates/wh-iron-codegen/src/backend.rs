@@ -171,6 +171,32 @@ impl TargetProfile {
 
     /// Default CUDA profile (software-decode path; portable Ampere+).
     /// Phase 4 swaps `mma` to `Tcgen05` when compute capability ≥ sm_100.
+    ///
+    /// `mma` is `SoftwareLocalC`, **not** `Wmma16x16x16`: real `wmma`
+    /// fragment codegen for `CoopTile*` is unimplemented (Phase 3 stub —
+    /// `cuda/mod.rs`'s `CoopTileLoadA/LoadB/Run/StoreC` never branch on
+    /// `Wmma16x16x16`, only on `SoftwareLocalC` vs the implicit software
+    /// fallback). Declaring `Wmma16x16x16` here was a dead/aspirational
+    /// value that silently ran every CoopTile kernel through the most
+    /// expensive fallback (full per-warp shared A+B+C, `Software`'s
+    /// baseline) with zero smem savings. `SoftwareLocalC` activates the
+    /// already-shipped, HIP/Vulkan-proven optimization that moves the
+    /// per-warp C accumulator to lane-local registers — same math, less
+    /// shared memory, no new codegen. Root-caused chasing
+    /// `iron_gdn_wy_plan`'s CUDA "244224 bytes > 48KB" dynamic-smem
+    /// rejection (`GDN_PREFILL_CONTRACT.md` §7.1): the honest fixed-cost
+    /// breakdown is 31232 B of the kernel's own `threadgroup_alloc`
+    /// buffers (matches Metal's ~30.5 KiB budget exactly) plus 212992 B of
+    /// per-warp `_CTA_/_CTB_/_CTC_` CoopTile staging (16 warps × 2
+    /// `coop_tile_setup` groups × hardcoded-f32 A+B+C) — this flag removes
+    /// the C third of that (65536 B here). Does not by itself get
+    /// `iron_gdn_wy_plan` under GB10's ~99 KiB dynamic-smem opt-in cap
+    /// (still ~174.5 KiB after); the remaining A/B duplication needs
+    /// either honest `act_dtype` sizing (currently hardcoded `float`
+    /// regardless of the tile's declared dtype — a real but separately
+    /// scoped bug, wide blast radius across all 46 `coop_tile_setup`
+    /// call sites) or a register/shuffle-based warp GEMM that avoids
+    /// shared memory for A/B entirely (no such CUDA strategy exists yet).
     pub fn cuda() -> Self {
         TargetProfile {
             target: Target::Cuda,
@@ -178,7 +204,7 @@ impl TargetProfile {
             shared_mem_kw: "__shared__",
             block_barrier: "__syncthreads()",
             warp_barrier: "__syncwarp()",
-            mma: MmaStrategy::Wmma16x16x16,
+            mma: MmaStrategy::SoftwareLocalC,
             precise_simd_sum: false,
         }
     }
@@ -498,7 +524,12 @@ mod tests {
         assert_eq!(p.block_idx(2), "blockIdx.z");
         assert_eq!(p.unary_intrinsic(UnaryOpKind::Rsqrt), "rsqrtf");
         assert_eq!(p.unary_intrinsic(UnaryOpKind::Exp2), "exp2f");
-        assert_eq!(p.mma, MmaStrategy::Wmma16x16x16);
+        // Not Wmma16x16x16: no real wmma-fragment codegen exists yet
+        // (cuda/mod.rs's CoopTile op emitters never branch on it), so
+        // that value was dead/aspirational. SoftwareLocalC activates the
+        // already-shipped HIP/Vulkan per-warp-C-to-lane-local-registers
+        // optimization — see the doc comment on `cuda()`.
+        assert_eq!(p.mma, MmaStrategy::SoftwareLocalC);
     }
 
     #[test]
