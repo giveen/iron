@@ -1356,7 +1356,11 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use wh_iron::{bench, test::*};
 
-    use super::{iron_gated_delta_prep_chunk, iron_gated_delta_prep_chunk_fast_d128_128_32_16};
+    use super::{
+        iron_gated_delta_prep_chunk,
+        iron_gated_delta_prep_chunk_fast_d128_128_32_16,
+        iron_gated_delta_prep_chunk_fast_d128_128_48_16,
+    };
 
     // Grid `[ceil(dv/4), b*hv, 1]`, TG `[128,1,1]` (4 SGs). NOTE: this
     // shape (Hv=16, Hk=8) does not match Qwen3.6-35B-A3B's actual
@@ -1521,6 +1525,39 @@ pub mod kernel_benches {
         let n_total = b * hv;
         let conv_w = 2 * hk * dk + hv * dv;
         BenchSetup::new(iron_gated_delta_prep_chunk_fast_d128_128_32_16::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
+            .buffer(BenchBuffer::random("a_log", hv, dt))
+            .buffer(BenchBuffer::random("dt_bias", hv, dt))
+            .buffer(BenchBuffer::random("a_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("b_raw", b * t * hv, dt))
+            .buffer(BenchBuffer::random("q_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("k_normed", b * t * hk * dk, dt))
+            .buffer(BenchBuffer::random("state_in", n_total * dv * dk, dt))
+            .buffer(BenchBuffer::zeros("state_out", n_total * dv * dk, dt).output())
+            .buffer(BenchBuffer::zeros("y", b * t * hv * dv, dt).output())
+            .buffer(BenchBuffer::from_vec("t_len", (t as u32).to_le_bytes().to_vec(), DType::U32))
+            .buffer(BenchBuffer::zeros("state_planes", 1, dt))
+            .buffer(BenchBuffer::from_vec(
+                "planes_enabled",
+                0u32.to_le_bytes().to_vec(),
+                DType::U32,
+            ))
+            .constexpr("n_total", n_total as u32)
+            .grid_3d((dv as u32).div_ceil(4), n_total as u32, 1, [128, 1, 1])
+            .bytes_moved((b * t * hv * dv * dt.size_bytes()) as u64)
+    }
+
+    // Dense Qwen3.8-27B prefill shape at the public gate length. Keeping
+    // this variant in the benchmark inventory also makes it available to
+    // downstream artifact emitters, instead of dead-stripping the variant
+    // that was previously referenced only by tests.
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_gated_delta_prep_chunk_fast_qwen38_t512(dt: DType) -> BenchSetup {
+        let (b, t, hv, hk, dv, dk) = (1usize, 512usize, 48usize, 16usize, 128usize, 128usize);
+        let n_total = b * hv;
+        let conv_w = 2 * hk * dk + hv * dv;
+        BenchSetup::new(iron_gated_delta_prep_chunk_fast_d128_128_48_16::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
             .buffer(BenchBuffer::random("conv_out", b * t * conv_w, dt))
             .buffer(BenchBuffer::random("a_log", hv, dt))
