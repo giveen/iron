@@ -213,6 +213,180 @@ pub fn iron_qmm_coop<T>(
     }
 }
 
+/// Wide-N sibling of `iron_qmm_coop` for dense prefill. Doubling BN from
+/// 64 to 128 lets each threadgroup reuse its staged activation tile across
+/// four 16-column cooperative matmuls. Geometry is BM=32, BN=128, BK=32.
+#[kernel]
+#[allow(clippy::too_many_arguments)]
+pub fn iron_qmm_coop_bn128<T>(
+    w: Tensor<u32>,
+    scales: Tensor<T>,
+    biases: Tensor<T>,
+    x: Tensor<T>,
+    mut out: Tensor<T>,
+    #[constexpr] k: u32,
+    #[constexpr] n: u32,
+    #[constexpr] gs_per_row: u32,
+) {
+    let lane = simd_lane;
+    let sg = simd_group_id();
+    let lane_in_tg = sg * 32u32 + lane;
+    let sm = sg / 2u32;
+    let sn = sg & 1u32;
+    let sg_m_base = sm * 16u32;
+    let sg_n_base = sn * 64u32;
+    let x_m_base = tgid_y * 32u32;
+    let w_n_base = tgid_x * 128u32;
+    threadgroup_alloc("Xs", 1152u32, coop_stage(T));
+    threadgroup_alloc("Ws", 4608u32, coop_stage(T));
+    threadgroup_alloc("OutScratch", 1024u32, f32);
+    coop_tile_setup(
+        "gemm0",
+        16u32,
+        16u32,
+        32u32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
+    );
+    coop_tile_setup(
+        "gemm1",
+        16u32,
+        16u32,
+        32u32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
+    );
+    coop_tile_setup(
+        "gemm2",
+        16u32,
+        16u32,
+        32u32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
+    );
+    coop_tile_setup(
+        "gemm3",
+        16u32,
+        16u32,
+        32u32,
+        coop_stage(T),
+        "accumulate",
+        "simdgroup",
+        f32,
+        false,
+        true,
+        false,
+    );
+    coop_tile_zero("gemm0");
+    coop_tile_zero("gemm1");
+    coop_tile_zero("gemm2");
+    coop_tile_zero("gemm3");
+
+    let x_m_row = lane_in_tg / 4u32;
+    let x_k_quad = lane_in_tg & 3u32;
+    let x_k_base = x_k_quad * 8u32;
+    let x_ws_base = x_m_row * 36u32 + x_k_base;
+    let packs_per_row = k / 8u32;
+    let w_row_in_quarter = lane_in_tg / 4u32;
+    let w_pack_in_row = lane_in_tg & 3u32;
+    let xs_sg_off = sg_m_base * 36u32;
+    let ws_sg_off0 = sg_n_base * 36u32;
+    let ws_sg_off1 = (sg_n_base + 16u32) * 36u32;
+    let ws_sg_off2 = (sg_n_base + 32u32) * 36u32;
+    let ws_sg_off3 = (sg_n_base + 48u32) * 36u32;
+    let sg_scratch_off = sg * 256u32;
+
+    for kb in range(0u32, k, 32u32) {
+        let x_row_dev_base = (x_m_base + x_m_row) * k + kb + x_k_base;
+        for i in range(0u32, 8u32, 1u32) {
+            let xv = load(x[x_row_dev_base + i]).cast::<f32>();
+            threadgroup_store("Xs", x_ws_base + i, xv);
+        }
+        for q in range(0u32, 4u32, 1u32) {
+            let w_row = q * 32u32 + w_row_in_quarter;
+            let wn = w_n_base + w_row;
+            let packed = load(w[wn * packs_per_row + kb / 8u32 + w_pack_in_row]);
+            let group = (kb + w_pack_in_row * 8u32) / 64u32;
+            let scale = load(scales[wn * gs_per_row + group]).cast::<f32>();
+            let bias = load(biases[wn * gs_per_row + group]).cast::<f32>();
+            let ws_base = w_row * 36u32 + w_pack_in_row * 8u32;
+            for ni in range(0u32, 8u32, 1u32) {
+                let nibble = ((packed >> (ni * 4u32)) & 15u32).cast::<f32>();
+                threadgroup_store("Ws", ws_base + ni, scale * nibble + bias);
+            }
+        }
+        threadgroup_barrier();
+        coop_tile_load_a("gemm0", "Xs", true, coop_stage(T), 36u32, 16u32, xs_sg_off);
+        coop_tile_load_b("gemm0", "Ws", true, coop_stage(T), 36u32, 16u32, ws_sg_off0);
+        coop_tile_run("gemm0");
+        coop_tile_load_a("gemm1", "Xs", true, coop_stage(T), 36u32, 16u32, xs_sg_off);
+        coop_tile_load_b("gemm1", "Ws", true, coop_stage(T), 36u32, 16u32, ws_sg_off1);
+        coop_tile_run("gemm1");
+        coop_tile_load_a("gemm2", "Xs", true, coop_stage(T), 36u32, 16u32, xs_sg_off);
+        coop_tile_load_b("gemm2", "Ws", true, coop_stage(T), 36u32, 16u32, ws_sg_off2);
+        coop_tile_run("gemm2");
+        coop_tile_load_a("gemm3", "Xs", true, coop_stage(T), 36u32, 16u32, xs_sg_off);
+        coop_tile_load_b("gemm3", "Ws", true, coop_stage(T), 36u32, 16u32, ws_sg_off3);
+        coop_tile_run("gemm3");
+        threadgroup_barrier();
+    }
+
+    let out_m_base = x_m_base + sg_m_base;
+    let out_n_base0 = w_n_base + sg_n_base;
+    let out_n_base1 = out_n_base0 + 16u32;
+    let out_n_base2 = out_n_base0 + 32u32;
+    let out_n_base3 = out_n_base0 + 48u32;
+    let o_row = lane / 2u32;
+    let o_col_base = (lane & 1u32) * 8u32;
+
+    coop_tile_store_c("gemm0", "OutScratch", true, f32, 16u32, 16u32, sg_scratch_off);
+    threadgroup_barrier();
+    for i in range(0u32, 8u32, 1u32) {
+        let col = o_col_base + i;
+        let v = threadgroup_load("OutScratch", sg_scratch_off + o_row * 16u32 + col);
+        store(out[(out_m_base + o_row) * n + out_n_base0 + col], v.cast::<T>());
+    }
+    threadgroup_barrier();
+    coop_tile_store_c("gemm1", "OutScratch", true, f32, 16u32, 16u32, sg_scratch_off);
+    threadgroup_barrier();
+    for i in range(0u32, 8u32, 1u32) {
+        let col = o_col_base + i;
+        let v = threadgroup_load("OutScratch", sg_scratch_off + o_row * 16u32 + col);
+        store(out[(out_m_base + o_row) * n + out_n_base1 + col], v.cast::<T>());
+    }
+    threadgroup_barrier();
+    coop_tile_store_c("gemm2", "OutScratch", true, f32, 16u32, 16u32, sg_scratch_off);
+    threadgroup_barrier();
+    for i in range(0u32, 8u32, 1u32) {
+        let col = o_col_base + i;
+        let v = threadgroup_load("OutScratch", sg_scratch_off + o_row * 16u32 + col);
+        store(out[(out_m_base + o_row) * n + out_n_base2 + col], v.cast::<T>());
+    }
+    threadgroup_barrier();
+    coop_tile_store_c("gemm3", "OutScratch", true, f32, 16u32, 16u32, sg_scratch_off);
+    threadgroup_barrier();
+    for i in range(0u32, 8u32, 1u32) {
+        let col = o_col_base + i;
+        let v = threadgroup_load("OutScratch", sg_scratch_off + o_row * 16u32 + col);
+        store(out[(out_m_base + o_row) * n + out_n_base3 + col], v.cast::<T>());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use wh_iron::core::{DType, ir::KernelMode};
@@ -235,6 +409,23 @@ mod tests {
                 runs, 2,
                 "expected one CoopTileRun per N-half per K-block-body (unrolled once in IR)"
             );
+        }
+    }
+
+    #[test]
+    fn bn128_ir_uses_four_coop_tile_ops_no_inline_msl() {
+        use wh_iron::core::ir::Op;
+        for dt in [DType::F32, DType::F16, DType::BF16] {
+            let kernel = iron_qmm_coop_bn128::kernel_ir_for(dt);
+            assert_eq!(kernel.name, "iron_qmm_coop_bn128");
+            let all_ops = || {
+                std::iter::once(&kernel.body)
+                    .chain(kernel.blocks.values())
+                    .flat_map(|block| block.ops.iter())
+            };
+            assert!(!all_ops().any(|op| matches!(op, Op::InlineMsl { .. })));
+            assert_eq!(all_ops().filter(|op| matches!(op, Op::CoopTileSetup { .. })).count(), 4);
+            assert_eq!(all_ops().filter(|op| matches!(op, Op::CoopTileRun { .. })).count(), 4);
         }
     }
 
@@ -263,7 +454,7 @@ mod tests {
 pub mod kernel_tests {
     use wh_iron::{test::*, test_kernel};
 
-    use super::iron_qmm_coop;
+    use super::{iron_qmm_coop, iron_qmm_coop_bn128};
     use crate::kernels::gemm::quantized::kernel_tests::qx_setup;
 
     // Single-TG cell: M=32, N=64 (one gemm0 + one gemm1 tile), K=512.
@@ -317,6 +508,22 @@ pub mod kernel_tests {
             dt,
         )
     }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_qmm_coop_bn128(dt: DType) -> TestSetup {
+        qx_setup(
+            iron_qmm_coop_bn128::kernel_ir_for(dt),
+            32,
+            128,
+            512,
+            4,
+            64,
+            true,
+            [1, 1, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
 }
 
 /// New-syntax benchmark for `iron_qmm_coop`. Without a `#[bench]` entry the
@@ -328,7 +535,7 @@ pub mod kernel_tests {
 pub mod kernel_benches {
     use wh_iron::{bench, test::*};
 
-    use super::iron_qmm_coop;
+    use super::{iron_qmm_coop, iron_qmm_coop_bn128};
     use crate::kernels::gemm::quantized::kernel_benches::qmb;
 
     #[bench(dtypes = [f32, f16, bf16])]
@@ -342,6 +549,38 @@ pub mod kernel_benches {
             64,
             true,
             [64, 1, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
+
+    #[bench(dtypes = [bf16])]
+    fn bench_qmm_coop_qwen38_gate(dt: DType) -> BenchSetup {
+        qmb(
+            iron_qmm_coop::kernel_ir_for(dt),
+            544,
+            17_408,
+            5_120,
+            4,
+            64,
+            true,
+            [272, 17, 1],
+            [128, 1, 1],
+            dt,
+        )
+    }
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_qmm_coop_bn128_qwen38_gate(dt: DType) -> BenchSetup {
+        qmb(
+            iron_qmm_coop_bn128::kernel_ir_for(dt),
+            544,
+            17_408,
+            5_120,
+            4,
+            64,
+            true,
+            [136, 17, 1],
             [128, 1, 1],
             dt,
         )
