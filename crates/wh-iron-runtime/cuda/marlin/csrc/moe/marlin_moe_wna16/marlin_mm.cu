@@ -567,7 +567,7 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
 // thread_config -- 3 for the small-batch table used at M=1) entirely on
 // the hot path; `determine_exec_config`'s result only depends on the
 // shape/dtype/group_size/sms, none of which vary call-to-call here.
-extern "C" void ffai_marlin_pick_config(int prob_m, int prob_n, int prob_k,
+extern "C" void iron_marlin_pick_config(int prob_m, int prob_n, int prob_k,
                                         int group_size, int sms,
                                         int* thread_k_out, int* thread_n_out,
                                         int* blocks_per_sm_out) {

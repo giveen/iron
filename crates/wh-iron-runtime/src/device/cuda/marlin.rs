@@ -33,7 +33,7 @@ impl CudaDevice {
         #[cfg(have_marlin)]
         {
             unsafe extern "C" {
-                fn ffai_marlin_repack(
+                fn iron_marlin_repack(
                     b_q_weight: *const c_void,
                     out: *mut c_void,
                     size_k: c_int,
@@ -44,7 +44,7 @@ impl CudaDevice {
                 );
             }
             unsafe {
-                ffai_marlin_repack(
+                iron_marlin_repack(
                     b_q_weight as *const c_void,
                     out as *mut c_void,
                     size_k as c_int,
@@ -80,7 +80,7 @@ impl CudaDevice {
         #[cfg(have_marlin)]
         {
             unsafe extern "C" {
-                fn ffai_marlin_permute_scales(
+                fn iron_marlin_permute_scales(
                     in_: *const c_void,
                     out: *mut c_void,
                     num_groups: c_int,
@@ -89,7 +89,7 @@ impl CudaDevice {
                 );
             }
             unsafe {
-                ffai_marlin_permute_scales(
+                iron_marlin_permute_scales(
                     in_ as *const c_void,
                     out as *mut c_void,
                     num_groups as c_int,
@@ -126,7 +126,7 @@ impl CudaDevice {
         #[cfg(have_marlin)]
         {
             unsafe extern "C" {
-                fn ffai_marlin_build_routing(
+                fn iron_marlin_build_routing(
                     off: *const c_int,
                     n_exp: c_int,
                     blk: c_int,
@@ -138,7 +138,7 @@ impl CudaDevice {
                 );
             }
             unsafe {
-                ffai_marlin_build_routing(
+                iron_marlin_build_routing(
                     off as *const c_int,
                     n_exp as c_int,
                     blk as c_int,
@@ -196,7 +196,7 @@ impl CudaDevice {
         #[cfg(have_marlin)]
         {
             unsafe extern "C" {
-                fn ffai_marlin_gemm_u4b8_f16(
+                fn iron_marlin_gemm_u4b8_f16(
                     a: *const c_void,
                     b_repacked: *const c_void,
                     c: *mut c_void,
@@ -220,7 +220,7 @@ impl CudaDevice {
                 );
             }
             unsafe {
-                ffai_marlin_gemm_u4b8_f16(
+                iron_marlin_gemm_u4b8_f16(
                     a as *const c_void,
                     b_repacked as *const c_void,
                     c as *mut c_void,
@@ -296,7 +296,7 @@ impl CudaDevice {
         #[cfg(have_marlin)]
         {
             unsafe extern "C" {
-                fn ffai_marlin_pick_config(
+                fn iron_marlin_pick_config(
                     prob_m: c_int,
                     prob_n: c_int,
                     prob_k: c_int,
@@ -311,7 +311,7 @@ impl CudaDevice {
             let mut thread_n: c_int = -1;
             let mut blocks_per_sm: c_int = -1;
             unsafe {
-                ffai_marlin_pick_config(
+                iron_marlin_pick_config(
                     prob_m as c_int,
                     prob_n as c_int,
                     prob_k as c_int,

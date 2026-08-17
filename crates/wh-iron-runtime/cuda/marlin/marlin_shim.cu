@@ -10,7 +10,7 @@
 // copies of the archived csrc; the format is documented in dequant.h).
 //
 // *** STATUS (2026-08-15, round-7): NUMERICS FIXED, caller must call
-// ffai_marlin_permute_scales() once per weight after ffai_marlin_repack().
+// iron_marlin_permute_scales() once per weight after iron_marlin_repack().
 // Round-6 left two independent bugs, both now root-caused with decisive
 // evidence (compute-sanitizer + isolation probes) and fixed:
 //
@@ -94,7 +94,7 @@ __global__ void marlin_routing_kernel(const int* off, int n_exp, int blk, int mt
 // not project-specific -- the same permutation used by the family's
 // upstream host-side `marlin_permute_scales` glue, which lives outside
 // this csrc and was never ported here). Round-6 shipped weight repack
-// (`ffai_marlin_repack`) but no scale-side counterpart, so raw
+// (`iron_marlin_repack`) but no scale-side counterpart, so raw
 // [num_groups, size_n] group scales were fed straight to a kernel that
 // expects them column-permuted -- silently correct whenever the scale
 // value happens to be uniform across a permuted group (why the round-6
@@ -125,22 +125,22 @@ extern "C" {
 // Repack one weight's GPTQ-packed [size_k/8, size_n] u32 weights (u4, K-major
 // packing, 8 values/u32) into the marlin tile layout. num_bits=4 is hardwired
 // in `run_repack` (repack_standalone.cu) — matches our u4b8 GEMM below.
-void ffai_marlin_repack(const unsigned* b_q_weight, unsigned* out, int size_k, int size_n,
+void iron_marlin_repack(const unsigned* b_q_weight, unsigned* out, int size_k, int size_n,
                         int sms, int max_shared_mem, cudaStream_t stream) {
   run_repack(b_q_weight, out, size_k, size_n, sms, max_shared_mem, stream);
 }
 
-void ffai_marlin_build_routing(const int* off, int n_exp, int blk, int mt,
+void iron_marlin_build_routing(const int* off, int n_exp, int blk, int mt,
                                int* stid, int* eid, int* ntpp, cudaStream_t stream) {
   marlin_routing_kernel<<<1, n_exp, 2*n_exp*sizeof(int), stream>>>(off, n_exp, blk, mt, stid, eid, ntpp);
 }
 
 // One-time (per weight-load) scale-column permutation companion to
-// ffai_marlin_repack -- see marlin_permute_scales_kernel above for why
+// iron_marlin_repack -- see marlin_permute_scales_kernel above for why
 // this is required. `in`/`out` are [num_groups, size_n] f16 device
 // buffers; `out` may not alias `in` (the permutation is not in-place
 // safe -- each output chunk reads all 64 source columns of its chunk).
-void ffai_marlin_permute_scales(const void* in, void* out, int num_groups,
+void iron_marlin_permute_scales(const void* in, void* out, int num_groups,
                                 int size_n, cudaStream_t stream) {
   int total = num_groups * size_n;
   int threads = 256;
@@ -151,10 +151,10 @@ void ffai_marlin_permute_scales(const void* in, void* out, int num_groups,
 }
 
 // Small-M symmetric-u4 (kU4B8) W4A16 GEMM: A [M,K] f16 activations,
-// B_repacked = ffai_marlin_repack() output of a [K/8,N] u32 GPTQ-packed u4b8
+// B_repacked = iron_marlin_repack() output of a [K/8,N] u32 GPTQ-packed u4b8
 // weight, b_scales = [K/group_size, N] f16 per-group scales, C = [M,N] f16
 // out. `sorted_token_ids`/`expert_ids`/`num_tokens_past_padded` come from
-// `ffai_marlin_build_routing` called once with a trivial single-"expert"
+// `iron_marlin_build_routing` called once with a trivial single-"expert"
 // [0, M) range (this GEMM has no MoE routing of its own — it is marlin_mm's
 // generic grouped-GEMM driver run with num_experts=1, top_k=1). `workspace`
 // = int32 locks buffer (size >= min(N/64 * (padded_M/8), sms*4)); `c_tmp` =
@@ -167,11 +167,11 @@ void ffai_marlin_permute_scales(const void* in, void* out, int num_groups,
 // falls through to marlin_mm's auto-config search (kept for callers that
 // don't have a cached config yet / debugging), but the decode hot path
 // (qwen35.rs) resolves these ONCE per weight class at load time via
-// `ffai_marlin_pick_config` (see marlin_mm.cu) and passes the resolved
+// `iron_marlin_pick_config` (see marlin_mm.cu) and passes the resolved
 // triple on every call, skipping the auto path's per-call
 // cudaFuncGetAttributes probe loop (round-9's census-vs-isolated-
 // microbench ~15ms/step integration gap).
-void ffai_marlin_gemm_u4b8_f16(
+void iron_marlin_gemm_u4b8_f16(
     const void* A, const void* B_repacked, void* C, void* C_tmp,
     const void* b_scales,
     const void* sorted_token_ids, const void* expert_ids, const void* num_tokens_past_padded,
