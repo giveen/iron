@@ -1117,9 +1117,6 @@ pub fn iron_qmm_bm3<T>(
     let lane_x_off = lane * 8u32;
     let lane_pack_off = lane;
     for _b in range(0u32, k, 256u32) {
-        let s_16 = 0.0625f32;
-        let s_256 = 0.00390625f32;
-        let s_4096 = 0.000244140625f32;
         // ── Load 8 X values for M-row A ──
         let xb_a = x_base_a + _b + lane_x_off;
         let x0_a = load(x[xb_a]).cast::<f32>();
@@ -1131,12 +1128,12 @@ pub fn iron_qmm_bm3<T>(
         let x6_a_raw = load(x[xb_a + 6u32]).cast::<f32>();
         let x7_a_raw = load(x[xb_a + 7u32]).cast::<f32>();
         let xs_a = x0_a + x1_a_raw + x2_a_raw + x3_a_raw + x4_a + x5_a_raw + x6_a_raw + x7_a_raw;
-        let x1_a = x1_a_raw * s_16;
-        let x2_a = x2_a_raw * s_256;
-        let x3_a = x3_a_raw * s_4096;
-        let x5_a = x5_a_raw * s_16;
-        let x6_a = x6_a_raw * s_256;
-        let x7_a = x7_a_raw * s_4096;
+        let x1_a = x1_a_raw;
+        let x2_a = x2_a_raw;
+        let x3_a = x3_a_raw;
+        let x5_a = x5_a_raw;
+        let x6_a = x6_a_raw;
+        let x7_a = x7_a_raw;
         // ── Load 8 X values for M-row B ──
         let xb_b = x_base_b + _b + lane_x_off;
         let x0_b = load(x[xb_b]).cast::<f32>();
@@ -1148,12 +1145,12 @@ pub fn iron_qmm_bm3<T>(
         let x6_b_raw = load(x[xb_b + 6u32]).cast::<f32>();
         let x7_b_raw = load(x[xb_b + 7u32]).cast::<f32>();
         let xs_b = x0_b + x1_b_raw + x2_b_raw + x3_b_raw + x4_b + x5_b_raw + x6_b_raw + x7_b_raw;
-        let x1_b = x1_b_raw * s_16;
-        let x2_b = x2_b_raw * s_256;
-        let x3_b = x3_b_raw * s_4096;
-        let x5_b = x5_b_raw * s_16;
-        let x6_b = x6_b_raw * s_256;
-        let x7_b = x7_b_raw * s_4096;
+        let x1_b = x1_b_raw;
+        let x2_b = x2_b_raw;
+        let x3_b = x3_b_raw;
+        let x5_b = x5_b_raw;
+        let x6_b = x6_b_raw;
+        let x7_b = x7_b_raw;
         // ── Load 8 X values for M-row C ──
         let xb_c = x_base_c + _b + lane_x_off;
         let x0_c = load(x[xb_c]).cast::<f32>();
@@ -1165,12 +1162,12 @@ pub fn iron_qmm_bm3<T>(
         let x6_c_raw = load(x[xb_c + 6u32]).cast::<f32>();
         let x7_c_raw = load(x[xb_c + 7u32]).cast::<f32>();
         let xs_c = x0_c + x1_c_raw + x2_c_raw + x3_c_raw + x4_c + x5_c_raw + x6_c_raw + x7_c_raw;
-        let x1_c = x1_c_raw * s_16;
-        let x2_c = x2_c_raw * s_256;
-        let x3_c = x3_c_raw * s_4096;
-        let x5_c = x5_c_raw * s_16;
-        let x6_c = x6_c_raw * s_256;
-        let x7_c = x7_c_raw * s_4096;
+        let x1_c = x1_c_raw;
+        let x2_c = x2_c_raw;
+        let x3_c = x3_c_raw;
+        let x5_c = x5_c_raw;
+        let x6_c = x6_c_raw;
+        let x7_c = x7_c_raw;
         // VARIANT A: gs_per_row=64 means K-elements/group=64. With lane_x_off=lane*8,
         // each lane's 8 X-values span exactly half a group (8 < 64), so the group
         // index is constant within a lane's 8-elt slice. _b advances by 256 per
@@ -1184,13 +1181,13 @@ pub fn iron_qmm_bm3<T>(
         let s0 = load(scales[sb_base0 + g]).cast::<f32>();
         let bi0 = load(biases[sb_base0 + g]).cast::<f32>();
         let q00 = (p00 & 15u32).cast::<f32>();
-        let q01 = (p00 & 240u32).cast::<f32>();
-        let q02 = (p00 & 3840u32).cast::<f32>();
-        let q03 = (p00 & 61440u32).cast::<f32>();
+        let q01 = ((p00 >> 4u32) & 15u32).cast::<f32>();
+        let q02 = ((p00 >> 8u32) & 15u32).cast::<f32>();
+        let q03 = ((p00 >> 12u32) & 15u32).cast::<f32>();
         let q04 = (p00_hi & 15u32).cast::<f32>();
-        let q05 = (p00_hi & 240u32).cast::<f32>();
-        let q06 = (p00_hi & 3840u32).cast::<f32>();
-        let q07 = (p00_hi & 61440u32).cast::<f32>();
+        let q05 = ((p00_hi >> 4u32) & 15u32).cast::<f32>();
+        let q06 = ((p00_hi >> 8u32) & 15u32).cast::<f32>();
+        let q07 = ((p00_hi >> 12u32) & 15u32).cast::<f32>();
         let qd0_a = q00 * x0_a
             + q01 * x1_a
             + q02 * x2_a
@@ -1224,13 +1221,13 @@ pub fn iron_qmm_bm3<T>(
         let s1 = load(scales[sb_base1 + g]).cast::<f32>();
         let bi1 = load(biases[sb_base1 + g]).cast::<f32>();
         let q10 = (p10 & 15u32).cast::<f32>();
-        let q11 = (p10 & 240u32).cast::<f32>();
-        let q12 = (p10 & 3840u32).cast::<f32>();
-        let q13 = (p10 & 61440u32).cast::<f32>();
+        let q11 = ((p10 >> 4u32) & 15u32).cast::<f32>();
+        let q12 = ((p10 >> 8u32) & 15u32).cast::<f32>();
+        let q13 = ((p10 >> 12u32) & 15u32).cast::<f32>();
         let q14 = (p10_hi & 15u32).cast::<f32>();
-        let q15 = (p10_hi & 240u32).cast::<f32>();
-        let q16 = (p10_hi & 3840u32).cast::<f32>();
-        let q17 = (p10_hi & 61440u32).cast::<f32>();
+        let q15 = ((p10_hi >> 4u32) & 15u32).cast::<f32>();
+        let q16 = ((p10_hi >> 8u32) & 15u32).cast::<f32>();
+        let q17 = ((p10_hi >> 12u32) & 15u32).cast::<f32>();
         let qd1_a = q10 * x0_a
             + q11 * x1_a
             + q12 * x2_a
@@ -1264,13 +1261,13 @@ pub fn iron_qmm_bm3<T>(
         let s2 = load(scales[sb_base2 + g]).cast::<f32>();
         let bi2 = load(biases[sb_base2 + g]).cast::<f32>();
         let q20 = (p20 & 15u32).cast::<f32>();
-        let q21 = (p20 & 240u32).cast::<f32>();
-        let q22 = (p20 & 3840u32).cast::<f32>();
-        let q23 = (p20 & 61440u32).cast::<f32>();
+        let q21 = ((p20 >> 4u32) & 15u32).cast::<f32>();
+        let q22 = ((p20 >> 8u32) & 15u32).cast::<f32>();
+        let q23 = ((p20 >> 12u32) & 15u32).cast::<f32>();
         let q24 = (p20_hi & 15u32).cast::<f32>();
-        let q25 = (p20_hi & 240u32).cast::<f32>();
-        let q26 = (p20_hi & 3840u32).cast::<f32>();
-        let q27 = (p20_hi & 61440u32).cast::<f32>();
+        let q25 = ((p20_hi >> 4u32) & 15u32).cast::<f32>();
+        let q26 = ((p20_hi >> 8u32) & 15u32).cast::<f32>();
+        let q27 = ((p20_hi >> 12u32) & 15u32).cast::<f32>();
         let qd2_a = q20 * x0_a
             + q21 * x1_a
             + q22 * x2_a
@@ -1304,13 +1301,13 @@ pub fn iron_qmm_bm3<T>(
         let s3 = load(scales[sb_base3 + g]).cast::<f32>();
         let bi3 = load(biases[sb_base3 + g]).cast::<f32>();
         let q30 = (p30 & 15u32).cast::<f32>();
-        let q31 = (p30 & 240u32).cast::<f32>();
-        let q32 = (p30 & 3840u32).cast::<f32>();
-        let q33 = (p30 & 61440u32).cast::<f32>();
+        let q31 = ((p30 >> 4u32) & 15u32).cast::<f32>();
+        let q32 = ((p30 >> 8u32) & 15u32).cast::<f32>();
+        let q33 = ((p30 >> 12u32) & 15u32).cast::<f32>();
         let q34 = (p30_hi & 15u32).cast::<f32>();
-        let q35 = (p30_hi & 240u32).cast::<f32>();
-        let q36 = (p30_hi & 3840u32).cast::<f32>();
-        let q37 = (p30_hi & 61440u32).cast::<f32>();
+        let q35 = ((p30_hi >> 4u32) & 15u32).cast::<f32>();
+        let q36 = ((p30_hi >> 8u32) & 15u32).cast::<f32>();
+        let q37 = ((p30_hi >> 12u32) & 15u32).cast::<f32>();
         let qd3_a = q30 * x0_a
             + q31 * x1_a
             + q32 * x2_a
