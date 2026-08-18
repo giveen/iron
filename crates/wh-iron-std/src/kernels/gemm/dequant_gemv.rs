@@ -39,8 +39,9 @@
 //!
 //! `#[kernel(variants(BITS = [2, 3, 4, 5, 6, 8], suffix = "int{BITS}"))]`
 //! produces kernels: `iron_dequant_gemv_int2`, `_int3`, `_int4`, `_int5`,
-//! `_int6`, `_int8`. The `iron_dequant_gemv_int4_fast` kernel is a separate
-//! perf-tuned variant with a different algorithm.
+//! `_int6`, `_int8`. The `iron_dequant_gemv_int2_fast` and
+//! `iron_dequant_gemv_int4_fast` kernels are separate perf-tuned variants
+//! with a different algorithm.
 
 use wh_iron::kernel;
 
@@ -286,6 +287,97 @@ pub fn iron_dequant_gemv<T>(
     let total = reduce_sum(acc);
     if tid == 0u32 {
         store(output[row], total.cast::<T>());
+    }
+}
+
+// Perf-tuned int2 GEMV, 8 output rows per TG.
+//
+// Uses the same 8-row geometry as `iron_dequant_gemv_int4_fast`, but each
+// lane consumes one packed u32 holding 16 2-bit values. The input values are
+// loaded once and reused across four weight rows in each simdgroup.
+
+/// Perf-tuned int2 dequant GEMV, 8 rows per threadgroup.
+///
+/// `output[row] = Σ_i (q[row,i]·scale_g + bias_g) · input[i]`
+/// for 8 consecutive output rows per dispatch. Grid: `[out_dim/8, 1, 1]`,
+/// TPG = 64, group_size = 64, in_dim a multiple of 512.
+#[kernel]
+pub fn iron_dequant_gemv_int2_fast<T>(
+    weight: Tensor<u32>,
+    scales: Tensor<T>,
+    biases: Tensor<T>,
+    input: Tensor<T>,
+    output: Tensor<T>,
+    #[constexpr] in_dim: u32,
+    #[constexpr] group_size: u32,
+) {
+    let tg = tgid_x;
+    let sg = simd_id;
+    let lane = simd_lane;
+    let base_row = tg * 8u32 + sg * 4u32;
+    let gs_per_row = in_dim / group_size;
+    let packs_per_row = in_dim / 16u32;
+    let lane_x_off = lane * 16u32;
+    stack_alloc("accs", 4, "f32");
+    for _r in range(0u32, 4u32, 1u32) {
+        stack_store("accs", _r, 0.0f32);
+    }
+
+    for _b in range(0u32, in_dim, 512u32) {
+        let xb = _b + lane_x_off;
+        let x0 = load(input[xb]).cast::<f32>();
+        let x1 = load(input[xb + 1u32]).cast::<f32>();
+        let x2 = load(input[xb + 2u32]).cast::<f32>();
+        let x3 = load(input[xb + 3u32]).cast::<f32>();
+        let x4 = load(input[xb + 4u32]).cast::<f32>();
+        let x5 = load(input[xb + 5u32]).cast::<f32>();
+        let x6 = load(input[xb + 6u32]).cast::<f32>();
+        let x7 = load(input[xb + 7u32]).cast::<f32>();
+        let x8 = load(input[xb + 8u32]).cast::<f32>();
+        let x9 = load(input[xb + 9u32]).cast::<f32>();
+        let x10 = load(input[xb + 10u32]).cast::<f32>();
+        let x11 = load(input[xb + 11u32]).cast::<f32>();
+        let x12 = load(input[xb + 12u32]).cast::<f32>();
+        let x13 = load(input[xb + 13u32]).cast::<f32>();
+        let x14 = load(input[xb + 14u32]).cast::<f32>();
+        let x15 = load(input[xb + 15u32]).cast::<f32>();
+        let xs =
+            x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 + x12 + x13 + x14 + x15;
+        let g = xb / group_size;
+        let pack_off = _b / 16u32 + lane;
+        for _r in range(0u32, 4u32, 1u32) {
+            let row = base_row + _r;
+            let packed = load(weight[row * packs_per_row + pack_off]);
+            let sb = row * gs_per_row + g;
+            let s = load(scales[sb]).cast::<f32>();
+            let bi = load(biases[sb]).cast::<f32>();
+            let qd = (packed & 3u32).cast::<f32>() * x0
+                + ((packed >> 2u32) & 3u32).cast::<f32>() * x1
+                + ((packed >> 4u32) & 3u32).cast::<f32>() * x2
+                + ((packed >> 6u32) & 3u32).cast::<f32>() * x3
+                + ((packed >> 8u32) & 3u32).cast::<f32>() * x4
+                + ((packed >> 10u32) & 3u32).cast::<f32>() * x5
+                + ((packed >> 12u32) & 3u32).cast::<f32>() * x6
+                + ((packed >> 14u32) & 3u32).cast::<f32>() * x7
+                + ((packed >> 16u32) & 3u32).cast::<f32>() * x8
+                + ((packed >> 18u32) & 3u32).cast::<f32>() * x9
+                + ((packed >> 20u32) & 3u32).cast::<f32>() * x10
+                + ((packed >> 22u32) & 3u32).cast::<f32>() * x11
+                + ((packed >> 24u32) & 3u32).cast::<f32>() * x12
+                + ((packed >> 26u32) & 3u32).cast::<f32>() * x13
+                + ((packed >> 28u32) & 3u32).cast::<f32>() * x14
+                + ((packed >> 30u32) & 3u32).cast::<f32>() * x15;
+            let prev = stack_load("accs", _r);
+            stack_store("accs", _r, prev + s * qd + bi * xs);
+        }
+    }
+
+    for _r in range(0u32, 4u32, 1u32) {
+        let v = stack_load("accs", _r);
+        let r = simd_sum(v);
+        if lane == 0u32 {
+            store(output[base_row + _r], r.cast::<T>());
+        }
     }
 }
 
@@ -799,6 +891,36 @@ pub mod kernel_tests {
     }
 
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_dequant_gemv_int2_fast(dt: DType) -> TestSetup {
+        let (out_dim, in_dim, group_size) = (8usize, 512usize, 64usize);
+        gemv_setup(
+            iron_dequant_gemv_int2_fast::kernel_ir_for(dt),
+            2,
+            out_dim,
+            in_dim,
+            group_size,
+            (out_dim / 8) as u32,
+            64,
+            dt,
+        )
+    }
+
+    #[test_kernel(dtypes = [bf16], tol = [2e-1])]
+    fn test_dequant_gemv_int2_fast_qwen38(dt: DType) -> TestSetup {
+        let (out_dim, in_dim, group_size) = (64usize, 5120usize, 64usize);
+        gemv_setup(
+            iron_dequant_gemv_int2_fast::kernel_ir_for(dt),
+            2,
+            out_dim,
+            in_dim,
+            group_size,
+            (out_dim / 8) as u32,
+            64,
+            dt,
+        )
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_dequant_gemv_int4_gathered(dt: DType) -> TestSetup {
         gathered_gemv_setup(dt, 16, 512, vec![15, 0, 7, 3, 12, 5, 1, 9])
     }
@@ -861,6 +983,11 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_gemv_int4_fast(dt: DType) -> BenchSetup {
         gb(iron_dequant_gemv_int4_fast::kernel_ir_for(dt), 4, 4096, 4096, 64, 4096 / 8, 64, dt)
+    }
+
+    #[bench(dtypes = [f32, f16, bf16])]
+    fn bench_dequant_gemv_int2_fast(dt: DType) -> BenchSetup {
+        gb(iron_dequant_gemv_int2_fast::kernel_ir_for(dt), 2, 4096, 4096, 64, 4096 / 8, 64, dt)
     }
 
     #[bench(dtypes = [bf16])]
