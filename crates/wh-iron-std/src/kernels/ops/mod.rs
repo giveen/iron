@@ -12,6 +12,7 @@
 
 pub mod arange;
 pub mod arg_reduce;
+pub mod argmax_rows;
 pub mod axpy_scalar_inplace;
 pub mod binary;
 pub mod binary_two;
