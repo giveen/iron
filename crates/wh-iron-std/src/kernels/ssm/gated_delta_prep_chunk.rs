@@ -33,8 +33,8 @@
 //!   - `t_len`     : Tensor<u32> [1]                     runtime chunk length
 //!   - `planes_enabled` : Tensor<u32> [1]                runtime mode; 0 = no plane
 //!     writes (byte-identical to the pre-plane kernel), 1 = write every token,
-//!     and 2 = write every token except the final live state. See "Per-token
-//!     state planes" below.
+//!     2 = write every token except the final live state, and 3 = write only
+//!     the final four rollback planes. See "Per-token state planes" below.
 //!
 //! Outputs:
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
@@ -66,7 +66,9 @@
 //! (disabled) path pays no memory-traffic cost beyond the branch test
 //! itself. Mode 2 omits the final plane for rollback consumers that keep
 //! the live state after a full acceptance and only select earlier planes
-//! after a partial acceptance. `n_total`/`state_planes` are validated/sized by the caller;
+//! after a partial acceptance. Mode 3 retains only the final four rollback
+//! planes for callers that keep a pre-sweep snapshot as an earlier-target
+//! fallback. `n_total`/`state_planes` are validated/sized by the caller;
 //! this kernel does not bounds-check `T` against the plane buffer's
 //! actual capacity.
 //!
@@ -211,7 +213,12 @@ pub fn iron_gated_delta_prep_chunk<T>(
             // state_planes[t] — default-off, gated on planes_on so the
             // disabled path is just one extra register compare per
             // token (no stores, no extra memory traffic).
-            if planes_on != 0u32 && (planes_on != 2u32 || t + 1u32 < t_total) {
+            let is_prefix = t + 1u32 < t_total;
+            let is_tail_prefix = is_prefix && t + 5u32 >= t_total;
+            if planes_on == 1u32
+                || (planes_on == 2u32 && is_prefix)
+                || (planes_on == 3u32 && is_tail_prefix)
+            {
                 let plane_base = t * plane_t_stride + state_base;
                 for i in range(0u32, n_per_t, 1u32) {
                     let s_idx = n_per_t * dk_idx + i;
@@ -382,7 +389,12 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
             // ─── Optional: mirror this token's post-update state into
             // state_planes[t] — see the generic kernel's identical block
             // for the design rationale.
-            if planes_on != 0u32 && (planes_on != 2u32 || t + 1u32 < t_total) {
+            let is_prefix = t + 1u32 < t_total;
+            let is_tail_prefix = is_prefix && t + 5u32 >= t_total;
+            if planes_on == 1u32
+                || (planes_on == 2u32 && is_prefix)
+                || (planes_on == 3u32 && is_tail_prefix)
+            {
                 let plane_base = t * plane_t_stride + state_base;
                 for i in range(0u32, NPT, 1u32) {
                     let s_idx = NPT * dk_idx + i;
@@ -928,6 +940,10 @@ pub mod kernel_tests {
         if plane_mode == 2 {
             let final_plane = (t_total - 1) * state_in.len();
             planes_exp[final_plane..].fill(0.0);
+        } else if plane_mode == 3 {
+            let first_tail_plane = t_total.saturating_sub(5);
+            planes_exp[..first_tail_plane * state_in.len()].fill(0.0);
+            planes_exp[(t_total - 1) * state_in.len()..].fill(0.0);
         }
         let planes_buf =
             if capture_planes { vec![0.0_f32; planes_exp.len()] } else { vec![0.0_f32; 1] };
@@ -994,6 +1010,12 @@ pub mod kernel_tests {
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_iron_gated_delta_prep_chunk_prefix_planes_gqa(dt: DType) -> TestSetup {
         setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, 2, dt)
+    }
+
+    // Tail mode leaves early and final planes untouched.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_iron_gated_delta_prep_chunk_tail_planes_gqa(dt: DType) -> TestSetup {
+        setup(1, 8, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, 3, dt)
     }
 
     // Hv == Hk (no key-sharing) at minimum dk=32, T=3 tokens.
@@ -1125,6 +1147,10 @@ pub mod kernel_tests {
         if plane_mode == 2 {
             let final_plane = (t_total - 1) * state_in.len();
             planes_exp[final_plane..].fill(0.0);
+        } else if plane_mode == 3 {
+            let first_tail_plane = t_total.saturating_sub(5);
+            planes_exp[..first_tail_plane * state_in.len()].fill(0.0);
+            planes_exp[(t_total - 1) * state_in.len()..].fill(0.0);
         }
         let planes_buf =
             if capture_planes { vec![0.0_f32; planes_exp.len()] } else { vec![0.0_f32; 1] };
@@ -1280,6 +1306,26 @@ pub mod kernel_tests {
             0.01,
             -3.0,
             0,
+            dt,
+        )
+    }
+
+    // Production dense 27B shape with sparse tail-plane capture.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_fast_tail_planes_d128_128_48_16(dt: DType) -> TestSetup {
+        setup_fast(
+            iron_gated_delta_prep_chunk_fast_d128_128_48_16::kernel_ir_for(dt),
+            1,
+            8,
+            48,
+            16,
+            128,
+            128,
+            0.1,
+            0.002,
+            0.001,
+            -4.0,
+            3,
             dt,
         )
     }

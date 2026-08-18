@@ -79,9 +79,10 @@
 //! processing token `t` is bit-for-bit what a fresh `t_len = t+1`
 //! invocation would produce. `planes_enabled` (runtime `Tensor<u32>[1]`,
 //! default 0) selects plane capture: 0 disables stores, 1 writes every
-//! token, and 2 writes every token except the final live state. The latter
-//! supports rollback consumers that keep the live state on full acceptance
-//! and only select earlier planes after a partial acceptance. `state_planes`
+//! token, 2 writes every token except the final live state, and 3 writes
+//! only the final four rollback planes. The sparse mode supports callers
+//! that retain a pre-sweep snapshot for earlier rollback targets.
+//! `state_planes`
 //! is `[T, conv_kernel-1, conv_dim]`. The conv
 //! window is tiny (`conv_dim * (conv_kernel-1)` elements, ~98 KB per
 //! plane at Qwen3.6-35B-A3B's conv_dim=8192) — negligible next to the
@@ -151,7 +152,12 @@ pub fn iron_conv1d_causal_step_silu_cast_many<T>(
         s0 = s1;
         s1 = s2;
         s2 = x_r;
-        if planes_on != 0u32 && (planes_on != 2u32 || r + 1u32 < t_len) {
+        let is_prefix = r + 1u32 < t_len;
+        let is_tail_prefix = is_prefix && r + 5u32 >= t_len;
+        if planes_on == 1u32
+            || (planes_on == 2u32 && is_prefix)
+            || (planes_on == 3u32 && is_tail_prefix)
+        {
             let plane_base = r * plane_t_stride + d;
             store(state_planes[plane_base], s0.cast::<T>());
             store(state_planes[plane_base + conv_dim], s1.cast::<T>());
@@ -270,6 +276,11 @@ pub mod kernel_tests {
         if plane_mode == 2 {
             let final_plane = (t_len - 1) * state_rows * conv_dim;
             planes_exp_t[final_plane..].fill(0.0);
+        } else if plane_mode == 3 {
+            let plane_size = state_rows * conv_dim;
+            let first_tail_plane = t_len.saturating_sub(5);
+            planes_exp_t[..first_tail_plane * plane_size].fill(0.0);
+            planes_exp_t[(t_len - 1) * plane_size..].fill(0.0);
         }
         let planes_buf =
             if capture_planes { vec![0.0_f32; planes_exp_t.len()] } else { vec![0.0_f32; 1] };
@@ -315,6 +326,10 @@ pub mod kernel_tests {
     // Prefix-only mode leaves the final live-state plane untouched.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
     fn test_conv1d_causal_many_prefix_planes(dt: DType) -> TestSetup { setup(8, 256, 2, dt) }
+
+    // Tail mode writes only the final four rollback planes.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-3, 8e-3, 4e-2])]
+    fn test_conv1d_causal_many_tail_planes(dt: DType) -> TestSetup { setup(8, 256, 3, dt) }
 }
 
 /// New-syntax bench for `iron_conv1d_causal_step_silu_cast_many`
