@@ -12,6 +12,7 @@
 
 pub mod gated_delta;
 pub mod gated_delta_gate_beta;
+pub mod gated_delta_packed_prework;
 pub mod gated_delta_prep;
 pub mod gated_delta_prep_chunk;
 pub mod gated_delta_qknorm_prepass;
