@@ -28,6 +28,7 @@ pub mod gather_axis;
 pub mod gelu_erf;
 pub mod hadamard;
 pub mod hadamard_m;
+pub mod indexed_argmax;
 pub mod indexing;
 pub mod leaky_relu;
 pub mod logsumexp;

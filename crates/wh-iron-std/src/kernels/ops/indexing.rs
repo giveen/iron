@@ -126,13 +126,32 @@ pub fn iron_masked_scatter<T>(
     }
 }
 
+/// Add `offset` to every index at or above `threshold`.
+///
+/// This keeps a compact, monotonic ID space on the GPU while translating a
+/// reserved suffix into its published ID range. Dispatch one thread per ID.
+#[kernel]
+pub fn iron_piecewise_offset_u32(
+    indices: Tensor<u32>,
+    mut out: Tensor<u32>,
+    #[constexpr] n: u32,
+    #[constexpr] threshold: u32,
+    #[constexpr] offset: u32,
+) {
+    let idx = program_id::<0>();
+    if idx < n {
+        let value = load(indices[idx]);
+        store(out[idx], select(value >= threshold, value + offset, value));
+    }
+}
+
 /// New-syntax correctness for the row gather/scatter + masked-scatter index
 /// kernels (Grid3D, exact). Oracles replicate the index math on dtype-rounded
 /// data; scatter uses distinct indices (no collisions).
 pub mod kernel_tests {
     use wh_iron::{test::*, test_kernel};
 
-    use super::{iron_gather_front, iron_masked_scatter, iron_scatter};
+    use super::{iron_gather_front, iron_masked_scatter, iron_piecewise_offset_u32, iron_scatter};
     use crate::utils::{pack_f32, unpack_f32};
 
     fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
@@ -197,13 +216,27 @@ pub mod kernel_tests {
             .expect(TestBuffer::from_vec("out", pack_f32(&expected, dt), dt))
             .grid_1d(n_elems, 256)
     }
+
+    #[test_kernel(dtypes = [f32], tol = 0.0)]
+    fn test_piecewise_offset_u32(_dt: DType) -> TestSetup {
+        let source = [0u32, 98_303, 98_304, 98_329];
+        let expected = [0u32, 98_303, 248_044, 248_069];
+        TestSetup::new(iron_piecewise_offset_u32::kernel_ir())
+            .input(TestBuffer::from_vec("indices", u32_bytes(&source), DType::U32))
+            .input(TestBuffer::zeros("out", source.len(), DType::U32))
+            .constexpr("n", source.len() as u32)
+            .constexpr("threshold", 98_304u32)
+            .constexpr("offset", 149_740u32)
+            .expect(TestBuffer::from_vec("out", u32_bytes(&expected), DType::U32))
+            .grid_1d(source.len(), 32)
+    }
 }
 
 /// New-syntax benchmarks for the index kernels.
 pub mod kernel_benches {
     use wh_iron::{bench, test::*};
 
-    use super::{iron_gather_front, iron_masked_scatter, iron_scatter};
+    use super::{iron_gather_front, iron_masked_scatter, iron_piecewise_offset_u32, iron_scatter};
 
     fn u32_bytes(v: impl Iterator<Item = u32>) -> Vec<u8> {
         v.flat_map(|x| x.to_le_bytes()).collect()
@@ -243,6 +276,18 @@ pub mod kernel_benches {
             .constexpr("n_elems", n_elems as u32)
             .grid_1d(n_elems, 256)
             .bytes_moved((2 * n_elems * dt.size_bytes()) as u64)
+    }
+
+    #[bench(dtypes = [f32])]
+    fn bench_piecewise_offset_u32(_dt: DType) -> BenchSetup {
+        BenchSetup::new(iron_piecewise_offset_u32::kernel_ir())
+            .buffer(BenchBuffer::random("indices", 16, DType::U32))
+            .buffer(BenchBuffer::zeros("out", 16, DType::U32).output())
+            .constexpr("n", 16u32)
+            .constexpr("threshold", 98_304u32)
+            .constexpr("offset", 149_740u32)
+            .grid_1d(16, 32)
+            .bytes_moved((16 * 8) as u64)
     }
 
     #[bench(dtypes = [f32, f16, bf16])]
