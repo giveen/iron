@@ -11,5 +11,6 @@ pub mod logits_min_p;
 pub mod logits_processors;
 pub mod logits_top_p;
 pub mod logits_topk;
+pub mod logits_topk_tiled;
 pub mod softmax;
 pub mod sort;
