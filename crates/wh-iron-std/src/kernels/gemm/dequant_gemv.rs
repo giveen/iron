@@ -462,6 +462,126 @@ pub fn iron_dequant_gemv_int4_fast<T>(
     }
 }
 
+/// Perf-tuned int4 dequant GEMV over a gathered list of weight rows.
+///
+/// `row_indices[out_row]` selects the source matrix row for each output.
+/// The output count must be a multiple of 8. Grid, threadgroup, input,
+/// group-size, and alignment contracts match `iron_dequant_gemv_int4_fast`.
+#[kernel]
+pub fn iron_dequant_gemv_int4_gathered<T>(
+    weight: Tensor<u32>,
+    scales: Tensor<T>,
+    biases: Tensor<T>,
+    row_indices: Tensor<u32>,
+    input: Tensor<T>,
+    output: Tensor<T>,
+    #[constexpr] in_dim: u32,
+    #[constexpr] group_size: u32,
+) {
+    let tg = tgid_x;
+    let sg = simd_id;
+    let lane = simd_lane;
+    let base_out_row = tg * 8u32 + sg * 4u32;
+    let gs_per_row = in_dim / group_size;
+    let packs_per_row = in_dim / 8u32;
+    let lane_x_off = lane * 16u32;
+    let lane_pack_off = lane * 2u32;
+    stack_alloc("accs", 4, "f32");
+    for _r in range(0u32, 4u32, 1u32) {
+        stack_store("accs", _r, 0.0f32);
+    }
+
+    let s_16 = 0.0625f32;
+    let s_256 = 0.00390625f32;
+    let s_4096 = 0.000244140625f32;
+    for _b in range(0u32, in_dim, 512u32) {
+        let xb = _b + lane_x_off;
+        let x0 = load(input[xb]).cast::<f32>();
+        let x1_raw = load(input[xb + 1u32]).cast::<f32>();
+        let x2_raw = load(input[xb + 2u32]).cast::<f32>();
+        let x3_raw = load(input[xb + 3u32]).cast::<f32>();
+        let x4 = load(input[xb + 4u32]).cast::<f32>();
+        let x5_raw = load(input[xb + 5u32]).cast::<f32>();
+        let x6_raw = load(input[xb + 6u32]).cast::<f32>();
+        let x7_raw = load(input[xb + 7u32]).cast::<f32>();
+        let x8 = load(input[xb + 8u32]).cast::<f32>();
+        let x9_raw = load(input[xb + 9u32]).cast::<f32>();
+        let x10_raw = load(input[xb + 10u32]).cast::<f32>();
+        let x11_raw = load(input[xb + 11u32]).cast::<f32>();
+        let x12 = load(input[xb + 12u32]).cast::<f32>();
+        let x13_raw = load(input[xb + 13u32]).cast::<f32>();
+        let x14_raw = load(input[xb + 14u32]).cast::<f32>();
+        let x15_raw = load(input[xb + 15u32]).cast::<f32>();
+        let xs = x0
+            + x1_raw
+            + x2_raw
+            + x3_raw
+            + x4
+            + x5_raw
+            + x6_raw
+            + x7_raw
+            + x8
+            + x9_raw
+            + x10_raw
+            + x11_raw
+            + x12
+            + x13_raw
+            + x14_raw
+            + x15_raw;
+        let x1 = x1_raw * s_16;
+        let x2 = x2_raw * s_256;
+        let x3 = x3_raw * s_4096;
+        let x5 = x5_raw * s_16;
+        let x6 = x6_raw * s_256;
+        let x7 = x7_raw * s_4096;
+        let x9 = x9_raw * s_16;
+        let x10 = x10_raw * s_256;
+        let x11 = x11_raw * s_4096;
+        let x13 = x13_raw * s_16;
+        let x14 = x14_raw * s_256;
+        let x15 = x15_raw * s_4096;
+        let g = xb / group_size;
+        let pack_off = _b / 8u32 + lane_pack_off;
+        for _r in range(0u32, 4u32, 1u32) {
+            let out_row = base_out_row + _r;
+            let source_row = load(row_indices[out_row]);
+            let w_base = source_row * packs_per_row;
+            let sb_base = source_row * gs_per_row;
+            let p_lo = load(weight[w_base + pack_off]);
+            let p_hi_word = load(weight[w_base + pack_off + 1u32]);
+            let p_lo_hi = p_lo >> 16u32;
+            let p_hi_hi = p_hi_word >> 16u32;
+            let s = load(scales[sb_base + g]).cast::<f32>();
+            let bi = load(biases[sb_base + g]).cast::<f32>();
+            let qd = (p_lo & 15u32).cast::<f32>() * x0
+                + (p_lo & 240u32).cast::<f32>() * x1
+                + (p_lo & 3840u32).cast::<f32>() * x2
+                + (p_lo & 61440u32).cast::<f32>() * x3
+                + (p_lo_hi & 15u32).cast::<f32>() * x4
+                + (p_lo_hi & 240u32).cast::<f32>() * x5
+                + (p_lo_hi & 3840u32).cast::<f32>() * x6
+                + (p_lo_hi & 61440u32).cast::<f32>() * x7
+                + (p_hi_word & 15u32).cast::<f32>() * x8
+                + (p_hi_word & 240u32).cast::<f32>() * x9
+                + (p_hi_word & 3840u32).cast::<f32>() * x10
+                + (p_hi_word & 61440u32).cast::<f32>() * x11
+                + (p_hi_hi & 15u32).cast::<f32>() * x12
+                + (p_hi_hi & 240u32).cast::<f32>() * x13
+                + (p_hi_hi & 3840u32).cast::<f32>() * x14
+                + (p_hi_hi & 61440u32).cast::<f32>() * x15;
+            let prev = stack_load("accs", _r);
+            stack_store("accs", _r, prev + s * qd + bi * xs);
+        }
+    }
+    for _r in range(0u32, 4u32, 1u32) {
+        let v = stack_load("accs", _r);
+        let r = simd_sum(v);
+        if lane == 0u32 {
+            store(output[base_out_row + _r], r.cast::<T>());
+        }
+    }
+}
+
 /// Per-kernel opt-in for the indirect Swift-wrapper variant. Iron's
 /// GPU-router dispatches the int4 dequant-GEMV indirectly so the GPU
 /// can drive the per-MoE-layer grid shape from a buffer; the other
@@ -614,6 +734,39 @@ pub mod kernel_tests {
             .grid_3d(grid_rows, 1, 1, [tpg, 1, 1])
     }
 
+    fn gathered_gemv_setup(
+        dt: DType,
+        matrix_rows: usize,
+        in_dim: usize,
+        row_indices: Vec<u32>,
+    ) -> TestSetup {
+        let group_size = 64usize;
+        let n_groups = in_dim / group_size;
+        let w = synth_bitstream_w(matrix_rows, in_dim, 4);
+        let scales_f: Vec<f32> =
+            (0..matrix_rows * n_groups).map(|i| 0.004 + (i % 7) as f32 * 0.0008).collect();
+        let biases_f: Vec<f32> =
+            (0..matrix_rows * n_groups).map(|i| ((i % 5) as f32 - 2.0) * 0.0009).collect();
+        let input_f: Vec<f32> = (0..in_dim).map(|i| ((i % 11) as f32 - 5.0) * 0.01).collect();
+        let s = unpack_f32(&pack_f32(&scales_f, dt), dt);
+        let b = unpack_f32(&pack_f32(&biases_f, dt), dt);
+        let x = unpack_f32(&pack_f32(&input_f, dt), dt);
+        let full = iron_dequant_gemv_oracle(&w, &s, &b, &x, in_dim, group_size, 4, matrix_rows);
+        let expected: Vec<f32> = row_indices.iter().map(|&row| full[row as usize]).collect();
+        TestSetup::new(iron_dequant_gemv_int4_gathered::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .input(TestBuffer::from_vec("weight", u32_bytes(&w), DType::U32))
+            .input(TestBuffer::from_vec("scales", pack_f32(&scales_f, dt), dt))
+            .input(TestBuffer::from_vec("biases", pack_f32(&biases_f, dt), dt))
+            .input(TestBuffer::from_vec("row_indices", u32_bytes(&row_indices), DType::U32))
+            .input(TestBuffer::from_vec("input", pack_f32(&input_f, dt), dt))
+            .input(TestBuffer::zeros("output", row_indices.len(), dt))
+            .constexpr("in_dim", in_dim as u32)
+            .constexpr("group_size", group_size as u32)
+            .expect(TestBuffer::from_vec("output", pack_f32(&expected, dt), dt))
+            .grid_3d((row_indices.len() / 8) as u32, 1, 1, [64, 1, 1])
+    }
+
     // Pack-strided (32 % BITS == 0): BITS ∈ {2, 4, 8}; in_dim a multiple of 32/BITS.
     // Element-strided (32 % BITS != 0): BITS ∈ {3, 5, 6}; in_dim*BITS must be 32-aligned.
     //   int3: 64*3=192; int5: 64*5=320; int6: 64*6=384.
@@ -644,6 +797,17 @@ pub mod kernel_tests {
             dt,
         )
     }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_dequant_gemv_int4_gathered(dt: DType) -> TestSetup {
+        gathered_gemv_setup(dt, 16, 512, vec![15, 0, 7, 3, 12, 5, 1, 9])
+    }
+
+    #[test_kernel(dtypes = [bf16], tol = [2e-1])]
+    fn test_dequant_gemv_int4_gathered_qwen38(dt: DType) -> TestSetup {
+        let rows = (0..32).map(|i| ((i * 37 + 11) % 64) as u32).collect();
+        gathered_gemv_setup(dt, 64, 5120, rows)
+    }
 }
 
 /// New-syntax benchmarks for the dequant GEMV family. Production-ish shapes
@@ -653,6 +817,8 @@ pub mod kernel_benches {
     use wh_iron::{bench, core::ir::Kernel, test::*};
 
     use super::*;
+
+    fn u32_bytes(v: &[u32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
 
     #[allow(clippy::too_many_arguments)]
     fn gb(
@@ -695,5 +861,33 @@ pub mod kernel_benches {
     #[bench(dtypes = [f32, f16, bf16])]
     fn bench_dequant_gemv_int4_fast(dt: DType) -> BenchSetup {
         gb(iron_dequant_gemv_int4_fast::kernel_ir_for(dt), 4, 4096, 4096, 64, 4096 / 8, 64, dt)
+    }
+
+    #[bench(dtypes = [bf16])]
+    fn bench_dequant_gemv_int4_gathered(dt: DType) -> BenchSetup {
+        let matrix_rows = 4096usize;
+        let candidate_rows = 32usize;
+        let in_dim = 5120usize;
+        let group_size = 64usize;
+        let n_groups = in_dim / group_size;
+        let packs_per_row = in_dim / 8;
+        let rows: Vec<u32> =
+            (0..candidate_rows).map(|i| ((i * 127 + 11) % matrix_rows) as u32).collect();
+        let bytes = candidate_rows * (packs_per_row * 4 + 2 * n_groups * dt.size_bytes())
+            + in_dim * dt.size_bytes()
+            + candidate_rows * (4 + dt.size_bytes());
+        BenchSetup::new(iron_dequant_gemv_int4_gathered::kernel_ir_for(dt))
+            .mode(KernelMode::Reduction)
+            .buffer(BenchBuffer::random("weight", matrix_rows * packs_per_row, DType::U32))
+            .buffer(BenchBuffer::random("scales", matrix_rows * n_groups, dt))
+            .buffer(BenchBuffer::random("biases", matrix_rows * n_groups, dt))
+            .buffer(BenchBuffer::from_vec("row_indices", u32_bytes(&rows), DType::U32))
+            .buffer(BenchBuffer::random("input", in_dim, dt))
+            .buffer(BenchBuffer::zeros("output", candidate_rows, dt).output())
+            .constexpr("in_dim", in_dim as u32)
+            .constexpr("group_size", group_size as u32)
+            .grid_3d((candidate_rows / 8) as u32, 1, 1, [64, 1, 1])
+            .bytes_moved(bytes as u64)
+            .flops((2 * candidate_rows * in_dim) as u64)
     }
 }
