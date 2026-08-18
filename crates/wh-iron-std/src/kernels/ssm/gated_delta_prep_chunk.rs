@@ -31,10 +31,10 @@
 //!   - `k_normed`  : Tensor<T> [B, T, Hk, Dk]   from `iron_gated_delta_qknorm_prepass`
 //!   - `state_in`  : Tensor<T> [B, Hv, Dv, Dk]           (one state per (b, hv))
 //!   - `t_len`     : Tensor<u32> [1]                     runtime chunk length
-//!   - `planes_enabled` : Tensor<u32> [1]                runtime flag; 0 = no plane
-//!     writes (byte-identical to the pre-plane kernel), nonzero = write
-//!     `state_out` into `state_planes` at every token boundary too. See
-//!     "Per-token state planes" below.
+//!   - `planes_enabled` : Tensor<u32> [1]                runtime mode; 0 = no plane
+//!     writes (byte-identical to the pre-plane kernel), 1 = write every token,
+//!     and 2 = write every token except the final live state. See "Per-token
+//!     state planes" below.
 //!
 //! Outputs:
 //!   - `state_out`    : Tensor<T> [B, Hv, Dv, Dk]
@@ -64,7 +64,9 @@
 //!
 //! `planes_enabled` gates the extra stores at runtime so the default
 //! (disabled) path pays no memory-traffic cost beyond the branch test
-//! itself — `n_total`/`state_planes` are validated/sized by the caller;
+//! itself. Mode 2 omits the final plane for rollback consumers that keep
+//! the live state after a full acceptance and only select earlier planes
+//! after a partial acceptance. `n_total`/`state_planes` are validated/sized by the caller;
 //! this kernel does not bounds-check `T` against the plane buffer's
 //! actual capacity.
 //!
@@ -209,7 +211,7 @@ pub fn iron_gated_delta_prep_chunk<T>(
             // state_planes[t] — default-off, gated on planes_on so the
             // disabled path is just one extra register compare per
             // token (no stores, no extra memory traffic).
-            if planes_on != 0u32 {
+            if planes_on != 0u32 && (planes_on != 2u32 || t + 1u32 < t_total) {
                 let plane_base = t * plane_t_stride + state_base;
                 for i in range(0u32, n_per_t, 1u32) {
                     let s_idx = n_per_t * dk_idx + i;
@@ -380,7 +382,7 @@ pub fn iron_gated_delta_prep_chunk_fast<T>(
             // ─── Optional: mirror this token's post-update state into
             // state_planes[t] — see the generic kernel's identical block
             // for the design rationale.
-            if planes_on != 0u32 {
+            if planes_on != 0u32 && (planes_on != 2u32 || t + 1u32 < t_total) {
                 let plane_base = t * plane_t_stride + state_base;
                 for i in range(0u32, NPT, 1u32) {
                     let s_idx = NPT * dk_idx + i;
@@ -847,7 +849,7 @@ pub mod kernel_tests {
         conv_scale: f32,
         state_scale: f32,
         a_log0: f32,
-        capture_planes: bool,
+        plane_mode: u32,
         dt: DType,
     ) -> TestSetup {
         let n_total = b * hv;
@@ -883,7 +885,8 @@ pub mod kernel_tests {
             dk,
         );
         let (q_normed, k_normed) = (r(&q_normed), r(&k_normed));
-        let (y_exp, state_exp, planes_exp) = if capture_planes {
+        let capture_planes = plane_mode != 0;
+        let (y_exp, state_exp, mut planes_exp) = if capture_planes {
             oracle_with_planes(
                 &r(&conv_out),
                 &r(&a_log),
@@ -922,7 +925,12 @@ pub mod kernel_tests {
         // Default-off tests still need a bound buffer for state_planes even
         // though the kernel never writes it (planes_enabled == 0) — size 1
         // is enough since it's never indexed on that path.
-        let planes_buf = if capture_planes { planes_exp.clone() } else { vec![0.0_f32; 1] };
+        if plane_mode == 2 {
+            let final_plane = (t_total - 1) * state_in.len();
+            planes_exp[final_plane..].fill(0.0);
+        }
+        let planes_buf =
+            if capture_planes { vec![0.0_f32; planes_exp.len()] } else { vec![0.0_f32; 1] };
 
         let mut ts = TestSetup::new(iron_gated_delta_prep_chunk::kernel_ir_for(dt))
             .mode(KernelMode::Reduction)
@@ -944,7 +952,7 @@ pub mod kernel_tests {
             .input(TestBuffer::from_vec("state_planes", pack_f32(&planes_buf, dt), dt))
             .input(TestBuffer::from_vec(
                 "planes_enabled",
-                (capture_planes as u32).to_le_bytes().to_vec(),
+                plane_mode.to_le_bytes().to_vec(),
                 DType::U32,
             ))
             .constexpr("dk", dk as u32)
@@ -968,7 +976,7 @@ pub mod kernel_tests {
     // inside tol across f32/f16/bf16 while still exercising GQA head-sharing.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_iron_gated_delta_prep_chunk_gqa(dt: DType) -> TestSetup {
-        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, false, dt)
+        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, 0, dt)
     }
 
     // Same fixture as the GQA cell above, but `planes_enabled = 1`:
@@ -978,7 +986,14 @@ pub mod kernel_tests {
     // rewind-to-(t+1)" equivalence claim in the module doc.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
     fn test_iron_gated_delta_prep_chunk_planes_gqa(dt: DType) -> TestSetup {
-        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, true, dt)
+        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, 1, dt)
+    }
+
+    // Prefix-only mode writes every rollback plane while leaving the final
+    // live-state plane untouched.
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [5e-3, 5e-2, 2e-1])]
+    fn test_iron_gated_delta_prep_chunk_prefix_planes_gqa(dt: DType) -> TestSetup {
+        setup(1, 4, 4, 2, 8, 64, 0.3, 0.02, 0.01, -3.0, 2, dt)
     }
 
     // Hv == Hk (no key-sharing) at minimum dk=32, T=3 tokens.
@@ -1005,7 +1020,7 @@ pub mod kernel_tests {
     // is a synthetic-fixture-only concern, not a production one.
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 5e-2, 3.0])]
     fn test_iron_gated_delta_prep_chunk_no_gqa(dt: DType) -> TestSetup {
-        setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, false, dt)
+        setup(1, 3, 4, 4, 4, 32, 1.0, 0.4, 0.1, -1.5, 0, dt)
     }
 
     // Qwen3.6-27B production shape via the GENERIC (runtime-hv/hk) kernel
@@ -1019,7 +1034,7 @@ pub mod kernel_tests {
     // fast-variant cell (identical NPT=4, identical fixture magnitudes).
     #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
     fn test_iron_gated_delta_prep_chunk_qwen36_27b_shape(dt: DType) -> TestSetup {
-        setup(1, 3, 48, 16, 128, 128, 0.3, 0.02, 0.01, -3.0, false, dt)
+        setup(1, 3, 48, 16, 128, 128, 0.3, 0.02, 0.01, -3.0, 0, dt)
     }
 
     /// Same oracle/fixture math as `setup` above, but targets the
@@ -1039,7 +1054,7 @@ pub mod kernel_tests {
         conv_scale: f32,
         state_scale: f32,
         a_log0: f32,
-        capture_planes: bool,
+        plane_mode: u32,
         dt: DType,
     ) -> TestSetup {
         let n_total = b * hv;
@@ -1070,7 +1085,8 @@ pub mod kernel_tests {
             dk,
         );
         let (q_normed, k_normed) = (r(&q_normed), r(&k_normed));
-        let (y_exp, state_exp, planes_exp) = if capture_planes {
+        let capture_planes = plane_mode != 0;
+        let (y_exp, state_exp, mut planes_exp) = if capture_planes {
             oracle_with_planes(
                 &r(&conv_out),
                 &r(&a_log),
@@ -1106,7 +1122,12 @@ pub mod kernel_tests {
             );
             (y, s, Vec::new())
         };
-        let planes_buf = if capture_planes { planes_exp.clone() } else { vec![0.0_f32; 1] };
+        if plane_mode == 2 {
+            let final_plane = (t_total - 1) * state_in.len();
+            planes_exp[final_plane..].fill(0.0);
+        }
+        let planes_buf =
+            if capture_planes { vec![0.0_f32; planes_exp.len()] } else { vec![0.0_f32; 1] };
 
         let mut ts = TestSetup::new(ir)
             .mode(KernelMode::Reduction)
@@ -1128,7 +1149,7 @@ pub mod kernel_tests {
             .input(TestBuffer::from_vec("state_planes", pack_f32(&planes_buf, dt), dt))
             .input(TestBuffer::from_vec(
                 "planes_enabled",
-                (capture_planes as u32).to_le_bytes().to_vec(),
+                plane_mode.to_le_bytes().to_vec(),
                 DType::U32,
             ))
             .constexpr("n_total", n_total as u32)
@@ -1159,7 +1180,7 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
-            false,
+            0,
             dt,
         )
     }
@@ -1188,7 +1209,7 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
-            false,
+            0,
             dt,
         )
     }
@@ -1212,7 +1233,26 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
-            true,
+            1,
+            dt,
+        )
+    }
+
+    #[test_kernel(dtypes = [f32, f16, bf16], tol = [1e-2, 1e-1, 3.0])]
+    fn test_iron_gated_delta_prep_chunk_fast_prefix_planes_d128_128_32_16(dt: DType) -> TestSetup {
+        setup_fast(
+            iron_gated_delta_prep_chunk_fast_d128_128_32_16::kernel_ir_for(dt),
+            1,
+            3,
+            32,
+            16,
+            128,
+            128,
+            0.3,
+            0.02,
+            0.01,
+            -3.0,
+            2,
             dt,
         )
     }
@@ -1239,7 +1279,7 @@ pub mod kernel_tests {
             0.02,
             0.01,
             -3.0,
-            false,
+            0,
             dt,
         )
     }
