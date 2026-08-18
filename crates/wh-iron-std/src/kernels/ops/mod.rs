@@ -34,6 +34,7 @@ pub mod random;
 pub mod reduce;
 pub mod scan;
 pub mod scatter_axis;
+pub mod split_scatter_columns;
 pub mod strided;
 pub mod swiglu_limit;
 pub mod ternary;
