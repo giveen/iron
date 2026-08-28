@@ -74,9 +74,11 @@
 //!   generated IR and MSL before dispatching.
 
 pub mod harness;
+pub mod model;
 pub mod prelude;
 /// GPU runner infrastructure for the `__iron_runner` subprocess.
 pub mod runner;
+pub mod tokenizer;
 /// Author-facing re-exports for `#[bench]` / `#[test_kernel]` setups.
 pub mod test;
 
