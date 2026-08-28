@@ -5,8 +5,9 @@
 //! registered kernels over the existing `run_kernel` device API.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use crate::model::{LayerGeometry, ModelInfo};
+use crate::model::{LayerGeometry, ModelInfo, SampleConfig};
 
 #[cfg(feature = "cuda")]
 use crate::model::ResidentCache;
@@ -60,7 +61,9 @@ impl<'a> ForwardPlan<'a> {
         Self { info, geom, steps }
     }
 
-    pub fn is_empty(&self) -> bool { self.steps.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -79,6 +82,29 @@ pub struct GenerateResult {
     pub prompt_len: usize,
 }
 
+pub trait SamplerBackend: Send + Sync {
+    fn sample_logits(&self, logits: &[f32], config: &SampleConfig) -> Result<u32, String>;
+}
+
+#[derive(Clone)]
+pub struct AnySampler(Arc<dyn SamplerBackend>);
+
+impl AnySampler {
+    pub fn new<S: SamplerBackend + 'static>(inner: S) -> Self {
+        Self(Arc::new(inner))
+    }
+
+    pub fn sample_logits(&self, logits: &[f32], config: &SampleConfig) -> Result<u32, String> {
+        self.0.sample_logits(logits, config)
+    }
+}
+
+impl std::fmt::Debug for AnySampler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnySampler").finish()
+    }
+}
+
 /// CUDA-backed generate loop scaffold. Uses raw device kernels until
 /// the model-specific kernel set is wired.
 #[cfg(feature = "cuda")]
@@ -88,12 +114,16 @@ pub struct CudaGenerator<'a> {
     pub info: ModelInfo,
     pub cache: ResidentCache,
     pub state: ForwardState,
-    pub sampler: crate::model::Sampler,
+    pub sampler: AnySampler,
 }
 
 #[cfg(feature = "cuda")]
 impl<'a> CudaGenerator<'a> {
-    pub fn new(dev: &'a wh_iron_runtime::CudaDevice, info: ModelInfo, sampler: crate::model::Sampler) -> Self {
+    pub fn new(
+        dev: &'a wh_iron_runtime::CudaDevice,
+        info: ModelInfo,
+        sampler: AnySampler,
+    ) -> Self {
         Self {
             dev,
             info,
@@ -159,7 +189,7 @@ impl<'a> CudaGenerator<'a> {
         self.set_input_ids(&req.prompt_ids);
         let mut generated = Vec::new();
         for _ in 0..req.max_new_tokens {
-            let token = self.sample_next()?;
+            let token = self.sample_next(&req)?;
             generated.push(token);
             self.append_ids(&[token]);
             if stop.contains(&token) {
@@ -170,11 +200,17 @@ impl<'a> CudaGenerator<'a> {
         Ok(GenerateResult { tokens: generated, finished: req.max_new_tokens == 0, prompt_len })
     }
 
-    fn sample_next(&self) -> Result<u32, String> {
+    fn sample_next(&mut self, req: &GenerateRequest) -> Result<u32, String> {
         let logits = self.state.borrow("logits").ok_or("missing logits")?;
         let vals: Vec<f32> =
             logits.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-        let token = self.sampler.sample_logits(&vals, vals.len());
-        Ok(token)
+        self.sampler.sample_logits(&vals, &SampleConfig {
+            temperature: req.temperature,
+            top_k: 0,
+            top_p: req.top_p,
+            min_p: 0.0,
+            max_new_tokens: 0,
+            stop: Vec::new(),
+        })
     }
 }

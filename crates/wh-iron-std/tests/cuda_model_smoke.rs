@@ -77,7 +77,7 @@ fn cuda_model_scaffold_smoke() {
             max_seq_len: 2048,
             dtype: DType::F32,
         },
-        wh_iron::model::Sampler::new(tokenizer, Default::default()),
+        wh_iron::model::AnySampler::new(wh_iron::model::Sampler::new(tokenizer, Default::default())),
     );
     runner.state = state.clone();
 
@@ -132,7 +132,10 @@ fn cuda_model_run_plan_smoke() {
             max_seq_len: 2048,
             dtype: DType::F32,
         },
-        wh_iron::model::Sampler::new(tokenizer, Default::default()),
+        wh_iron::model::AnySampler::new(wh_iron::model::Sampler::new(
+            tokenizer,
+            Default::default(),
+        )),
     );
     runner.state = state;
     runner.cache = cache;

@@ -77,7 +77,7 @@ impl Sampler {
     /// logits; returns the sampled token id. This is intentionally
     /// simple — the GPU-backed path will replace this with
     /// `iron_logits_topk_mask` + `iron_softmax_categorical_sample`.
-    pub fn sample_logits(&self, logits: &[f32], _seq_len: usize) -> u32 {
+    pub fn sample_logits(&self, logits: &[f32], _seq_len: usize) -> Result<u32, String> {
         let vocab = self.tokenizer.vocab_size;
         let n = logits.len().min(vocab);
         let mut indices: Vec<usize> = (0..n).collect();
@@ -93,6 +93,12 @@ impl Sampler {
                 logits[a].partial_cmp(&logits[b]).unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied();
-        best.unwrap_or(0) as u32
+        Ok(best.unwrap_or(0) as u32)
+    }
+}
+
+impl crate::model::SamplerBackend for Sampler {
+    fn sample_logits(&self, logits: &[f32], config: &SampleConfig) -> Result<u32, String> {
+        self.sample_logits(logits, config.top_k.max(1))
     }
 }

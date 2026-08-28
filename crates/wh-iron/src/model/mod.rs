@@ -15,7 +15,7 @@ pub mod kv;
 pub mod resident;
 pub mod sampler;
 
-pub use forward::{ForwardMode, ForwardPlan, ForwardState, GenerateRequest, GenerateResult};
+pub use forward::{ForwardMode, ForwardPlan, ForwardState, GenerateRequest, GenerateResult, AnySampler, SamplerBackend};
 pub use kv::{KvCache, KvLayout};
 pub use resident::{ResidentCache, ResidentKernel};
 pub use sampler::{SampleConfig, Sampler, Tokenizer, TokenizerInner};
