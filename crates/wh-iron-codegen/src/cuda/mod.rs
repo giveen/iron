@@ -149,6 +149,10 @@ __device__ __forceinline__ float iron_gelu(float x) {
     arg = fminf(fmaxf(arg, -15.0f), 15.0f);
     return 0.5f * x * (1.0f + tanhf(arg));
 }
+// sign(x): -1/0/+1, with 0 → 0. Shared helper so all callers match.
+__device__ __forceinline__ float iron_sign(float x) {
+    return (x > 0.0f) ? 1.0f : ((x < 0.0f) ? -1.0f : 0.0f);
+}
 
 "#;
 
@@ -377,9 +381,21 @@ impl CudaGenerator {
                 self.emit_simd_aliases(out);
             },
             KernelMode::Tile2D => {
-                return Err(Error::UnsupportedOp(
-                    "cuda: KernelMode Tile2D (Op::Dot tiled-matmul path → wmma, Phase 3)".into(),
-                ));
+                let tensors: Vec<_> = kernel
+                    .params
+                    .iter()
+                    .filter(|p| p.shape.rank() == 2)
+                    .collect();
+                let tm = tensors
+                    .get(0)
+                    .and_then(|p| p.shape.dim(0).map(|d| d.to_string()))
+                    .unwrap_or_else(|| "M".into());
+                let tn = tensors
+                    .get(1)
+                    .and_then(|p| p.shape.dim(1).map(|d| d.to_string()))
+                    .unwrap_or_else(|| "N".into());
+                let (thx, thy) = self.emit_tile2d_preamble(out, &tm, &tn);
+                self.emit_tiled_scalar(out, kernel, "A_tile", "B_tile", "C_tile", thx, thy)?;
             },
         }
 
@@ -429,13 +445,13 @@ impl CudaGenerator {
             let mut seen_c: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for blk in std::iter::once(&kernel.body).chain(kernel.blocks.values()) {
                 for op in &blk.ops {
-                    if let Op::CoopTileSetup { name, m, n, exec_scope, .. } = op
-                        && matches!(exec_scope, CoopTileScope::SimdGroup)
-                    {
-                        let cnm = ct_ident(&coop_c_name(name));
-                        if seen_c.insert(cnm.clone()) {
-                            let per_lane = (m * n).div_ceil(lw).max(1);
-                            writeln!(out, "    float _CTC_lane_{cnm}[{per_lane}];").ok();
+                    if let Op::CoopTileSetup { name, m, n, exec_scope, .. } = op {
+                        if matches!(exec_scope, CoopTileScope::SimdGroup) {
+                            let cnm = ct_ident(&coop_c_name(name));
+                            if seen_c.insert(cnm.clone()) {
+                                let per_lane = (m * n).div_ceil(lw).max(1);
+                                writeln!(out, "    float _CTC_lane_{cnm}[{per_lane}];").ok();
+                            }
                         }
                     }
                 }
@@ -566,6 +582,117 @@ impl CudaGenerator {
             child.insert(k, v.clone());
         }
         child
+    }
+
+    /// Tile2D preamble: tile-grid identifiers, lane ids, and shared-mem
+    /// declaration for the scalar tiled matmul path. Returns the 2D thread
+    /// geometry `(THX, THY)` together with symbolic tile extents.
+    fn emit_tile2d_preamble(&self, out: &mut String, tm: &str, tn: &str) -> (u32, u32) {
+        let (thy, thx) = self.tile2d_thread_shape();
+        writeln!(out, "    const unsigned int tid  = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;").ok();
+        writeln!(out, "    const unsigned int tgid_x = blockIdx.x;").ok();
+        writeln!(out, "    const unsigned int tgid_y = blockIdx.y;").ok();
+        writeln!(out, "    const unsigned int _ltid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;").ok();
+        writeln!(out, "    const unsigned int lsize = blockDim.x * blockDim.y * blockDim.z;").ok();
+        writeln!(out, "    const unsigned int simd_lane  = _ltid % 32u;").ok();
+        writeln!(out, "    const unsigned int simd_group = _ltid / 32u;").ok();
+        writeln!(out, "    const unsigned int thx = {thx}u;").ok();
+        writeln!(out, "    const unsigned int thy = {thy}u;").ok();
+        writeln!(out, "    const unsigned int thrds = thx * thy;").ok();
+        writeln!(out, "    const unsigned int row_start = tgid_y * {tm}u;").ok();
+        writeln!(out, "    const unsigned int col_start = tgid_x * {tn}u;").ok();
+        (thx, thy)
+    }
+
+    /// Emit scalar tile allocation + loads, scalar inner-loop matmul, and
+    /// final scatter to `C` using the same dataflow as the MSL scalar path
+    /// in `msl/matmul.rs`. Parameters:
+    /// - `kernel` carries compile-time `M`, `K`, `N`, tile shapes, etc.
+    /// - tile names are the shared array identifiers used in `emit_allocs`.
+    fn emit_tiled_scalar(
+        &self,
+        out: &mut String,
+        kernel: &Kernel,
+        a_tile_name: &str,
+        b_tile_name: &str,
+        c_tile_name: &str,
+        thx: u32,
+        thy: u32,
+    ) -> Result<()> {
+        let tensors: Vec<_> = kernel
+            .params
+            .iter()
+            .filter(|p| p.shape.rank() == 2)
+            .collect();
+        if tensors.len() < 3 {
+            return Err(Error::UnsupportedOp(
+                "cuda Tile2D: need >= 3 rank-2 tensor params (A, B, C)".into(),
+            ));
+        }
+        let [a, b, c] = [&tensors[0], &tensors[1], &tensors[2]];
+
+        let a_name = &a.name;
+        let b_name = &b.name;
+        let c_name = &c.name;
+
+        let m = a.shape.dim(0).map(|d| d.to_string()).unwrap_or_else(|| "M".into());
+        let k = a.shape.dim(1).map(|d| d.to_string()).unwrap_or_else(|| "K".into());
+        let n = b.shape.dim(1).map(|d| d.to_string()).unwrap_or_else(|| "N".into());
+
+        let tm = kernel.tile_annotations.values().next().map(|(tm, _, _)| *tm).unwrap_or(64);
+        let (_, tn, tk) = kernel.tile_annotations.values().next().unwrap_or(&(64, 64, 16));
+        let tk = *tk;
+        let tn = *tn;
+
+        let thrds = thx * thy;
+        let rpt = 1;
+        let cpt = 1;
+
+        writeln!(out, "    float acc[1][1];").ok();
+        writeln!(out, "    acc[0][0] = 0.0f;").ok();
+
+        writeln!(out, "    for (unsigned int kb = 0u; kb < {k}; kb += {tk}u) {{").ok();
+        writeln!(
+            out,
+            "        for (unsigned int i = tid; i < {tm}u * ({tk}u + 1u); i += {thrds}u) {{"
+        )
+        .ok();
+        writeln!(out, "            unsigned int r = i / ({tk}u + 1u), ko = kb + (i % ({tk}u + 1u));").ok();
+        writeln!(out, "            float av = (row_start + r < {m}u && ko < {k}u) ? {a_name}[r * {k}u + ko] : 0.0f;").ok();
+        writeln!(out, "            {a_tile_name}[r * ({tk}u + 1u) + ko] = __half(av);").ok();
+        writeln!(out, "        }}").ok();
+        writeln!(
+            out,
+            "        for (unsigned int i = tid; i < {tk}u * ({tn}u + 1u); i += {thrds}u) {{"
+        )
+        .ok();
+        writeln!(out, "            unsigned int ko = kb + (i / ({tn}u + 1u)), c2 = i % ({tn}u + 1u);").ok();
+        writeln!(out, "            float bv = (ko < {k}u && col_start + c2 < {n}u) ? {b_name}[ko * {n}u + col_start + c2] : 0.0f;").ok();
+        writeln!(out, "            {b_tile_name}[i] = __half(bv);").ok();
+        writeln!(out, "        }}").ok();
+        writeln!(out, "        __syncthreads();").ok();
+        writeln!(out, "        for (unsigned int r = 0u; r < {rpt}u; r++) {{").ok();
+        writeln!(out, "            for (unsigned int c2 = 0u; c2 < {cpt}u; c2++) {{").ok();
+        writeln!(out, "                unsigned int lr = (tid / {thx}u) * {rpt}u + r;").ok();
+        writeln!(out, "                unsigned int lc = (tid % {thx}u) * {cpt}u + c2;").ok();
+        writeln!(out, "                float s = 0.0f;").ok();
+        writeln!(out, "                for (unsigned int kk = 0u; kk < {tk}u; kk++) {{").ok();
+        writeln!(out, "                    s += (float){a_tile_name}[lr * ({tk}u + 1u) + kk] * (float){b_tile_name}[kk * ({tn}u + 1u) + lc];").ok();
+        writeln!(out, "                }}").ok();
+        writeln!(out, "                acc[0][0] += s;").ok();
+        writeln!(out, "            }}").ok();
+        writeln!(out, "        }}").ok();
+        writeln!(out, "        __syncthreads();").ok();
+        writeln!(out, "    }}").ok();
+
+        writeln!(out, "    {c_tile_name}[tgid_y * {n}u + tgid_x] = __half(acc[0][0]);").ok();
+        Ok(())
+    }
+
+    /// Thread geometry for scalar Tile2D. Defaults to 16×16 when no tile
+    /// annotation is present; MSL mirror is driven by `TileSchedule`.
+    fn tile2d_thread_shape(&self) -> (u32, u32) {
+        (16, 16)
     }
 
     /// Common threadgroup/warp aliases available in every mode (kernels
@@ -1356,10 +1483,8 @@ impl CudaGenerator {
         match op {
             Neg => format!("(-{arg})"),
             Recip => format!("(1.0f / {arg})"),
-            // sign(x): -1/0/+1 (matches Metal `sign`, incl. 0 → 0).
-            // `copysignf` would map 0 → +1, so emit the explicit form.
-            Sign =>
-                format!("((float)({arg}) > 0.0f ? 1.0f : ((float)({arg}) < 0.0f ? -1.0f : 0.0f))"),
+            // sign(x): -1/0/+1, matching the shared preamble helper.
+            Sign => format!("iron_sign((float)({arg}))"),
             // Block-scaled-quant decode helpers (preamble __device__ fns).
             _ => format!("{}({arg})", self.profile.unary_intrinsic(op)),
         }
@@ -1697,10 +1822,112 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_mode() {
-        let mut k = vector_add_ir();
+    fn emits_reduce_product_cuda() {
+        let mut k = Kernel::new("row_reduce_prod");
+        k.mode = KernelMode::Reduction;
+        k.params.push(Param {
+            name: "inp".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: false,
+            kind: ParamKind::Tensor,
+        });
+        k.params.push(Param {
+            name: "out".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: true,
+            kind: ParamKind::Tensor,
+        });
+        k.constexprs.push(wh_iron_core::ir::ConstExprDecl {
+            name: wh_iron_core::constexpr::ConstExpr::new("n"),
+            dtype: DType::U32,
+            value: None,
+        });
+        let (row, nv, rs, re, acc, res) = (
+            ValueId::new(0),
+            ValueId::new(1),
+            ValueId::new(2),
+            ValueId::new(3),
+            ValueId::new(4),
+            ValueId::new(5),
+        );
+        k.body.push_op(Op::ProgramId { axis: 0 }, row);
+        k.body.name_value(row, "row");
+        k.body.push_op(Op::Load { src: "n".into(), indices: vec![], mask: None, other: None }, nv);
+        k.body.push_op(Op::BinOp { op: BinOpKind::Mul, lhs: row, rhs: nv }, rs);
+        k.body.name_value(rs, "rs");
+        k.body.push_op(Op::BinOp { op: BinOpKind::Add, lhs: rs, rhs: nv }, re);
+        k.body.name_value(re, "re");
+        k.body.push_op(
+            Op::StrideReduce {
+                src: "inp".into(),
+                offset: rs,
+                stride: nv,
+                end: re,
+                op: ReduceKind::Product,
+                dtype: DType::F32,
+                transform: None,
+                secondary_src: None,
+                secondary_base: None,
+            },
+            acc,
+        );
+        k.body.name_value(acc, "acc");
+        k.body.push_op(Op::Reduce { value: acc, axis: 0, op: ReduceKind::Product }, res);
+        k.body.name_value(res, "result");
+        k.body.push_op_no_result(Op::Store {
+            dst: "out".into(),
+            indices: vec![IndexExpr::Value(row)],
+            value: res,
+            mask: None,
+        });
+
+        let src = CudaGenerator::new().generate(&k).unwrap();
+        assert!(src.contains("extern \"C\" __global__ void row_reduce_prod("));
+        assert!(src.contains("unsigned int n"));
+        assert!(src.contains("for (unsigned int _i = v_rs_2 + tid; _i < v_re_3; _i += lsize)"));
+        assert!(src.contains("__shfl_down_sync(0xffffffffu"));
+        assert!(src.contains("__syncthreads();"));
+        assert!(src.contains("out[v_row_0] = v_result_5;"));
+    }
+
+    #[test]
+    fn emits_scalar_tile2d_matmul_cuda() {
+        use wh_iron_core::{constexpr::ConstExpr, shape::Dim};
+        let mut k = Kernel::new("tile2d_matmul");
+        let m_ce = ConstExpr::new("M");
+        let k_ce = ConstExpr::new("K");
+        let n_ce = ConstExpr::new("N");
+        k.params.push(Param {
+            name: "A".into(),
+            dtype: DType::F32,
+            shape: Shape::new([Dim::ConstExpr(m_ce.clone()), Dim::ConstExpr(k_ce.clone())]),
+            is_output: false,
+            kind: ParamKind::Tensor,
+        });
+        k.params.push(Param {
+            name: "B".into(),
+            dtype: DType::F32,
+            shape: Shape::new([Dim::ConstExpr(k_ce.clone()), Dim::ConstExpr(n_ce.clone())]),
+            is_output: false,
+            kind: ParamKind::Tensor,
+        });
+        k.params.push(Param {
+            name: "C".into(),
+            dtype: DType::F32,
+            shape: Shape::new([Dim::ConstExpr(m_ce.clone()), Dim::ConstExpr(n_ce.clone())]),
+            is_output: true,
+            kind: ParamKind::Tensor,
+        });
         k.mode = KernelMode::Tile2D;
-        assert!(CudaGenerator::new().generate(&k).is_err());
+        k.tile_annotations.insert(ValueId::new(1), (64, 64, 16));
+        let src = CudaGenerator::new().generate(&k).unwrap();
+        assert!(src.contains("extern \"C\" __global__ void tile2d_matmul("));
+        assert!(src.contains("tgid_x = blockIdx.x;"));
+        assert!(src.contains("tgid_y = blockIdx.y;"));
+        assert!(src.contains("__syncthreads();"));
+        assert!(src.contains("C_tile[tgid_y"));
     }
 
     #[test]
@@ -1718,5 +1945,124 @@ mod tests {
         assert_eq!(g.target(), Target::Cuda);
         assert_eq!(g.profile().shared_mem_kw, "__shared__");
         assert_eq!(g.profile().lane_width, 32);
+    }
+
+    #[test]
+    fn emits_grid3d_sign_test_cuda() {
+        let mut k = Kernel::new("grid3d_sign_test");
+        k.mode = KernelMode::Grid3D;
+        k.params.push(Param {
+            name: "a".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: false,
+            kind: ParamKind::Tensor,
+        });
+        k.params.push(Param {
+            name: "out".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: true,
+            kind: ParamKind::Tensor,
+        });
+        let gid_x = ValueId::new(0);
+        let gid_y = ValueId::new(1);
+        let idx = ValueId::new(2);
+        k.body.push_op(Op::ProgramId { axis: 0 }, gid_x);
+        k.body.name_value(gid_x, "gid_x");
+        k.body.push_op(Op::ProgramId { axis: 1 }, gid_y);
+        k.body.name_value(gid_y, "gid_y");
+        k.body.push_op(
+            Op::BinOp {
+                op: BinOpKind::Add,
+                lhs: gid_x,
+                rhs: gid_y,
+            },
+            idx,
+        );
+        k.body.name_value(idx, "idx");
+        let loaded = ValueId::new(3);
+        k.body.push_op(
+            Op::Load {
+                src: "a".into(),
+                indices: vec![IndexExpr::Value(idx)],
+                mask: None,
+                other: None,
+            },
+            loaded,
+        );
+        let signed = ValueId::new(4);
+        k.body.push_op(
+            Op::UnaryOp {
+                op: UnaryOpKind::Sign,
+                value: loaded,
+            },
+            signed,
+        );
+        k.body.name_value(signed, "signed");
+        k.body.push_op_no_result(Op::Store {
+            dst: "out".into(),
+            indices: vec![IndexExpr::Value(idx)],
+            value: signed,
+            mask: None,
+        });
+
+        let src = CudaGenerator::new().generate(&k).unwrap();
+        assert!(src.contains("gid_x = blockIdx.x * blockDim.x + threadIdx.x;"));
+        assert!(src.contains("gid_y = blockIdx.y * blockDim.y + threadIdx.y;"));
+        assert!(src.contains("iron_sign("));
+        assert!(!src.contains(N_ELEMS_PARAM));
+    }
+
+    #[test]
+    fn emits_sign_using_iron_sign_helper() {
+        let mut k = Kernel::new("sign_test");
+        k.mode = KernelMode::Elementwise;
+        k.params.push(Param {
+            name: "a".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: false,
+            kind: ParamKind::Tensor,
+        });
+        k.params.push(Param {
+            name: "out".into(),
+            dtype: DType::F32,
+            shape: Shape::scalar(),
+            is_output: true,
+            kind: ParamKind::Tensor,
+        });
+        let v = ValueId::new(0);
+        k.body.push_op(Op::ProgramId { axis: 0 }, v);
+        k.body.name_value(v, "idx");
+        let loaded = ValueId::new(1);
+        k.body.push_op(
+            Op::Load {
+                src: "a".into(),
+                indices: vec![IndexExpr::Value(v)],
+                mask: None,
+                other: None,
+            },
+            loaded,
+        );
+        let signed = ValueId::new(2);
+        k.body.push_op(
+            Op::UnaryOp {
+                op: UnaryOpKind::Sign,
+                value: loaded,
+            },
+            signed,
+        );
+        k.body.name_value(signed, "signed");
+        k.body.push_op_no_result(Op::Store {
+            dst: "out".into(),
+            indices: vec![IndexExpr::Value(v)],
+            value: signed,
+            mask: None,
+        });
+
+        let src = CudaGenerator::new().generate(&k).unwrap();
+        assert!(src.contains("iron_sign("), "expected iron_sign helper in:\n{src}");
+        assert!(!src.contains("? 1.0f : ((float)"), "expected old inline ternary to be gone:\n{src}");
     }
 }

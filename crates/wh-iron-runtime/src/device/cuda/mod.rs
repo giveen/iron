@@ -1497,9 +1497,59 @@ impl CudaDevice {
 
         // Load module (driver JITs PTX → cubin for the live arch).
         let mut module: CUmodule = ptr::null_mut();
+        let load_res = unsafe { cuModuleLoadData(&mut module, ptx.as_ptr() as *const c_void) };
+        if load_res == CUDA_SUCCESS {
+            return Ok(CudaModule { module });
+        }
+        // Blackwell + CUDA 13.x driver/JIT quirk: NVRTC PTX/CUBIN load can
+        // fail with "unsupported toolchain" (222). Fall back to an offline
+        // nvcc --cubin compile for sm_<cc><minor>a and load that SASS image.
+        let is_blackwell_fallback = self.cc_major >= 12
+            && load_res == 222
+            && std::env::var("IRON_OFFLINE_CUBIN").ok().as_deref() != Some("0");
+        if is_blackwell_fallback {
+            unsafe { nvrtcDestroyProgram(&mut prog) };
+            return self.compile_offline_cubin(src, prog_name);
+        }
+        cu_check(load_res, "cuModuleLoadData")?;
+        Ok(CudaModule { module })
+    }
+
+    /// Offline fallback for Blackwell/CUDA-13.x: write source to a temp file,
+    /// invoke `nvcc --cubin --gpu-architecture=sm_<cc><minor>a`, read the
+    /// emitted CUBIN, and load it with `cuModuleLoadData`.
+    fn compile_offline_cubin(
+        &self,
+        src: &str,
+        prog_name: &str,
+    ) -> Result<CudaModule, IronError> {
+        use std::process::Command;
+        let accel = if self.cc_major >= 12 { "a" } else { "" };
+        let arch = format!("sm_{}{}{}", self.cc_major, self.cc_minor, accel);
+        let cuda_root = std::env::var("CUDA_PATH")
+            .or_else(|_| std::env::var("CUDA_HOME"))
+            .unwrap_or_else(|_| "/usr/local/cuda".to_string());
+        let nvcc = std::path::Path::new(&cuda_root).join("bin/nvcc");
+        let safe_name = prog_name.replace(|c: char| !c.is_alphanumeric(), "_");
+        let src_path = format!("/tmp/iron_offline_{}.cu", safe_name);
+        let cubin_path = format!("/tmp/iron_offline_{}.cubin", safe_name);
+        std::fs::write(&src_path, src).map_err(|e| IronError::Compilation(e.to_string()))?;
+        let output = Command::new(&nvcc)
+            .args(["--gpu-architecture", &arch, "--cubin", &src_path, "-o", &cubin_path])
+            .output()
+            .map_err(|e| IronError::Compilation(format!("nvcc spawn failed: {e}")))?;
+        if !output.status.success() {
+            let log = String::from_utf8_lossy(&output.stderr);
+            return Err(IronError::Compilation(format!(
+                "nvcc --cubin failed for {arch}: {log}"
+            )));
+        }
+        let cubin =
+            std::fs::read(&cubin_path).map_err(|e| IronError::Compilation(e.to_string()))?;
+        let mut module: CUmodule = ptr::null_mut();
         cu_check(
-            unsafe { cuModuleLoadData(&mut module, ptx.as_ptr() as *const c_void) },
-            "cuModuleLoadData",
+            unsafe { cuModuleLoadData(&mut module, cubin.as_ptr() as *const c_void) },
+            "cuModuleLoadData(offline-cubin)",
         )?;
         Ok(CudaModule { module })
     }
