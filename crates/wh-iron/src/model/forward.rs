@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::model::{LayerGeometry, ModelInfo};
 
 #[cfg(feature = "cuda")]
-use crate::model::{ResidentCache, ResidentKernel};
+use crate::model::ResidentCache;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardMode {
@@ -20,10 +20,10 @@ pub enum ForwardMode {
 /// One transformer-layer step: inputs, expected outputs, metadata.
 #[derive(Debug, Clone)]
 pub struct LayerStep {
-    pub name: &'static str,
+    pub name: String,
     pub mode: ForwardMode,
-    pub inputs: &'static [&'static str],
-    pub outputs: &'static [&'static str],
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
     pub kernel: wh_iron_core::ir::Kernel,
 }
 
@@ -82,23 +82,24 @@ pub struct GenerateResult {
 /// CUDA-backed generate loop scaffold. Uses raw device kernels until
 /// the model-specific kernel set is wired.
 #[cfg(feature = "cuda")]
-#[derive(Debug)]
 pub struct CudaGenerator<'a> {
     pub dev: &'a wh_iron_runtime::CudaDevice,
     #[allow(dead_code)]
     pub info: ModelInfo,
     pub cache: ResidentCache,
     pub state: ForwardState,
+    pub sampler: crate::model::Sampler,
 }
 
 #[cfg(feature = "cuda")]
 impl<'a> CudaGenerator<'a> {
-    pub fn new(dev: &'a wh_iron_runtime::CudaDevice, info: ModelInfo) -> Self {
+    pub fn new(dev: &'a wh_iron_runtime::CudaDevice, info: ModelInfo, sampler: crate::model::Sampler) -> Self {
         Self {
             dev,
             info,
             cache: ResidentCache::new(),
             state: ForwardState::default(),
+            sampler,
         }
     }
 
@@ -119,12 +120,36 @@ impl<'a> CudaGenerator<'a> {
         self.state.seed("input_ids", existing);
     }
 
-    /// Run one forward plan and return output token id bytes.
-    pub fn run_plan(&self, _plan: &ForwardPlan<'_>) -> Result<Vec<u8>, String> {
-        // Placeholder: in a full implementation this would iterate
-        // `_plan.steps`, look up resident kernels in `self.cache`, and
-        // call `self.dev.run_kernel(...)` for each step.
-        Ok(Vec::new())
+    /// Run one forward plan and update the generator state in place.
+    /// Returns the concatenated output bytes from the final step, if any.
+    pub fn run_plan(&mut self, plan: &ForwardPlan<'_>) -> Result<Vec<u8>, String> {
+        let mut local_state = self.state.clone();
+        let mut last_out = Vec::new();
+        for step in &plan.steps {
+            let resident = self
+                .cache
+                .get(&step.name)
+                .ok_or_else(|| format!("missing resident kernel: {}", step.name))?;
+            let mut buffers = BTreeMap::new();
+            for input in &step.inputs {
+                let data = local_state
+                    .borrow(input)
+                    .ok_or_else(|| format!("missing input buffer: {}", input))?;
+                buffers.insert(input.clone(), data.to_vec());
+            }
+            let outputs = self
+                .dev
+                .run_kernel(&resident.kernel, &buffers, resident.block, resident.grid)
+                .map_err(|e| e.to_string())?;
+            last_out.clear();
+            for output in &step.outputs {
+                let bytes = outputs.get(output).cloned().unwrap_or_default();
+                local_state.set_output(output.clone(), bytes.clone());
+                last_out = bytes;
+            }
+        }
+        self.state = local_state;
+        Ok(last_out)
     }
 
     /// Generate tokens for the request.
@@ -146,7 +171,10 @@ impl<'a> CudaGenerator<'a> {
     }
 
     fn sample_next(&self) -> Result<u32, String> {
-        // Placeholder: replace with real sampler/logits read-back.
-        Ok(0)
+        let logits = self.state.borrow("logits").ok_or("missing logits")?;
+        let vals: Vec<f32> =
+            logits.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let token = self.sampler.sample_logits(&vals, vals.len());
+        Ok(token)
     }
 }

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 #[cfg(feature = "cuda")]
-use wh_iron_runtime::{CudaDevice, DeviceBuffer};
+use wh_iron_runtime::CudaDevice;
 
 #[derive(Debug, Clone, Copy)]
 pub struct KvLayout {
@@ -31,14 +31,14 @@ impl KvLayout {
     }
 }
 
-/// KV-cache handle owning per-layer device buffers.
 #[cfg(feature = "cuda")]
-#[derive(Debug)]
 pub struct KvCache {
     _dev: Arc<CudaDevice>,
     pub layout: KvLayout,
     #[allow(dead_code)]
-    buffers: Vec<DeviceBuffer<'static>>,
+    ptrs: Vec<usize>,
+    #[allow(dead_code)]
+    lens: Vec<usize>,
 }
 
 #[cfg(feature = "cuda")]
@@ -46,18 +46,22 @@ impl KvCache {
     /// Best-effort alloc; if the device cannot satisfy the full cache,
     /// returns `None` so callers can fall back to host-backed or sliced caches.
     pub fn allocate(dev: Arc<CudaDevice>, layout: KvLayout, dtype: usize) -> Option<Self> {
-        let mut buffers = Vec::with_capacity(layout.num_layers);
+        let mut ptrs = Vec::with_capacity(layout.num_layers);
+        let mut lens = Vec::with_capacity(layout.num_layers);
         for _ in 0..layout.num_layers {
             let len = layout.layer_bytes(dtype);
             if len == 0 {
                 continue;
             }
             match unsafe { dev.alloc(len) } {
-                Ok(b) => buffers.push(b),
+                Ok(b) => {
+                    ptrs.push(b.device_ptr() as usize);
+                    lens.push(b.len());
+                }
                 Err(_) => return None,
             }
         }
-        Some(Self { _dev: dev, layout, buffers })
+        Some(Self { _dev: dev, layout, ptrs, lens })
     }
 
     pub fn layout(&self) -> KvLayout { self.layout }

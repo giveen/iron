@@ -15,6 +15,11 @@ pub mod kv;
 pub mod resident;
 pub mod sampler;
 
+pub use forward::{ForwardMode, ForwardPlan, ForwardState, GenerateRequest, GenerateResult};
+pub use kv::{KvCache, KvLayout};
+pub use resident::{ResidentCache, ResidentKernel};
+pub use sampler::{SampleConfig, Sampler, Tokenizer, TokenizerInner};
+
 use std::collections::BTreeMap;
 
 use wh_iron_core::ir::Kernel;
@@ -58,72 +63,4 @@ impl LayerGeometry {
             decode_tpg: [tpg_u, 1, 1],
         }
     }
-}
-
-/// Resident compiled kernel handle. Thin wrapper so the model runtime
-/// can keep compiled kernels + their param buffers alive across many
-/// decode steps.
-#[derive(Debug, Clone)]
-pub struct ResidentKernel {
-    pub kernel: Kernel,
-    pub block: [u32; 3],
-    pub grid: [u32; 3],
-    pub shared_bytes: u32,
-}
-
-/// Forward pass state: scratch buffers + outputs accumulated across layers.
-#[derive(Debug, Clone, Default)]
-pub struct ForwardState {
-    pub buffers: BTreeMap<String, Vec<u8>>,
-}
-
-impl ForwardState {
-    pub fn seed(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
-        self.buffers.insert(name.into(), bytes);
-    }
-
-    pub fn borrow(&self, name: &str) -> Option<&[u8]> {
-        self.buffers.get(name).map(|b| b.as_slice())
-    }
-
-    pub fn set_output(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
-        self.buffers.insert(name.into(), bytes);
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GenerateRequest {
-    pub prompt_ids: Vec<u32>,
-    pub max_new_tokens: usize,
-    pub temperature: f32,
-    pub top_p: f32,
-    pub stop: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GenerateResult {
-    pub tokens: Vec<u32>,
-    pub finished: bool,
-    pub prompt_len: usize,
-}
-
-/// Cache of resident kernels by name.
-#[derive(Debug, Default)]
-pub struct ResidentCache {
-    kernels: BTreeMap<String, ResidentKernel>,
-}
-
-impl ResidentCache {
-    pub fn new() -> Self { Self::default() }
-
-    pub fn insert(&mut self, kernel: ResidentKernel) {
-        self.kernels.insert(kernel.kernel.name.clone(), kernel);
-    }
-
-    pub fn get(&self, name: &str) -> Option<&ResidentKernel> {
-        self.kernels.get(name)
-    }
-
-    pub fn len(&self) -> usize { self.kernels.len() }
-    pub fn is_empty(&self) -> bool { self.kernels.is_empty() }
 }
