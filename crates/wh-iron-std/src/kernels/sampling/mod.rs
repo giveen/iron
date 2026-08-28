@@ -7,6 +7,7 @@
 //! repetition penalty) from the legacy `iron/`.
 
 pub mod categorical_sample;
+pub mod gpu_pipeline;
 pub mod logits_min_p;
 pub mod logits_processors;
 pub mod logits_top_p;

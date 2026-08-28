@@ -181,3 +181,26 @@ fn cuda_checkpoint_upload_smoke() {
 
     assert_eq!(host, bytes);
 }
+
+#[test]
+fn cuda_gpu_sampler_smoke() {
+    let Some(dev) = CudaDevice::create().expect("CUDA init") else {
+        eprintln!("no CUDA device — skipping");
+        return;
+    };
+
+    let sampler = wh_iron_std::kernels::sampling::gpu_pipeline::GpuSampler::new(&dev);
+    let mut logits = vec![0.0f32; 1024];
+    logits[42] = 8.0;
+    logits[7] = 4.0;
+
+    let config = wh_iron::model::SampleConfig {
+        temperature: 0.7,
+        top_k: 50,
+        top_p: 0.9,
+        ..wh_iron::model::SampleConfig::default()
+    };
+
+    let token = sampler.sample_logits(&logits, &config).expect("gpu sample");
+    assert_eq!(token, 42);
+}
