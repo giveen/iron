@@ -6,8 +6,10 @@
 
 use std::collections::BTreeMap;
 
+use crate::model::{LayerGeometry, ModelInfo};
+
 #[cfg(feature = "cuda")]
-use crate::model::{LayerGeometry, ModelInfo, ResidentCache, ResidentKernel};
+use crate::model::{ResidentCache, ResidentKernel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardMode {

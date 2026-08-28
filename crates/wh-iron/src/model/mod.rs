@@ -39,14 +39,36 @@ impl ModelInfo {
     pub fn q_dim(&self) -> usize { self.num_heads * self.head_dim }
 }
 
-/// One transformer-layer step: inputs, expected outputs, metadata.
+/// Compute dispatch geometry for a single attention layer.
+#[derive(Debug, Clone, Copy)]
+pub struct LayerGeometry {
+    pub prefill_grid: [u32; 3],
+    pub prefill_tpg: [u32; 3],
+    pub decode_grid: [u32; 3],
+    pub decode_tpg: [u32; 3],
+}
+
+impl LayerGeometry {
+    pub fn from_model(_info: &ModelInfo, tpg: usize) -> Self {
+        let tpg_u = tpg as u32;
+        Self {
+            prefill_grid: [1, 1, 1],
+            prefill_tpg: [tpg_u, 1, 1],
+            decode_grid: [1, 1, 1],
+            decode_tpg: [tpg_u, 1, 1],
+        }
+    }
+}
+
+/// Resident compiled kernel handle. Thin wrapper so the model runtime
+/// can keep compiled kernels + their param buffers alive across many
+/// decode steps.
 #[derive(Debug, Clone)]
-pub struct LayerStep {
-    pub name: &'static str,
-    pub mode: forward::ForwardMode,
-    pub inputs: &'static [&'static str],
-    pub outputs: &'static [&'static str],
+pub struct ResidentKernel {
     pub kernel: Kernel,
+    pub block: [u32; 3],
+    pub grid: [u32; 3],
+    pub shared_bytes: u32,
 }
 
 /// Forward pass state: scratch buffers + outputs accumulated across layers.
@@ -83,38 +105,6 @@ pub struct GenerateResult {
     pub tokens: Vec<u32>,
     pub finished: bool,
     pub prompt_len: usize,
-}
-
-/// Compute dispatch geometry for a single attention layer.
-#[derive(Debug, Clone, Copy)]
-pub struct LayerGeometry {
-    pub prefill_grid: [u32; 3],
-    pub prefill_tpg: [u32; 3],
-    pub decode_grid: [u32; 3],
-    pub decode_tpg: [u32; 3],
-}
-
-impl LayerGeometry {
-    pub fn from_model(_info: &ModelInfo, tpg: usize) -> Self {
-        let tpg_u = tpg as u32;
-        Self {
-            prefill_grid: [1, 1, 1],
-            prefill_tpg: [tpg_u, 1, 1],
-            decode_grid: [1, 1, 1],
-            decode_tpg: [tpg_u, 1, 1],
-        }
-    }
-}
-
-/// Resident compiled kernel handle. Thin wrapper so the model runtime
-/// can keep compiled kernels + their param buffers alive across many
-/// decode steps.
-#[derive(Debug, Clone)]
-pub struct ResidentKernel {
-    pub kernel: Kernel,
-    pub block: [u32; 3],
-    pub grid: [u32; 3],
-    pub shared_bytes: u32,
 }
 
 /// Cache of resident kernels by name.
