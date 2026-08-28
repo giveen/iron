@@ -1,0 +1,14 @@
+[package]
+name = "cuda_smoke"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+cuda = []
+
+[dependencies]
+wh-iron-core = { path = "../crates/wh-iron-core" }
+wh-iron-codegen = { path = "../crates/wh-iron-codegen" }
+wh-iron-runtime = { path = "../crates/wh-iron-runtime", features = ["cuda"] }
+half = "2"
+bytemuck = "1"

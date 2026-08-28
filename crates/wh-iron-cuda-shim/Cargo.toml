@@ -1,0 +1,11 @@
+[package]
+name = "wh-iron-cuda-shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wh-iron-runtime = { path = "../wh-iron-runtime", features = ["cuda"] }

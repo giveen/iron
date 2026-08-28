@@ -1,0 +1,10 @@
+[package]
+name = "cuda-kv-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wh-iron = { path = "../crates/wh-iron", features = ["cuda"] }
+wh-iron-std = { path = "../crates/wh-iron-std", features = ["cuda"] }
+half = { workspace = true }
+bytemuck = { workspace = true }
