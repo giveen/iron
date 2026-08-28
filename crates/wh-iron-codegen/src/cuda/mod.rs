@@ -1343,6 +1343,23 @@ impl CudaGenerator {
                 }
             },
             // ── Control flow (nested-block recursion) ──────────────────
+            Op::Dot { .. } => {
+                let tensors: Vec<_> = kernel
+                    .params
+                    .iter()
+                    .filter(|p| p.shape.rank() == 2)
+                    .collect();
+                let tm = tensors
+                    .get(0)
+                    .and_then(|p| p.shape.dim(0).map(|d| d.to_string()))
+                    .unwrap_or_else(|| "M".into());
+                let tn = tensors
+                    .get(1)
+                    .and_then(|p| p.shape.dim(1).map(|d| d.to_string()))
+                    .unwrap_or_else(|| "N".into());
+                let (thx, thy) = self.emit_tile2d_preamble(out, &tm, &tn);
+                self.emit_tiled_scalar(out, kernel, "A_tile", "B_tile", "C_tile", thx, thy)?;
+            },
             Op::Loop { var, start, end, step, body } => {
                 let s = self.vname(Some(*start), block, ov);
                 let e = self.vname(Some(*end), block, ov);
@@ -1926,7 +1943,8 @@ mod tests {
         assert!(src.contains("extern \"C\" __global__ void tile2d_matmul("));
         assert!(src.contains("tgid_x = blockIdx.x;"));
         assert!(src.contains("tgid_y = blockIdx.y;"));
-        assert!(src.contains("__syncthreads();"));
+        assert!(src.contains("A_tile["));
+        assert!(src.contains("B_tile["));
         assert!(src.contains("C_tile[tgid_y"));
     }
 
