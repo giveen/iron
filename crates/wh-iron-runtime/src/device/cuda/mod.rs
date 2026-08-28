@@ -2134,10 +2134,13 @@ impl CudaDevice {
         &self,
         kernel: &Kernel,
         buffers: &BTreeMap<String, Vec<u8>>,
-        grid: [u32; 3],
+        mut grid: [u32; 3],
         block: [u32; 3],
     ) -> Result<BTreeMap<String, Vec<u8>>, IronError> {
         self.ensure_current();
+        if kernel.mode == wh_iron_core::ir::KernelMode::Tile2D {
+            grid = self.tile2d_grid(kernel, block);
+        }
         let prep = self.prepare(kernel, buffers, block)?;
 
         // Launch (with dynamic shared memory).
@@ -2243,6 +2246,33 @@ impl CudaDevice {
         cu_check(unsafe { cuStreamSynchronize(self.stream) }, "cuStreamSynchronize")?;
         self.reclaim_pinned();
         Ok(())
+    }
+
+    /// Derive a 2-D dispatch grid for Tile2D matmul kernels from the output
+    /// tensor shape, mirroring Metal's `SingleDispatch::resolve_grid` for
+    /// `KernelMode::Tile2D`.
+    fn tile2d_grid(&self, kernel: &Kernel, block: [u32; 3]) -> [u32; 3] {
+        let out = kernel
+            .params
+            .iter()
+            .find(|p| p.is_output && p.shape.rank() == 2);
+        let (m, n) = out
+            .map(|p| {
+                let m = p.shape.dim(0).and_then(|d| match d {
+                    wh_iron_core::shape::Dim::Known(v) => Some((*v) as u32),
+                    _ => None,
+                }).unwrap_or(1);
+                let n = p.shape.dim(1).and_then(|d| match d {
+                    wh_iron_core::shape::Dim::Known(v) => Some((*v) as u32),
+                    _ => None,
+                }).unwrap_or(1);
+                (m, n)
+            })
+            .unwrap_or((1, 1));
+        let tpg = block[0].max(block[1]).max(1);
+        let tiles_x = n.div_ceil(tpg.max(1));
+        let tiles_y = m.div_ceil(tpg.max(1));
+        [tiles_x, tiles_y, 1]
     }
 }
 
